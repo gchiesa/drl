@@ -192,6 +192,16 @@ func (c *Cluster) NumMembers() int {
 	return c.memberlist.NumMembers()
 }
 
+// MemberNames returns the names of all cluster members
+func (c *Cluster) MemberNames() []string {
+	members := c.memberlist.Members()
+	names := make([]string, len(members))
+	for i, m := range members {
+		names[i] = m.Name
+	}
+	return names
+}
+
 // Leave gracefully leaves the cluster
 func (c *Cluster) Leave(timeout time.Duration) error {
 	if c.memberlist == nil {

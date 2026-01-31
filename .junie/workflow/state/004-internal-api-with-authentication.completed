@@ -1,0 +1,64 @@
+Milestone 004 completed on 2026-01-31
+
+## Summary
+Implemented a protected internal API using gofiber/fiber/v2 with SCRAM-SHA-256 authentication.
+
+## Changes Made
+
+### 1. Internal API Setup
+- Created `internal/api/api.go` with Fiber server on default port :8082
+- Implemented `GET /status` endpoint returning cluster info (cluster_name, node_id, active_peers, uptime)
+
+### 2. SCRAM Authentication Logic
+- Created `internal/api/auth.go` with SCRAM-SHA-256 middleware using `github.com/xdg-go/scram`
+- Implements full RFC 5802/7677 compliant authentication flow:
+  - Client First Message handling
+  - Server First Message generation
+  - Client Final Message verification with proof validation
+  - Server signature generation
+- Raw API key is never stored; only StoredKey and ServerKey are kept in memory
+- Thread-safe conversation tracking for multi-step handshake
+
+### 3. Environment Variable Enforcement
+- API fails to start if DRL_PRIVATE_API_KEY is not set
+- API fails to start if DRL_PRIVATE_API_KEY is shorter than 16 characters
+- Added `ValidatePrivateAPIKey()` and `GetPrivateAPIKey()` functions in config package
+
+### 4. Configuration
+- Extended config.go with InternalAPIConfig (Enabled, Address)
+- Added KDL parsing support for `internal-api` section
+- Added environment variable overrides: DRL_INTERNAL_API_ENABLED, DRL_INTERNAL_API_ADDRESS
+
+### 5. Integration
+- Updated main.go to initialize and start internal API server
+- Added graceful shutdown handling for the API server
+- Added MemberNames() method to Cluster for exposing peer names
+
+### 6. Documentation
+- Created comprehensive README.md with:
+  - Usage examples for SCRAM authentication
+  - Configuration reference
+  - Security notes
+  - API documentation
+
+## Test Results
+- 52 tests passing
+- API package coverage: 89.8%
+- All linting checks pass
+
+## Validation Criteria Met
+1. Auth Failure: `curl -I http://localhost:8082/status` returns 401 Unauthorized ✓
+2. Auth Success: Valid SCRAM exchange returns 200 OK with cluster JSON ✓
+3. No Env Var: Application logs fatal error and exits if DRL_PRIVATE_API_KEY is missing ✓
+
+## Files Created/Modified
+- internal/api/api.go (new)
+- internal/api/api_test.go (new)
+- internal/api/auth.go (new)
+- internal/api/auth_test.go (new)
+- internal/config/config.go (modified)
+- internal/membership/membership.go (modified)
+- main.go (modified)
+- go.mod (modified)
+- go.sum (modified)
+- README.md (new)
