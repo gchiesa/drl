@@ -37,10 +37,9 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
-    environment:
-      - DISCOVERY_SERVICE_NAME=drl
-      - BIND_ADDR=0.0.0.0
-      - STARTUP_DELAY=3s
+    volumes:
+      - ./deployments/drl/config.kdl:/etc/drl/config.kdl:ro
+    command: ["--config", "/etc/drl/config.kdl"]
     healthcheck:
       test: ["CMD", "wget", "-q", "--spider", "http://localhost:9091/health"]
       interval: 5s

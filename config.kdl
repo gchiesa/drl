@@ -1,0 +1,19 @@
+// DRL - Distributed Rate Limiter Configuration
+// This file follows KDL v1 syntax: https://kdl.dev/
+
+listen {
+    grpc ":8081"
+    metrics ":9091"
+}
+
+membership {
+    service-name "drl"
+    port 7946
+    bind-addr "0.0.0.0"
+    startup-delay "3s"
+}
+
+logging {
+    level "info"
+    format "json"
+}
