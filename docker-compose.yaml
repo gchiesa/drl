@@ -1,0 +1,47 @@
+services:
+  echo-server:
+    image: mccutchen/go-httpbin:latest
+    container_name: echo-server
+    networks:
+      - drl-network
+
+  envoy:
+    image: envoyproxy/envoy:v1.30-latest
+    container_name: envoy
+    ports:
+      - "10000:10000"
+    volumes:
+      - ./deployments/envoy/envoy.yaml:/etc/envoy/envoy.yaml:ro
+    command: ["-c", "/etc/envoy/envoy.yaml", "--log-level", "info"]
+    depends_on:
+      - echo-server
+    networks:
+      - drl-network
+
+  k6:
+    image: grafana/k6:latest
+    container_name: k6
+    volumes:
+      - ./deployments/k6:/scripts:ro
+    environment:
+      - TARGET_URL=http://envoy:10000
+    command: ["run", "/scripts/load-test.js"]
+    depends_on:
+      - envoy
+    networks:
+      - drl-network
+
+  # DRL service - uncomment when ready to implement
+  # drl:
+  #   build:
+  #     context: .
+  #     dockerfile: Dockerfile
+  #   container_name: drl
+  #   deploy:
+  #     replicas: 3
+  #   networks:
+  #     - drl-network
+
+networks:
+  drl-network:
+    driver: bridge
