@@ -3,3 +3,4 @@ bin
 
 # golang
 coverage.out
+test-output.json

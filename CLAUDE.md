@@ -38,6 +38,7 @@ rate limit upon received Envoy requests
 * **Event Broadcast**: Hashicorp Serf
 * **Consistency**: Consistent Hashing (stathat/consistent)
 * **In-Memory Store**: Ristretto (High-concurrency cache)
+* **Metrics**: The application should publish metrics in prometheus compatible format on the standard port and path
 
 ## Node Lifecycle & State Transfer Startup & Warm-up
 
