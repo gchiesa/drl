@@ -36,9 +36,9 @@ func NewCluster(cfg *config.Config, m *metrics.Metrics, logger *slog.Logger) *Cl
 func (c *Cluster) Start() error {
 	mlConfig := memberlist.DefaultLANConfig()
 	mlConfig.Name = c.config.NodeName
-	mlConfig.BindAddr = c.config.BindAddr
-	mlConfig.BindPort = c.config.BindPort
-	mlConfig.AdvertisePort = c.config.BindPort
+	mlConfig.BindAddr = c.config.Membership.BindAddr
+	mlConfig.BindPort = c.config.Membership.Port
+	mlConfig.AdvertisePort = c.config.Membership.Port
 
 	// Set up event delegate for membership events
 	mlConfig.Events = &eventDelegate{
@@ -60,8 +60,8 @@ func (c *Cluster) Start() error {
 
 	c.logger.Info("memberlist started",
 		"local_node_name", c.config.NodeName,
-		"bind_addr", c.config.BindAddr,
-		"bind_port", c.config.BindPort,
+		"bind_addr", c.config.Membership.BindAddr,
+		"bind_port", c.config.Membership.Port,
 	)
 
 	// Update initial cluster size
@@ -74,16 +74,16 @@ func (c *Cluster) Start() error {
 func (c *Cluster) JoinCluster() error {
 	// Wait for networking to stabilize
 	c.logger.Info("waiting for network to stabilize",
-		"delay", c.config.StartupDelay,
+		"delay", c.config.Membership.StartupDelay,
 	)
-	time.Sleep(c.config.StartupDelay)
+	time.Sleep(c.config.Membership.StartupDelay)
 
 	// Resolve peers via DNS
 	peers, err := c.discoverPeers()
 	if err != nil {
 		c.logger.Warn("failed to discover peers via DNS",
 			"error", err,
-			"service_name", c.config.DiscoveryServiceName,
+			"service_name", c.config.Membership.ServiceName,
 		)
 		// Not fatal - we might be the first node
 		c.setReady(true)
@@ -134,7 +134,7 @@ func (c *Cluster) JoinCluster() error {
 
 // discoverPeers resolves the discovery service name to get peer IPs
 func (c *Cluster) discoverPeers() ([]string, error) {
-	ips, err := net.LookupIP(c.config.DiscoveryServiceName)
+	ips, err := net.LookupIP(c.config.Membership.ServiceName)
 	if err != nil {
 		return nil, fmt.Errorf("DNS lookup failed: %w", err)
 	}

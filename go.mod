@@ -5,6 +5,7 @@ go 1.25.5
 require (
 	github.com/hashicorp/memberlist v0.5.4
 	github.com/prometheus/client_golang v1.23.2
+	github.com/sblinch/kdl-go v0.0.0-20260121213736-8b7053306ca6
 )
 
 require (
