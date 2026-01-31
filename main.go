@@ -11,6 +11,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/gchiesa/drl/internal/api"
 	"github.com/gchiesa/drl/internal/config"
 	"github.com/gchiesa/drl/internal/membership"
 	"github.com/gchiesa/drl/internal/metrics"
@@ -73,6 +74,36 @@ func main() {
 		}
 	}()
 
+	// Initialize internal API if enabled
+	var apiServer *api.Server
+	if cfg.InternalAPI.Enabled {
+		// Validate API key
+		if err := config.ValidatePrivateAPIKey(); err != nil {
+			logger.Error("internal API configuration error", "error", err)
+			os.Exit(1)
+		}
+
+		apiKey, _ := config.GetPrivateAPIKey()
+		apiServer, err = api.NewServer(api.ServerConfig{
+			Address:     cfg.InternalAPI.Address,
+			APIKey:      apiKey,
+			ClusterName: cfg.Membership.ServiceName,
+			NodeID:      cfg.NodeName,
+			Cluster:     cluster,
+			Logger:      logger,
+		})
+		if err != nil {
+			logger.Error("failed to create internal API server", "error", err)
+			os.Exit(1)
+		}
+
+		if err := apiServer.Start(); err != nil {
+			logger.Error("failed to start internal API server", "error", err)
+			os.Exit(1)
+		}
+		logger.Info("internal API server started", "address", cfg.InternalAPI.Address)
+	}
+
 	logger.Info("DRL is running")
 
 	// Wait for shutdown signal
@@ -83,6 +114,15 @@ func main() {
 	logger.Info("shutdown signal received")
 
 	// Graceful shutdown
+	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer shutdownCancel()
+
+	if apiServer != nil {
+		if err := apiServer.Stop(shutdownCtx); err != nil {
+			logger.Error("failed to stop internal API server", "error", err)
+		}
+	}
+
 	if err := cluster.Leave(5 * time.Second); err != nil {
 		logger.Error("failed to leave cluster gracefully", "error", err)
 	}

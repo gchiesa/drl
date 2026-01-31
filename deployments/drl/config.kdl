@@ -17,3 +17,8 @@ logging {
     level "info"
     format "json"
 }
+
+internal-api {
+    enabled true
+    address ":8082"
+}

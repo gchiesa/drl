@@ -24,7 +24,7 @@ RUN CGO_ENABLED=0 GOOS=linux go build -ldflags="-w -s" -o /drl ./main.go
 # Runtime stage
 FROM alpine:3.19
 
-RUN apk add --no-cache ca-certificates wget
+RUN apk add --no-cache ca-certificates wget curl
 
 COPY --from=builder /drl /usr/local/bin/drl
 

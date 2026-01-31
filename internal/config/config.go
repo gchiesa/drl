@@ -24,6 +24,9 @@ type Config struct {
 	// Logging configuration
 	Logging LoggingConfig
 
+	// InternalAPI configuration
+	InternalAPI InternalAPIConfig
+
 	// ConfigSource indicates where the config was loaded from
 	ConfigSource string
 }
@@ -56,11 +59,20 @@ type LoggingConfig struct {
 	Format string
 }
 
+// InternalAPIConfig holds internal API configuration
+type InternalAPIConfig struct {
+	// Enabled indicates if the internal API is enabled
+	Enabled bool
+	// Address is the address for the internal API server
+	Address string
+}
+
 // kdlConfig represents the KDL file structure for unmarshaling
 type kdlConfig struct {
-	Listen     kdlListen     `kdl:"listen"`
-	Membership kdlMembership `kdl:"membership"`
-	Logging    kdlLogging    `kdl:"logging"`
+	Listen      kdlListen      `kdl:"listen"`
+	Membership  kdlMembership  `kdl:"membership"`
+	Logging     kdlLogging     `kdl:"logging"`
+	InternalAPI kdlInternalAPI `kdl:"internal-api"`
 }
 
 type kdlListen struct {
@@ -78,6 +90,11 @@ type kdlMembership struct {
 type kdlLogging struct {
 	Level  string `kdl:"level"`
 	Format string `kdl:"format"`
+}
+
+type kdlInternalAPI struct {
+	Enabled bool   `kdl:"enabled"`
+	Address string `kdl:"address"`
 }
 
 // DefaultConfig returns the default configuration
@@ -98,6 +115,10 @@ func DefaultConfig() *Config {
 		Logging: LoggingConfig{
 			Level:  "info",
 			Format: "json",
+		},
+		InternalAPI: InternalAPIConfig{
+			Enabled: true,
+			Address: ":8082",
 		},
 	}
 }
@@ -167,6 +188,14 @@ func (c *Config) loadFromKDL(path string) error {
 	if kdlCfg.Logging.Format != "" {
 		c.Logging.Format = kdlCfg.Logging.Format
 	}
+
+	// Internal API - note: bool default is false, so we check if address is set
+	// to determine if the section was explicitly configured
+	if kdlCfg.InternalAPI.Address != "" {
+		c.InternalAPI.Address = kdlCfg.InternalAPI.Address
+	}
+	// For enabled, we always apply the KDL value since false is a valid setting
+	c.InternalAPI.Enabled = kdlCfg.InternalAPI.Enabled
 
 	return nil
 }
@@ -240,6 +269,14 @@ func (c *Config) applyEnvOverrides() {
 	if v := os.Getenv("DRL_LOGGING_FORMAT"); v != "" {
 		c.Logging.Format = v
 	}
+
+	// Internal API section
+	if v := os.Getenv("DRL_INTERNAL_API_ENABLED"); v != "" {
+		c.InternalAPI.Enabled = v == "true" || v == "1"
+	}
+	if v := os.Getenv("DRL_INTERNAL_API_ADDRESS"); v != "" {
+		c.InternalAPI.Address = v
+	}
 }
 
 // Validate validates the configuration
@@ -311,6 +348,37 @@ func (c *Config) MetricsPort() int {
 // StartupDelay returns the startup delay (for backward compatibility)
 func (c *Config) StartupDelay() time.Duration {
 	return c.Membership.StartupDelay
+}
+
+// InternalAPIPort returns the internal API port extracted from the address
+func (c *Config) InternalAPIPort() int {
+	addr := c.InternalAPI.Address
+	if idx := strings.LastIndex(addr, ":"); idx >= 0 {
+		if port, err := strconv.Atoi(addr[idx+1:]); err == nil {
+			return port
+		}
+	}
+	return 8082
+}
+
+// GetPrivateAPIKey returns the private API key from environment variable
+// Returns the key and a boolean indicating if it was set
+func GetPrivateAPIKey() (string, bool) {
+	key := os.Getenv("DRL_PRIVATE_API_KEY")
+	return key, key != ""
+}
+
+// ValidatePrivateAPIKey validates the private API key meets security requirements
+// Returns an error if the key is not set or is shorter than 16 characters
+func ValidatePrivateAPIKey() error {
+	key, exists := GetPrivateAPIKey()
+	if !exists {
+		return fmt.Errorf("DRL_PRIVATE_API_KEY environment variable is not set")
+	}
+	if len(key) < 16 {
+		return fmt.Errorf("DRL_PRIVATE_API_KEY must be at least 16 characters, got %d", len(key))
+	}
+	return nil
 }
 
 func getHostname() string {
