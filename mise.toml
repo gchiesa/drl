@@ -1,0 +1,15 @@
+[tools]
+go = "1.23"
+golangci-lint = "2.8"
+
+[tasks.build]
+description = "Build the DRL binary"
+run = "./ci/scripts/build.sh"
+
+[tasks.test]
+description = "Run tests with coverage"
+run = "./ci/scripts/test.sh"
+
+[tasks.lint]
+description = "Run linting"
+run = "./ci/scripts/lint.sh"
