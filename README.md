@@ -9,7 +9,7 @@ of external databases by using a Peer-to-Peer (P2P) Hybrid Architecture.
 - **Shadow Accounting**: Hashed, asynchronous global quota tracking
 - **State Sync**: Warm-bootstrapping to prevent "vulnerability windows" during rolling updates
 - **Cluster Discovery**: Automatic peer discovery via DNS using Hashicorp Memberlist
-- **SCRAM-SHA-256 Authentication**: Secure internal API with RFC 5802/7677 compliant authentication
+- **Digest Authentication (SHA-256)**: Secure internal API with RFC 7616 compliant HTTP Digest authentication
 
 ## Quick Start
 
@@ -89,7 +89,7 @@ internal-api {
 
 ## Internal API
 
-DRL exposes an internal API on port 8082 (configurable) protected by SCRAM-SHA-256 authentication.
+DRL exposes an internal API on port 8082 (configurable) protected by HTTP Digest Authentication with SHA-256.
 
 ### Endpoints
 
@@ -113,47 +113,50 @@ Returns cluster status information including node ID, cluster name, active peers
 }
 ```
 
-### SCRAM-SHA-256 Authentication
+### Digest Authentication (SHA-256)
 
-The internal API uses SCRAM-SHA-256 (RFC 5802/7677) for authentication. This is a challenge-response mechanism that
-never transmits the password over the wire.
+The internal API uses HTTP Digest Authentication (RFC 7616) with SHA-256 algorithm. This challenge-response mechanism
+never transmits the password over the wire, making it suitable for secure API authentication.
+
+#### Quick Testing with curl
+
+The simplest way to test the API is using curl's built-in digest authentication support:
+
+```bash
+# Testing the Private API with Digest (empty username, API key as password)
+curl --digest -u ":$DRL_PRIVATE_API_KEY" http://localhost:8082/status
+
+# Or with explicit admin username
+curl --digest -u "admin:$DRL_PRIVATE_API_KEY" http://localhost:8082/status
+```
 
 #### Authentication Flow
 
-1. **Client First Message**: Client sends username and nonce
-2. **Server First Message**: Server responds with combined nonce, salt, and iteration count
-3. **Client Final Message**: Client sends proof of password knowledge
-4. **Server Final Message**: Server verifies and sends its own proof
+1. **Client Request**: Client requests a protected resource
+2. **Server Challenge**: Server responds with 401 and `WWW-Authenticate` header containing nonce, realm, and algorithm
+3. **Client Response**: Client calculates digest response using password and sends `Authorization` header
+4. **Server Verification**: Server verifies the digest and grants access
 
-#### Example Using curl
+#### Manual Authentication Example
 
-**Step 1: Initial Request (Client First)**
+**Step 1: Get Challenge**
 
 ```bash
-curl -v http://localhost:8082/status \
-     -H "Authorization: SCRAM-SHA-256 n,,n=admin,r=fyko+d2lbbFgONRv9qkxdawL"
+curl -v http://localhost:8082/status
 ```
 
 Response (401 Unauthorized):
 
 ```
-WWW-Authenticate: SCRAM-SHA-256 r=fyko+d2lbbFgONRv9qkxdawL<server-nonce>,s=<salt>,i=4096
+WWW-Authenticate: Digest realm="DRL Internal API", nonce="abc123...", algorithm=SHA-256, qop="auth"
 ```
 
-**Step 2: Final Request (Client Final)**
+**Step 2: Send Authenticated Request**
 
-```bash
-curl -v http://localhost:8082/status \
-     -H "Authorization: SCRAM-SHA-256 c=biws,r=<full-nonce>,p=<client-proof>"
-```
-
-Response (200 OK):
-
-```
-Authentication-Info: v=<server-signature>
-
-{"cluster_name":"drl","node_id":"node-1",...}
-```
+The digest response is calculated as:
+- `A1 = SHA256(username:realm:password)`
+- `A2 = SHA256(method:uri)`
+- `response = SHA256(A1:nonce:nc:cnonce:qop:A2)`
 
 #### Programmatic Example (Go)
 
@@ -161,27 +164,41 @@ Authentication-Info: v=<server-signature>
 package main
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
-	"github.com/xdg-go/scram"
+	"net/http"
 )
 
+func sha256Hash(s string) string {
+	h := sha256.Sum256([]byte(s))
+	return hex.EncodeToString(h[:])
+}
+
 func main() {
-	client, _ := scram.SHA256.NewClient("admin", "your-api-key", "")
-	conv := client.NewConversation()
+	// Parse the challenge from WWW-Authenticate header
+	realm := "DRL Internal API"
+	nonce := "server-nonce-here"
+	uri := "/status"
+	method := "GET"
+	username := "admin"
+	password := "your-api-key"
+	cnonce := "client-nonce"
+	nc := "00000001"
+	qop := "auth"
 
-	// Step 1: Generate client-first message
-	clientFirst, _ := conv.Step("")
+	// Calculate digest
+	a1 := sha256Hash(fmt.Sprintf("%s:%s:%s", username, realm, password))
+	a2 := sha256Hash(fmt.Sprintf("%s:%s", method, uri))
+	response := sha256Hash(fmt.Sprintf("%s:%s:%s:%s:%s:%s", a1, nonce, nc, cnonce, qop, a2))
 
-	// Step 2: Send to server, receive server-first
-	// serverFirst := sendToServer(clientFirst)
+	// Build Authorization header
+	auth := fmt.Sprintf(`Digest username="%s", realm="%s", nonce="%s", uri="%s", algorithm=SHA-256, qop=%s, nc=%s, cnonce="%s", response="%s"`,
+		username, realm, nonce, uri, qop, nc, cnonce, response)
 
-	// Step 3: Generate client-final message
-	// clientFinal, _ := conv.Step(serverFirst)
-
-	// Step 4: Verify server-final
-	// _, _ = conv.Step(serverFinal)
-
-	fmt.Println("Client first:", clientFirst)
+	req, _ := http.NewRequest("GET", "http://localhost:8082/status", nil)
+	req.Header.Set("Authorization", auth)
+	// ... execute request
 }
 ```
 
@@ -189,7 +206,8 @@ func main() {
 
 - **Production Deployment**: The internal API should be bound to `localhost` or protected by mTLS/VPN
 - **API Key Requirements**: Must be at least 16 characters
-- **Credential Storage**: DRL never stores the raw API key. Only derived `StoredKey` and `ServerKey` are kept in memory
+- **Credential Storage**: DRL never stores the raw API key. Only the A1 hash (`SHA256(username:realm:password)`) is kept in memory
+- **Replay Protection**: Each nonce can only be used once and expires after 5 minutes
 - **Error Messages**: Authentication errors do not reveal whether the username exists or if credentials are incorrect
 
 ## Docker Deployment

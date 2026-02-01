@@ -19,7 +19,7 @@ type ClusterInfo interface {
 // Server represents the internal API server
 type Server struct {
 	app         *fiber.App
-	auth        *SCRAMAuthenticator
+	auth        *DigestAuthenticator
 	logger      *slog.Logger
 	address     string
 	clusterName string
@@ -45,8 +45,8 @@ func NewServer(cfg ServerConfig) (*Server, error) {
 		return nil, fmt.Errorf("API key must be at least %d characters", MinAPIKeyLength)
 	}
 
-	// Create SCRAM authenticator
-	auth, err := NewSCRAMAuthenticator(cfg.APIKey)
+	// Create Digest authenticator
+	auth, err := NewDigestAuthenticator(cfg.APIKey)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create authenticator: %w", err)
 	}
@@ -76,7 +76,7 @@ func NewServer(cfg ServerConfig) (*Server, error) {
 
 // setupRoutes configures the API routes
 func (s *Server) setupRoutes() {
-	// Apply SCRAM authentication middleware to /status
+	// Apply Digest authentication middleware to /status
 	s.app.Get("/status", s.auth.Middleware(), s.handleStatus)
 }
 

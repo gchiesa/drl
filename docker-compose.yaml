@@ -52,8 +52,6 @@ services:
       DRL_PRIVATE_API_KEY: "Test5ecretPrivateAPIKey!"
     networks:
       - drl-network
-    ports:
-      - 8082:8082
 
 networks:
   drl-network:

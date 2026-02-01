@@ -3,7 +3,7 @@ package api
 import (
 	"context"
 	"crypto/sha256"
-	"encoding/base64"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -120,6 +120,12 @@ func TestStatusEndpoint_Unauthorized(t *testing.T) {
 	if resp.StatusCode != fiber.StatusUnauthorized {
 		t.Errorf("Expected status %d, got %d", fiber.StatusUnauthorized, resp.StatusCode)
 	}
+
+	// Verify it returns Digest challenge
+	wwwAuth := resp.Header.Get("WWW-Authenticate")
+	if !strings.HasPrefix(wwwAuth, "Digest") {
+		t.Errorf("Expected WWW-Authenticate to start with 'Digest', got %s", wwwAuth)
+	}
 }
 
 func TestStatusEndpoint_Authenticated(t *testing.T) {
@@ -143,14 +149,8 @@ func TestStatusEndpoint_Authenticated(t *testing.T) {
 		t.Fatalf("Failed to create server: %v", err)
 	}
 
-	// Perform full SCRAM authentication
-	clientNonce := "testClientNonce12345"
-	clientFirst := fmt.Sprintf("n,,n=%s,r=%s", scramUsername, clientNonce)
-	clientFirstBare := fmt.Sprintf("n=%s,r=%s", scramUsername, clientNonce)
-
-	// Step 1: Client first
+	// Step 1: Get challenge
 	req1 := httptest.NewRequest("GET", "/status", nil)
-	req1.Header.Set("Authorization", "SCRAM-SHA-256 "+clientFirst)
 	resp1, err := server.app.Test(req1)
 	if err != nil {
 		t.Fatalf("Step 1 failed: %v", err)
@@ -160,46 +160,16 @@ func TestStatusEndpoint_Authenticated(t *testing.T) {
 		t.Fatalf("Step 1: Expected 401, got %d", resp1.StatusCode)
 	}
 
-	serverFirstHeader := resp1.Header.Get("WWW-Authenticate")
-	serverFirst := strings.TrimPrefix(serverFirstHeader, "SCRAM-SHA-256 ")
-
-	var serverNonce, saltB64 string
-	var iterations int
-	for _, part := range strings.Split(serverFirst, ",") {
-		if strings.HasPrefix(part, "r=") {
-			serverNonce = strings.TrimPrefix(part, "r=")
-		}
-		if strings.HasPrefix(part, "s=") {
-			saltB64 = strings.TrimPrefix(part, "s=")
-		}
-		if strings.HasPrefix(part, "i=") {
-			_, _ = fmt.Sscanf(strings.TrimPrefix(part, "i="), "%d", &iterations)
-		}
+	wwwAuth := resp1.Header.Get("WWW-Authenticate")
+	nonce := extractNonceFromHeader(wwwAuth)
+	if nonce == "" {
+		t.Fatalf("Failed to extract nonce from WWW-Authenticate: %s", wwwAuth)
 	}
 
-	salt, _ := base64.StdEncoding.DecodeString(saltB64)
-
-	// Calculate proof
-	channelBinding := base64.StdEncoding.EncodeToString([]byte("n,,"))
-	clientFinalWithoutProof := fmt.Sprintf("c=%s,r=%s", channelBinding, serverNonce)
-	authMessage := clientFirstBare + "," + serverFirst + "," + clientFinalWithoutProof
-
-	saltedPassword := pbkdf2Sha256([]byte(apiKey), salt, iterations, 32)
-	clientKey := hmacSHA256(saltedPassword, []byte("Client Key"))
-	storedKey := sha256.Sum256(clientKey)
-	clientSignature := hmacSHA256(storedKey[:], []byte(authMessage))
-
-	proof := make([]byte, len(clientKey))
-	for i := range clientKey {
-		proof[i] = clientKey[i] ^ clientSignature[i]
-	}
-	proofB64 := base64.StdEncoding.EncodeToString(proof)
-
-	clientFinal := fmt.Sprintf("c=%s,r=%s,p=%s", channelBinding, serverNonce, proofB64)
-
-	// Step 2: Client final
+	// Step 2: Send authenticated request
+	digestAuth := buildDigestAuthForTest(digestUsername, apiKey, nonce, "/status", "GET")
 	req2 := httptest.NewRequest("GET", "/status", nil)
-	req2.Header.Set("Authorization", "SCRAM-SHA-256 "+clientFinal)
+	req2.Header.Set("Authorization", digestAuth)
 	resp2, err := server.app.Test(req2)
 	if err != nil {
 		t.Fatalf("Step 2 failed: %v", err)
@@ -290,52 +260,15 @@ func TestStatusEndpoint_NilCluster(t *testing.T) {
 		t.Fatalf("Failed to create server: %v", err)
 	}
 
-	// Perform authentication and check that nil cluster is handled
-	clientNonce := "testNonce"
-	clientFirst := fmt.Sprintf("n,,n=%s,r=%s", scramUsername, clientNonce)
-	clientFirstBare := fmt.Sprintf("n=%s,r=%s", scramUsername, clientNonce)
-
-	// Step 1
+	// Step 1: Get challenge
 	req1 := httptest.NewRequest("GET", "/status", nil)
-	req1.Header.Set("Authorization", "SCRAM-SHA-256 "+clientFirst)
 	resp1, _ := server.app.Test(req1)
+	nonce := extractNonceFromHeader(resp1.Header.Get("WWW-Authenticate"))
 
-	serverFirst := strings.TrimPrefix(resp1.Header.Get("WWW-Authenticate"), "SCRAM-SHA-256 ")
-
-	var serverNonce, saltB64 string
-	var iterations int
-	for _, part := range strings.Split(serverFirst, ",") {
-		if strings.HasPrefix(part, "r=") {
-			serverNonce = strings.TrimPrefix(part, "r=")
-		}
-		if strings.HasPrefix(part, "s=") {
-			saltB64 = strings.TrimPrefix(part, "s=")
-		}
-		if strings.HasPrefix(part, "i=") {
-			_, _ = fmt.Sscanf(strings.TrimPrefix(part, "i="), "%d", &iterations)
-		}
-	}
-
-	salt, _ := base64.StdEncoding.DecodeString(saltB64)
-	channelBinding := base64.StdEncoding.EncodeToString([]byte("n,,"))
-	clientFinalWithoutProof := fmt.Sprintf("c=%s,r=%s", channelBinding, serverNonce)
-	authMessage := clientFirstBare + "," + serverFirst + "," + clientFinalWithoutProof
-
-	saltedPassword := pbkdf2Sha256([]byte(apiKey), salt, iterations, 32)
-	clientKey := hmacSHA256(saltedPassword, []byte("Client Key"))
-	storedKey := sha256.Sum256(clientKey)
-	clientSignature := hmacSHA256(storedKey[:], []byte(authMessage))
-
-	proof := make([]byte, len(clientKey))
-	for i := range clientKey {
-		proof[i] = clientKey[i] ^ clientSignature[i]
-	}
-	proofB64 := base64.StdEncoding.EncodeToString(proof)
-	clientFinal := fmt.Sprintf("c=%s,r=%s,p=%s", channelBinding, serverNonce, proofB64)
-
-	// Step 2
+	// Step 2: Authenticated request
+	digestAuth := buildDigestAuthForTest(digestUsername, apiKey, nonce, "/status", "GET")
 	req2 := httptest.NewRequest("GET", "/status", nil)
-	req2.Header.Set("Authorization", "SCRAM-SHA-256 "+clientFinal)
+	req2.Header.Set("Authorization", digestAuth)
 	resp2, _ := server.app.Test(req2)
 
 	if resp2.StatusCode != http.StatusOK {
@@ -350,4 +283,38 @@ func TestStatusEndpoint_NilCluster(t *testing.T) {
 	if status["active_peers"] != nil {
 		t.Errorf("Expected active_peers to be nil when cluster is nil")
 	}
+}
+
+// Helper functions for api_test.go
+
+func extractNonceFromHeader(wwwAuth string) string {
+	params := parseDigestAuth(strings.TrimPrefix(wwwAuth, "Digest "))
+	return params["nonce"]
+}
+
+func buildDigestAuthForTest(username, password, nonce, uri, method string) string {
+	realm := digestRealm
+	cnonce := "testcnonce123456"
+	nc := "00000001"
+	qop := "auth"
+
+	// A1 = username:realm:password
+	a1 := fmt.Sprintf("%s:%s:%s", username, realm, password)
+	a1Hash := testSha256(a1)
+
+	// A2 = method:uri
+	a2 := fmt.Sprintf("%s:%s", method, uri)
+	a2Hash := testSha256(a2)
+
+	// response = H(A1:nonce:nc:cnonce:qop:A2)
+	response := testSha256(fmt.Sprintf("%s:%s:%s:%s:%s:%s",
+		a1Hash, nonce, nc, cnonce, qop, a2Hash))
+
+	return fmt.Sprintf(`Digest username="%s", realm="%s", nonce="%s", uri="%s", algorithm=SHA-256, qop=%s, nc=%s, cnonce="%s", response="%s"`,
+		username, realm, nonce, uri, qop, nc, cnonce, response)
+}
+
+func testSha256(s string) string {
+	h := sha256.Sum256([]byte(s))
+	return hex.EncodeToString(h[:])
 }
