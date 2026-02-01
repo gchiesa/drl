@@ -2,7 +2,7 @@ package api
 
 import (
 	"crypto/sha256"
-	"encoding/base64"
+	"encoding/hex"
 	"fmt"
 	"io"
 	"net/http/httptest"
@@ -12,7 +12,7 @@ import (
 	"github.com/gofiber/fiber/v2"
 )
 
-func TestNewSCRAMAuthenticator(t *testing.T) {
+func TestNewDigestAuthenticator(t *testing.T) {
 	tests := []struct {
 		name    string
 		apiKey  string
@@ -42,31 +42,31 @@ func TestNewSCRAMAuthenticator(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			auth, err := NewSCRAMAuthenticator(tt.apiKey)
+			auth, err := NewDigestAuthenticator(tt.apiKey)
 			if (err != nil) != tt.wantErr {
-				t.Errorf("NewSCRAMAuthenticator() error = %v, wantErr %v", err, tt.wantErr)
+				t.Errorf("NewDigestAuthenticator() error = %v, wantErr %v", err, tt.wantErr)
 				return
 			}
 			if !tt.wantErr && auth == nil {
-				t.Error("NewSCRAMAuthenticator() returned nil authenticator without error")
+				t.Error("NewDigestAuthenticator() returned nil authenticator without error")
 			}
 			if !tt.wantErr {
-				if len(auth.storedKey) == 0 {
-					t.Error("NewSCRAMAuthenticator() storedKey is empty")
+				if auth.a1Hash == "" {
+					t.Error("NewDigestAuthenticator() a1Hash is empty")
 				}
-				if len(auth.serverKey) == 0 {
-					t.Error("NewSCRAMAuthenticator() serverKey is empty")
-				}
-				if len(auth.salt) != scramSaltLength {
-					t.Errorf("NewSCRAMAuthenticator() salt length = %d, want %d", len(auth.salt), scramSaltLength)
+				// Verify A1 hash is correctly computed
+				expectedA1 := fmt.Sprintf("%s:%s:%s", digestUsername, digestRealm, tt.apiKey)
+				expectedHash := sha256Sum(expectedA1)
+				if auth.a1Hash != expectedHash {
+					t.Errorf("NewDigestAuthenticator() a1Hash = %s, want %s", auth.a1Hash, expectedHash)
 				}
 			}
 		})
 	}
 }
 
-func TestSCRAMMiddleware_NoAuth(t *testing.T) {
-	auth, err := NewSCRAMAuthenticator("thisIsAVerySecureAPIKey123")
+func TestDigestMiddleware_NoAuth(t *testing.T) {
+	auth, err := NewDigestAuthenticator("thisIsAVerySecureAPIKey123")
 	if err != nil {
 		t.Fatalf("Failed to create authenticator: %v", err)
 	}
@@ -87,13 +87,22 @@ func TestSCRAMMiddleware_NoAuth(t *testing.T) {
 	}
 
 	wwwAuth := resp.Header.Get("WWW-Authenticate")
-	if !strings.HasPrefix(wwwAuth, "SCRAM-SHA-256") {
-		t.Errorf("Expected WWW-Authenticate header to start with 'SCRAM-SHA-256', got %s", wwwAuth)
+	if !strings.HasPrefix(wwwAuth, "Digest") {
+		t.Errorf("Expected WWW-Authenticate header to start with 'Digest', got %s", wwwAuth)
+	}
+	if !strings.Contains(wwwAuth, "algorithm=SHA-256") {
+		t.Errorf("Expected WWW-Authenticate to contain 'algorithm=SHA-256', got %s", wwwAuth)
+	}
+	if !strings.Contains(wwwAuth, "nonce=") {
+		t.Errorf("Expected WWW-Authenticate to contain 'nonce=', got %s", wwwAuth)
+	}
+	if !strings.Contains(wwwAuth, `realm="DRL Internal API"`) {
+		t.Errorf("Expected WWW-Authenticate to contain realm, got %s", wwwAuth)
 	}
 }
 
-func TestSCRAMMiddleware_InvalidScheme(t *testing.T) {
-	auth, err := NewSCRAMAuthenticator("thisIsAVerySecureAPIKey123")
+func TestDigestMiddleware_InvalidScheme(t *testing.T) {
+	auth, err := NewDigestAuthenticator("thisIsAVerySecureAPIKey123")
 	if err != nil {
 		t.Fatalf("Failed to create authenticator: %v", err)
 	}
@@ -115,8 +124,8 @@ func TestSCRAMMiddleware_InvalidScheme(t *testing.T) {
 	}
 }
 
-func TestSCRAMMiddleware_ClientFirst(t *testing.T) {
-	auth, err := NewSCRAMAuthenticator("thisIsAVerySecureAPIKey123")
+func TestDigestMiddleware_WrongUsername(t *testing.T) {
+	auth, err := NewDigestAuthenticator("thisIsAVerySecureAPIKey123")
 	if err != nil {
 		t.Fatalf("Failed to create authenticator: %v", err)
 	}
@@ -126,46 +135,15 @@ func TestSCRAMMiddleware_ClientFirst(t *testing.T) {
 		return c.SendString("OK")
 	})
 
-	clientNonce := "fyko+d2lbbFgONRv9qkxdawL"
-	clientFirst := fmt.Sprintf("n,,n=%s,r=%s", scramUsername, clientNonce)
+	// First get a valid nonce
+	req1 := httptest.NewRequest("GET", "/test", nil)
+	resp1, _ := app.Test(req1)
+	nonce := extractNonceFromWWWAuth(resp1.Header.Get("WWW-Authenticate"))
 
+	// Try with wrong username
+	digestAuth := buildDigestAuth("wronguser", "thisIsAVerySecureAPIKey123", nonce, "/test", "GET")
 	req := httptest.NewRequest("GET", "/test", nil)
-	req.Header.Set("Authorization", "SCRAM-SHA-256 "+clientFirst)
-	resp, err := app.Test(req)
-	if err != nil {
-		t.Fatalf("Failed to test request: %v", err)
-	}
-
-	if resp.StatusCode != fiber.StatusUnauthorized {
-		t.Errorf("Expected status %d for client-first, got %d", fiber.StatusUnauthorized, resp.StatusCode)
-	}
-
-	wwwAuth := resp.Header.Get("WWW-Authenticate")
-	if !strings.HasPrefix(wwwAuth, "SCRAM-SHA-256 r=") {
-		t.Errorf("Expected WWW-Authenticate to contain server-first message, got %s", wwwAuth)
-	}
-
-	// Check that the nonce starts with client nonce
-	if !strings.Contains(wwwAuth, "r="+clientNonce) {
-		t.Errorf("Server nonce should start with client nonce")
-	}
-}
-
-func TestSCRAMMiddleware_WrongUsername(t *testing.T) {
-	auth, err := NewSCRAMAuthenticator("thisIsAVerySecureAPIKey123")
-	if err != nil {
-		t.Fatalf("Failed to create authenticator: %v", err)
-	}
-
-	app := fiber.New()
-	app.Get("/test", auth.Middleware(), func(c *fiber.Ctx) error {
-		return c.SendString("OK")
-	})
-
-	clientFirst := "n,,n=wronguser,r=someNonce123"
-
-	req := httptest.NewRequest("GET", "/test", nil)
-	req.Header.Set("Authorization", "SCRAM-SHA-256 "+clientFirst)
+	req.Header.Set("Authorization", digestAuth)
 	resp, err := app.Test(req)
 	if err != nil {
 		t.Fatalf("Failed to test request: %v", err)
@@ -174,16 +152,10 @@ func TestSCRAMMiddleware_WrongUsername(t *testing.T) {
 	if resp.StatusCode != fiber.StatusUnauthorized {
 		t.Errorf("Expected status %d for wrong username, got %d", fiber.StatusUnauthorized, resp.StatusCode)
 	}
-
-	body, _ := io.ReadAll(resp.Body)
-	if !strings.Contains(string(body), "Authentication failed") {
-		t.Errorf("Expected 'Authentication failed' message, got %s", string(body))
-	}
 }
 
-func TestSCRAMMiddleware_FullHandshake(t *testing.T) {
-	apiKey := "thisIsAVerySecureAPIKey123"
-	auth, err := NewSCRAMAuthenticator(apiKey)
+func TestDigestMiddleware_WrongPassword(t *testing.T) {
+	auth, err := NewDigestAuthenticator("thisIsAVerySecureAPIKey123")
 	if err != nil {
 		t.Fatalf("Failed to create authenticator: %v", err)
 	}
@@ -193,13 +165,39 @@ func TestSCRAMMiddleware_FullHandshake(t *testing.T) {
 		return c.SendString("OK")
 	})
 
-	// Step 1: Send client-first message
-	clientNonce := "rOprNGfwEbeRWgbNEkqO"
-	clientFirst := fmt.Sprintf("n,,n=%s,r=%s", scramUsername, clientNonce)
-	clientFirstBare := fmt.Sprintf("n=%s,r=%s", scramUsername, clientNonce)
-
+	// First get a valid nonce
 	req1 := httptest.NewRequest("GET", "/test", nil)
-	req1.Header.Set("Authorization", "SCRAM-SHA-256 "+clientFirst)
+	resp1, _ := app.Test(req1)
+	nonce := extractNonceFromWWWAuth(resp1.Header.Get("WWW-Authenticate"))
+
+	// Try with wrong password
+	digestAuth := buildDigestAuth(digestUsername, "wrongPasswordHere1234", nonce, "/test", "GET")
+	req := httptest.NewRequest("GET", "/test", nil)
+	req.Header.Set("Authorization", digestAuth)
+	resp, err := app.Test(req)
+	if err != nil {
+		t.Fatalf("Failed to test request: %v", err)
+	}
+
+	if resp.StatusCode != fiber.StatusUnauthorized {
+		t.Errorf("Expected status %d for wrong password, got %d", fiber.StatusUnauthorized, resp.StatusCode)
+	}
+}
+
+func TestDigestMiddleware_FullHandshake(t *testing.T) {
+	apiKey := "thisIsAVerySecureAPIKey123"
+	auth, err := NewDigestAuthenticator(apiKey)
+	if err != nil {
+		t.Fatalf("Failed to create authenticator: %v", err)
+	}
+
+	app := fiber.New()
+	app.Get("/test", auth.Middleware(), func(c *fiber.Ctx) error {
+		return c.SendString("OK")
+	})
+
+	// Step 1: Get challenge
+	req1 := httptest.NewRequest("GET", "/test", nil)
 	resp1, err := app.Test(req1)
 	if err != nil {
 		t.Fatalf("Step 1 failed: %v", err)
@@ -209,57 +207,16 @@ func TestSCRAMMiddleware_FullHandshake(t *testing.T) {
 		t.Fatalf("Step 1: Expected status %d, got %d", fiber.StatusUnauthorized, resp1.StatusCode)
 	}
 
-	// Parse server-first message
-	serverFirstHeader := resp1.Header.Get("WWW-Authenticate")
-	serverFirst := strings.TrimPrefix(serverFirstHeader, "SCRAM-SHA-256 ")
-
-	// Extract server nonce, salt, and iterations
-	parts := strings.Split(serverFirst, ",")
-	var serverNonce, saltB64 string
-	var iterations int
-	for _, part := range parts {
-		if strings.HasPrefix(part, "r=") {
-			serverNonce = strings.TrimPrefix(part, "r=")
-		}
-		if strings.HasPrefix(part, "s=") {
-			saltB64 = strings.TrimPrefix(part, "s=")
-		}
-		if strings.HasPrefix(part, "i=") {
-			_, _ = fmt.Sscanf(strings.TrimPrefix(part, "i="), "%d", &iterations)
-		}
+	wwwAuth := resp1.Header.Get("WWW-Authenticate")
+	nonce := extractNonceFromWWWAuth(wwwAuth)
+	if nonce == "" {
+		t.Fatalf("Failed to extract nonce from WWW-Authenticate header: %s", wwwAuth)
 	}
 
-	if !strings.HasPrefix(serverNonce, clientNonce) {
-		t.Fatalf("Server nonce should start with client nonce")
-	}
-
-	salt, err := base64.StdEncoding.DecodeString(saltB64)
-	if err != nil {
-		t.Fatalf("Failed to decode salt: %v", err)
-	}
-
-	// Step 2: Calculate and send client-final message
-	channelBinding := base64.StdEncoding.EncodeToString([]byte("n,,"))
-	clientFinalWithoutProof := fmt.Sprintf("c=%s,r=%s", channelBinding, serverNonce)
-	authMessage := clientFirstBare + "," + serverFirst + "," + clientFinalWithoutProof
-
-	// Derive keys using PBKDF2 (matching the server's SCRAM implementation)
-	saltedPassword := pbkdf2Sha256([]byte(apiKey), salt, iterations, 32)
-	clientKey := hmacSHA256(saltedPassword, []byte("Client Key"))
-	storedKey := sha256.Sum256(clientKey)
-	clientSignature := hmacSHA256(storedKey[:], []byte(authMessage))
-
-	// Calculate proof
-	proof := make([]byte, len(clientKey))
-	for i := range clientKey {
-		proof[i] = clientKey[i] ^ clientSignature[i]
-	}
-	proofB64 := base64.StdEncoding.EncodeToString(proof)
-
-	clientFinal := fmt.Sprintf("c=%s,r=%s,p=%s", channelBinding, serverNonce, proofB64)
-
+	// Step 2: Send authenticated request
+	digestAuth := buildDigestAuth(digestUsername, apiKey, nonce, "/test", "GET")
 	req2 := httptest.NewRequest("GET", "/test", nil)
-	req2.Header.Set("Authorization", "SCRAM-SHA-256 "+clientFinal)
+	req2.Header.Set("Authorization", digestAuth)
 	resp2, err := app.Test(req2)
 	if err != nil {
 		t.Fatalf("Step 2 failed: %v", err)
@@ -270,20 +227,15 @@ func TestSCRAMMiddleware_FullHandshake(t *testing.T) {
 		t.Fatalf("Step 2: Expected status %d, got %d. Body: %s", fiber.StatusOK, resp2.StatusCode, string(body))
 	}
 
-	// Verify server signature is present
-	authInfo := resp2.Header.Get("Authentication-Info")
-	if !strings.HasPrefix(authInfo, "v=") {
-		t.Errorf("Expected Authentication-Info header with server signature")
-	}
-
 	body, _ := io.ReadAll(resp2.Body)
 	if string(body) != "OK" {
 		t.Errorf("Expected body 'OK', got %s", string(body))
 	}
 }
 
-func TestSCRAMMiddleware_InvalidProof(t *testing.T) {
-	auth, err := NewSCRAMAuthenticator("thisIsAVerySecureAPIKey123")
+func TestDigestMiddleware_NonceReplay(t *testing.T) {
+	apiKey := "thisIsAVerySecureAPIKey123"
+	auth, err := NewDigestAuthenticator(apiKey)
 	if err != nil {
 		t.Fatalf("Failed to create authenticator: %v", err)
 	}
@@ -293,85 +245,165 @@ func TestSCRAMMiddleware_InvalidProof(t *testing.T) {
 		return c.SendString("OK")
 	})
 
-	// Step 1: Send client-first message
-	clientNonce := "testNonce123"
-	clientFirst := fmt.Sprintf("n,,n=%s,r=%s", scramUsername, clientNonce)
-
+	// Get a nonce
 	req1 := httptest.NewRequest("GET", "/test", nil)
-	req1.Header.Set("Authorization", "SCRAM-SHA-256 "+clientFirst)
-	resp1, err := app.Test(req1)
-	if err != nil {
-		t.Fatalf("Step 1 failed: %v", err)
-	}
+	resp1, _ := app.Test(req1)
+	nonce := extractNonceFromWWWAuth(resp1.Header.Get("WWW-Authenticate"))
 
-	// Parse server-first message
-	serverFirstHeader := resp1.Header.Get("WWW-Authenticate")
-	serverFirst := strings.TrimPrefix(serverFirstHeader, "SCRAM-SHA-256 ")
-
-	var serverNonce string
-	for _, part := range strings.Split(serverFirst, ",") {
-		if strings.HasPrefix(part, "r=") {
-			serverNonce = strings.TrimPrefix(part, "r=")
-			break
-		}
-	}
-
-	// Step 2: Send client-final with wrong proof
-	channelBinding := base64.StdEncoding.EncodeToString([]byte("n,,"))
-	wrongProof := base64.StdEncoding.EncodeToString([]byte("wrongproof00000000000000000000000"))
-	clientFinal := fmt.Sprintf("c=%s,r=%s,p=%s", channelBinding, serverNonce, wrongProof)
-
+	// First request with nonce should succeed
+	digestAuth := buildDigestAuth(digestUsername, apiKey, nonce, "/test", "GET")
 	req2 := httptest.NewRequest("GET", "/test", nil)
-	req2.Header.Set("Authorization", "SCRAM-SHA-256 "+clientFinal)
-	resp2, err := app.Test(req2)
-	if err != nil {
-		t.Fatalf("Step 2 failed: %v", err)
+	req2.Header.Set("Authorization", digestAuth)
+	resp2, _ := app.Test(req2)
+
+	if resp2.StatusCode != fiber.StatusOK {
+		t.Fatalf("First request should succeed, got %d", resp2.StatusCode)
 	}
 
-	if resp2.StatusCode != fiber.StatusUnauthorized {
-		t.Errorf("Expected status %d for invalid proof, got %d", fiber.StatusUnauthorized, resp2.StatusCode)
-	}
-}
+	// Second request with same nonce should fail (replay protection)
+	req3 := httptest.NewRequest("GET", "/test", nil)
+	req3.Header.Set("Authorization", digestAuth)
+	resp3, _ := app.Test(req3)
 
-func TestGenerateNonce(t *testing.T) {
-	nonce1 := generateNonce()
-	nonce2 := generateNonce()
-
-	if nonce1 == "" {
-		t.Error("generateNonce() returned empty string")
-	}
-	if nonce1 == nonce2 {
-		t.Error("generateNonce() should return unique values")
-	}
-
-	// Check that it's valid base64
-	_, err := base64.StdEncoding.DecodeString(nonce1)
-	if err != nil {
-		t.Errorf("generateNonce() should return valid base64: %v", err)
+	if resp3.StatusCode != fiber.StatusUnauthorized {
+		t.Errorf("Replay should be rejected, expected %d, got %d", fiber.StatusUnauthorized, resp3.StatusCode)
 	}
 }
 
-// pbkdf2Sha256 derives a key using PBKDF2 with SHA-256
-func pbkdf2Sha256(password, salt []byte, iterations, keyLen int) []byte {
-	numBlocks := (keyLen + sha256.Size - 1) / sha256.Size
-	dk := make([]byte, 0, numBlocks*sha256.Size)
+func TestDigestMiddleware_InvalidNonce(t *testing.T) {
+	apiKey := "thisIsAVerySecureAPIKey123"
+	auth, err := NewDigestAuthenticator(apiKey)
+	if err != nil {
+		t.Fatalf("Failed to create authenticator: %v", err)
+	}
 
-	for block := 1; block <= numBlocks; block++ {
-		// U1 = PRF(Password, Salt || INT(i))
-		blockBytes := []byte{byte(block >> 24), byte(block >> 16), byte(block >> 8), byte(block)}
-		u := hmacSHA256(password, append(salt, blockBytes...))
-		result := make([]byte, len(u))
-		copy(result, u)
+	app := fiber.New()
+	app.Get("/test", auth.Middleware(), func(c *fiber.Ctx) error {
+		return c.SendString("OK")
+	})
 
-		// U2 = PRF(Password, U1), U3 = PRF(Password, U2), ...
-		for i := 1; i < iterations; i++ {
-			u = hmacSHA256(password, u)
-			for j := range result {
-				result[j] ^= u[j]
-			}
+	// Try with invalid nonce
+	digestAuth := buildDigestAuth(digestUsername, apiKey, "invalidnonce123456", "/test", "GET")
+	req := httptest.NewRequest("GET", "/test", nil)
+	req.Header.Set("Authorization", digestAuth)
+	resp, err := app.Test(req)
+	if err != nil {
+		t.Fatalf("Failed to test request: %v", err)
+	}
+
+	if resp.StatusCode != fiber.StatusUnauthorized {
+		t.Errorf("Expected status %d for invalid nonce, got %d", fiber.StatusUnauthorized, resp.StatusCode)
+	}
+
+	// Check for stale indicator
+	wwwAuth := resp.Header.Get("WWW-Authenticate")
+	if !strings.Contains(wwwAuth, "stale=true") {
+		t.Errorf("Expected 'stale=true' in WWW-Authenticate for invalid nonce, got %s", wwwAuth)
+	}
+}
+
+func TestGenerateNonce_Uniqueness(t *testing.T) {
+	auth, err := NewDigestAuthenticator("thisIsAVerySecureAPIKey123")
+	if err != nil {
+		t.Fatalf("Failed to create authenticator: %v", err)
+	}
+
+	nonces := make(map[string]bool)
+	for i := 0; i < 100; i++ {
+		nonce := auth.generateNonce()
+		if nonces[nonce] {
+			t.Errorf("Duplicate nonce generated: %s", nonce)
 		}
-		dk = append(dk, result...)
+		nonces[nonce] = true
+	}
+}
+
+func TestParseDigestAuth(t *testing.T) {
+	tests := []struct {
+		name     string
+		auth     string
+		expected map[string]string
+	}{
+		{
+			name: "standard digest auth",
+			auth: `username="admin", realm="test", nonce="abc123", uri="/test", response="xyz"`,
+			expected: map[string]string{
+				"username": "admin",
+				"realm":    "test",
+				"nonce":    "abc123",
+				"uri":      "/test",
+				"response": "xyz",
+			},
+		},
+		{
+			name: "with qop and nc",
+			auth: `username="admin", realm="test", nonce="abc", uri="/", response="xyz", qop=auth, nc=00000001, cnonce="client123"`,
+			expected: map[string]string{
+				"username": "admin",
+				"realm":    "test",
+				"nonce":    "abc",
+				"uri":      "/",
+				"response": "xyz",
+				"qop":      "auth",
+				"nc":       "00000001",
+				"cnonce":   "client123",
+			},
+		},
 	}
 
-	return dk[:keyLen]
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := parseDigestAuth(tt.auth)
+			for key, expected := range tt.expected {
+				if result[key] != expected {
+					t.Errorf("parseDigestAuth()[%s] = %q, want %q", key, result[key], expected)
+				}
+			}
+		})
+	}
+}
+
+func TestSha256Sum(t *testing.T) {
+	input := "test string"
+	expected := "d5579c46dfcc7f18207013e65b44e4cb4e2c2298f4ac457ba8f82743f31e930b"
+
+	result := sha256Sum(input)
+	if result != expected {
+		t.Errorf("sha256Sum(%q) = %q, want %q", input, result, expected)
+	}
+}
+
+// Helper functions
+
+func extractNonceFromWWWAuth(wwwAuth string) string {
+	// Parse: Digest realm="...", nonce="...", algorithm=SHA-256, qop="auth"
+	params := parseDigestAuth(strings.TrimPrefix(wwwAuth, "Digest "))
+	return params["nonce"]
+}
+
+func buildDigestAuth(username, password, nonce, uri, method string) string {
+	realm := digestRealm
+	cnonce := "abcdef123456"
+	nc := "00000001"
+	qop := "auth"
+
+	// A1 = username:realm:password
+	a1 := fmt.Sprintf("%s:%s:%s", username, realm, password)
+	a1Hash := computeSha256(a1)
+
+	// A2 = method:uri
+	a2 := fmt.Sprintf("%s:%s", method, uri)
+	a2Hash := computeSha256(a2)
+
+	// response = H(A1:nonce:nc:cnonce:qop:A2)
+	response := computeSha256(fmt.Sprintf("%s:%s:%s:%s:%s:%s",
+		a1Hash, nonce, nc, cnonce, qop, a2Hash))
+
+	return fmt.Sprintf(`Digest username="%s", realm="%s", nonce="%s", uri="%s", algorithm=SHA-256, qop=%s, nc=%s, cnonce="%s", response="%s"`,
+		username, realm, nonce, uri, qop, nc, cnonce, response)
+}
+
+func computeSha256(s string) string {
+	h := sha256.Sum256([]byte(s))
+	return hex.EncodeToString(h[:])
 }

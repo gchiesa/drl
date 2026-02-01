@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net"
+	"os"
 	"sync"
 	"time"
 
@@ -34,10 +35,22 @@ func NewCluster(cfg *config.Config, m *metrics.Metrics, logger *slog.Logger) *Cl
 
 // Start initializes and starts the memberlist cluster
 func (c *Cluster) Start() error {
+	// Get the actual container IP
+	hostname, _ := os.Hostname()
+	ips, _ := net.LookupIP(hostname)
+	var containerIP string
+	for _, ip := range ips {
+		if ipv4 := ip.To4(); ipv4 != nil {
+			containerIP = ipv4.String()
+			break
+		}
+	}
+
 	mlConfig := memberlist.DefaultLANConfig()
 	mlConfig.Name = c.config.NodeName
 	mlConfig.BindAddr = c.config.Membership.BindAddr
 	mlConfig.BindPort = c.config.Membership.Port
+	mlConfig.AdvertiseAddr = containerIP
 	mlConfig.AdvertisePort = c.config.Membership.Port
 
 	// Set up event delegate for membership events
