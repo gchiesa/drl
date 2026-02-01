@@ -47,7 +47,7 @@ services:
       retries: 3
       start_period: 10s
     deploy:
-      replicas: 1
+      replicas: 3
     environment:
       DRL_PRIVATE_API_KEY: "Test5ecretPrivateAPIKey!"
     networks:
