@@ -221,11 +221,16 @@ func (c *Cluster) Leave(timeout time.Duration) error {
 		return nil
 	}
 
+	if c.memberlist.NumMembers() == 1 {
+		if c.memberlist.Members()[0].Name == c.config.NodeName {
+			c.logger.Info("only member, not leaving anything")
+			return c.memberlist.Shutdown()
+		}
+	}
 	c.logger.Info("leaving cluster")
 	if err := c.memberlist.Leave(timeout); err != nil {
 		return fmt.Errorf("failed to leave cluster: %w", err)
 	}
-
 	return c.memberlist.Shutdown()
 }
 
