@@ -1,6 +1,3 @@
-//go:build testMembership
-// +build testMembership
-
 package membership
 
 import (
@@ -15,12 +12,21 @@ import (
 
 func TestNewCluster(t *testing.T) {
 	cfg := &config.Config{
-		NodeName:             "test-node",
-		BindAddr:             "127.0.0.1",
-		BindPort:             17946,
-		DiscoveryServiceName: "drl",
-		MetricsPort:          9091,
-		StartupDelay:         100 * time.Millisecond,
+		NodeName: "test-node",
+		Listen: config.ListenConfig{
+			GRPC:    ":8081",
+			Metrics: ":9091",
+		},
+		Membership: config.MembershipConfig{
+			ServiceName:  "drl",
+			Port:         17946,
+			BindAddr:     "127.0.0.1",
+			StartupDelay: 100 * time.Millisecond,
+		},
+		Logging: config.LoggingConfig{
+			Level:  "info",
+			Format: "json",
+		},
 	}
 	m := metrics.NewMetrics()
 	logger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelError}))
@@ -46,12 +52,21 @@ func TestNewCluster(t *testing.T) {
 
 func TestClusterStart(t *testing.T) {
 	cfg := &config.Config{
-		NodeName:             "test-node-start",
-		BindAddr:             "127.0.0.1",
-		BindPort:             17947,
-		DiscoveryServiceName: "invalid-service",
-		MetricsPort:          9091,
-		StartupDelay:         100 * time.Millisecond,
+		NodeName: "test-node-start",
+		Listen: config.ListenConfig{
+			GRPC:    ":8081",
+			Metrics: ":9091",
+		},
+		Membership: config.MembershipConfig{
+			ServiceName:  "invalid-service",
+			Port:         17947,
+			BindAddr:     "127.0.0.1",
+			StartupDelay: 100 * time.Millisecond,
+		},
+		Logging: config.LoggingConfig{
+			Level:  "debug",
+			Format: "json",
+		},
 	}
 	m := metrics.NewMetrics()
 	logger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelError}))
@@ -79,12 +94,21 @@ func TestClusterStart(t *testing.T) {
 
 func TestClusterIsReady(t *testing.T) {
 	cfg := &config.Config{
-		NodeName:             "test-node-ready",
-		BindAddr:             "127.0.0.1",
-		BindPort:             17948,
-		DiscoveryServiceName: "invalid-service",
-		MetricsPort:          9091,
-		StartupDelay:         100 * time.Millisecond,
+		NodeName: "test-node-ready",
+		Listen: config.ListenConfig{
+			GRPC:    ":8081",
+			Metrics: ":9091",
+		},
+		Membership: config.MembershipConfig{
+			ServiceName:  "invalid-service",
+			Port:         17948,
+			BindAddr:     "127.0.0.1",
+			StartupDelay: 100 * time.Millisecond,
+		},
+		Logging: config.LoggingConfig{
+			Level:  "info",
+			Format: "json",
+		},
 	}
 	m := metrics.NewMetrics()
 	logger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelError}))
@@ -118,12 +142,21 @@ func TestClusterIsReady(t *testing.T) {
 
 func TestClusterMembers(t *testing.T) {
 	cfg := &config.Config{
-		NodeName:             "test-node-members",
-		BindAddr:             "127.0.0.1",
-		BindPort:             17949,
-		DiscoveryServiceName: "invalid-service",
-		MetricsPort:          9091,
-		StartupDelay:         100 * time.Millisecond,
+		NodeName: "test-node-members",
+		Listen: config.ListenConfig{
+			GRPC:    ":8081",
+			Metrics: ":9091",
+		},
+		Membership: config.MembershipConfig{
+			ServiceName:  "invalid-service",
+			Port:         17949,
+			BindAddr:     "127.0.0.1",
+			StartupDelay: 100 * time.Millisecond,
+		},
+		Logging: config.LoggingConfig{
+			Level:  "info",
+			Format: "json",
+		},
 	}
 	m := metrics.NewMetrics()
 	logger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelError}))
@@ -150,12 +183,21 @@ func TestClusterMembers(t *testing.T) {
 
 func TestClusterLeave(t *testing.T) {
 	cfg := &config.Config{
-		NodeName:             "test-node-leave",
-		BindAddr:             "127.0.0.1",
-		BindPort:             17950,
-		DiscoveryServiceName: "invalid-service",
-		MetricsPort:          9091,
-		StartupDelay:         100 * time.Millisecond,
+		NodeName: "test-node-leave",
+		Listen: config.ListenConfig{
+			GRPC:    ":8081",
+			Metrics: ":9091",
+		},
+		Membership: config.MembershipConfig{
+			ServiceName:  "invalid-service",
+			Port:         17950,
+			BindAddr:     "127.0.0.1",
+			StartupDelay: 100 * time.Millisecond,
+		},
+		Logging: config.LoggingConfig{
+			Level:  "info",
+			Format: "json",
+		},
 	}
 	m := metrics.NewMetrics()
 	logger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelError}))
@@ -176,6 +218,20 @@ func TestClusterLeave(t *testing.T) {
 func TestClusterLeaveWithoutStart(t *testing.T) {
 	cfg := &config.Config{
 		NodeName: "test-node-leave-no-start",
+		Listen: config.ListenConfig{
+			GRPC:    ":8081",
+			Metrics: ":9091",
+		},
+		Membership: config.MembershipConfig{
+			ServiceName:  "drl",
+			Port:         7946,
+			BindAddr:     "0.0.0.0",
+			StartupDelay: 100 * time.Millisecond,
+		},
+		Logging: config.LoggingConfig{
+			Level:  "info",
+			Format: "json",
+		},
 	}
 	m := metrics.NewMetrics()
 	logger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelError}))

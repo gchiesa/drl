@@ -221,11 +221,16 @@ func (c *Cluster) Leave(timeout time.Duration) error {
 		return nil
 	}
 
+	if c.memberlist.NumMembers() == 1 {
+		if c.memberlist.Members()[0].Name == c.config.NodeName {
+			c.logger.Info("only member, not leaving anything")
+			return c.memberlist.Shutdown()
+		}
+	}
 	c.logger.Info("leaving cluster")
 	if err := c.memberlist.Leave(timeout); err != nil {
 		return fmt.Errorf("failed to leave cluster: %w", err)
 	}
-
 	return c.memberlist.Shutdown()
 }
 
@@ -241,7 +246,9 @@ func (e *eventDelegate) NotifyJoin(node *memberlist.Node) {
 		"node_addr", node.Addr.String(),
 	)
 	e.cluster.metrics.IncEvent("join")
-	e.cluster.updateClusterSize()
+	// Run updateClusterSize asynchronously to avoid blocking memberlist's internal operations.
+	// Calling memberlist methods from within event callbacks can cause deadlock/contention.
+	go e.cluster.updateClusterSize()
 }
 
 func (e *eventDelegate) NotifyLeave(node *memberlist.Node) {
@@ -250,7 +257,8 @@ func (e *eventDelegate) NotifyLeave(node *memberlist.Node) {
 		"node_addr", node.Addr.String(),
 	)
 	e.cluster.metrics.IncEvent("leave")
-	e.cluster.updateClusterSize()
+	// Run updateClusterSize asynchronously to avoid blocking memberlist's internal operations.
+	go e.cluster.updateClusterSize()
 }
 
 func (e *eventDelegate) NotifyUpdate(node *memberlist.Node) {
