@@ -47,7 +47,7 @@ traffic:
 
 * **Full State Sync**: On startup, the node performs a TCP Push/Pull sync with existing peers via the Memberlist
   Delegate interface.
-* **Merge Strategy**: The node hydates its local cache with the received Blocklist data.
+* **Merge Strategy**: The node hydates its local cache with the received Blocklist Data.
 * **Readiness**: The node only reports Ready to serve reequests after the initial state transfer is complete.
 
 ## Shutdown

@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/gchiesa/drl/internal/api"
+	"github.com/gchiesa/drl/internal/cache"
 	"github.com/gchiesa/drl/internal/config"
 	"github.com/gchiesa/drl/internal/membership"
 	"github.com/gchiesa/drl/internal/metrics"
@@ -49,6 +50,8 @@ func main() {
 		"membership_service", cfg.Membership.ServiceName,
 		"membership_port", cfg.Membership.Port,
 		"log_level", cfg.Logging.Level,
+		"cache_blocklist_size_mb", cfg.Cache.BlocklistSizeMB,
+		"cache_accounting_size_mb", cfg.Cache.AccountingSizeMB,
 	)
 
 	// Initialize metrics
@@ -59,10 +62,60 @@ func main() {
 	}
 	logger.Info("metrics server started", "port", cfg.MetricsPort())
 
-	// Initialize and start cluster membership
+	// Initialize cache manager
+	cacheManager, err := cache.NewManager(cache.ManagerConfig{
+		BlocklistSizeMB:  cfg.Cache.BlocklistSizeMB,
+		AccountingSizeMB: cfg.Cache.AccountingSizeMB,
+		LocalNode:        cfg.NodeName,
+		WindowSize:       time.Minute, // Rate limiting window
+		Logger:           logger,
+		// Connect metrics callbacks
+		OnBlocklistHit: func() {
+			m.IncCacheHit(metrics.CacheTypeBlocklist)
+		},
+		OnBlocklistMiss: func() {
+			m.IncCacheMiss(metrics.CacheTypeBlocklist)
+		},
+		OnBlocklistEvict: func() {
+			m.IncCacheEviction(metrics.CacheTypeBlocklist)
+		},
+		OnAccountingHit: func() {
+			m.IncCacheHit(metrics.CacheTypeAccounting)
+		},
+		OnAccountingMiss: func() {
+			m.IncCacheMiss(metrics.CacheTypeAccounting)
+		},
+		OnAccountingEvict: func() {
+			m.IncCacheEviction(metrics.CacheTypeAccounting)
+		},
+	})
+	if err != nil {
+		logger.Error("failed to create cache manager", "error", err)
+		os.Exit(1)
+	}
+	logger.Info("cache manager initialized",
+		"blocklist_size_mb", cfg.Cache.BlocklistSizeMB,
+		"accounting_size_mb", cfg.Cache.AccountingSizeMB,
+	)
+
+	// Create state delegate for blocklist sync
+	stateDelegate := membership.NewStateDelegate(membership.DelegateConfig{
+		Blocklist:   cacheManager.Blocklist,
+		Metrics:     m,
+		Logger:      logger,
+		SyncTimeout: time.Duration(cfg.Cache.SyncTimeoutSeconds) * time.Second,
+	})
+
+	// Initialize cluster membership
 	cluster := membership.NewCluster(cfg, m, logger)
+
+	// Set state delegate before starting the cluster
+	cluster.SetStateDelegate(stateDelegate)
+
+	// Start the cluster
 	if err := cluster.Start(); err != nil {
 		logger.Error("failed to start cluster", "error", err)
+		cacheManager.Close()
 		os.Exit(1)
 	}
 
@@ -71,6 +124,9 @@ func main() {
 		if err := cluster.JoinCluster(); err != nil {
 			logger.Error("failed to join cluster", "error", err)
 		}
+
+		// Update accounting cache with cluster member addresses
+		cacheManager.UpdateNodes(cluster.MemberAddrs())
 	}()
 
 	// Initialize internal API if enabled
@@ -79,6 +135,7 @@ func main() {
 		// Validate API key
 		if err := config.ValidatePrivateAPIKey(); err != nil {
 			logger.Error("internal API configuration error", "error", err)
+			cacheManager.Close()
 			os.Exit(1)
 		}
 
@@ -93,11 +150,13 @@ func main() {
 		})
 		if err != nil {
 			logger.Error("failed to create internal API server", "error", err)
+			cacheManager.Close()
 			os.Exit(1)
 		}
 
 		if err := apiServer.Start(); err != nil {
 			logger.Error("failed to start internal API server", "error", err)
+			cacheManager.Close()
 			os.Exit(1)
 		}
 		logger.Info("internal API server started", "address", cfg.InternalAPI.Address)
@@ -125,6 +184,9 @@ func main() {
 	if err := cluster.Leave(5 * time.Second); err != nil {
 		logger.Error("failed to leave cluster gracefully", "error", err)
 	}
+
+	// Close cache manager
+	cacheManager.Close()
 
 	if err := m.Stop(); err != nil {
 		logger.Error("failed to stop metrics server", "error", err)

@@ -19,6 +19,26 @@ func TestNewMetrics(t *testing.T) {
 		t.Error("EventsTotal counter should not be nil")
 	}
 
+	if m.CacheHitsTotal == nil {
+		t.Error("CacheHitsTotal counter should not be nil")
+	}
+
+	if m.CacheMissesTotal == nil {
+		t.Error("CacheMissesTotal counter should not be nil")
+	}
+
+	if m.CacheEvictionsTotal == nil {
+		t.Error("CacheEvictionsTotal counter should not be nil")
+	}
+
+	if m.CacheMemoryBytes == nil {
+		t.Error("CacheMemoryBytes gauge should not be nil")
+	}
+
+	if m.SyncDurationSeconds == nil {
+		t.Error("SyncDurationSeconds histogram should not be nil")
+	}
+
 	if m.registry == nil {
 		t.Error("registry should not be nil")
 	}
@@ -41,12 +61,43 @@ func TestIncEvent(t *testing.T) {
 	m.IncEvent("fail")
 }
 
+func TestCacheMetrics(t *testing.T) {
+	m := NewMetrics()
+
+	// Test cache hit metrics
+	m.IncCacheHit(CacheTypeBlocklist)
+	m.IncCacheHit(CacheTypeAccounting)
+
+	// Test cache miss metrics
+	m.IncCacheMiss(CacheTypeBlocklist)
+	m.IncCacheMiss(CacheTypeAccounting)
+
+	// Test cache eviction metrics
+	m.IncCacheEviction(CacheTypeBlocklist)
+	m.IncCacheEviction(CacheTypeAccounting)
+
+	// Test cache memory metrics
+	m.SetCacheMemory(CacheTypeBlocklist, 1024*1024)
+	m.SetCacheMemory(CacheTypeAccounting, 2048*1024)
+
+	// Test sync duration
+	m.ObserveSyncDuration(0.5)
+	m.ObserveSyncDuration(1.2)
+}
+
 func TestStartServer(t *testing.T) {
 	m := NewMetrics()
 
 	// Set some metric values so they appear in output
 	m.SetClusterSize(3)
 	m.IncEvent("join")
+
+	// Set cache metrics so they appear in output
+	m.IncCacheHit(CacheTypeBlocklist)
+	m.IncCacheMiss(CacheTypeBlocklist)
+	m.IncCacheEviction(CacheTypeBlocklist)
+	m.SetCacheMemory(CacheTypeBlocklist, 1024)
+	m.ObserveSyncDuration(0.1)
 
 	// Use a random high port to avoid conflicts
 	port := 19091
@@ -102,6 +153,27 @@ func TestStartServer(t *testing.T) {
 
 	if !strings.Contains(metricsStr, "drl_membership_events_total") {
 		t.Error("expected drl_membership_events_total metric in output")
+	}
+
+	// Verify cache metrics are exposed
+	if !strings.Contains(metricsStr, "drl_cache_hits_total") {
+		t.Error("expected drl_cache_hits_total metric in output")
+	}
+
+	if !strings.Contains(metricsStr, "drl_cache_misses_total") {
+		t.Error("expected drl_cache_misses_total metric in output")
+	}
+
+	if !strings.Contains(metricsStr, "drl_cache_evictions_total") {
+		t.Error("expected drl_cache_evictions_total metric in output")
+	}
+
+	if !strings.Contains(metricsStr, "drl_cache_memory_bytes") {
+		t.Error("expected drl_cache_memory_bytes metric in output")
+	}
+
+	if !strings.Contains(metricsStr, "drl_sync_duration_seconds") {
+		t.Error("expected drl_sync_duration_seconds metric in output")
 	}
 }
 

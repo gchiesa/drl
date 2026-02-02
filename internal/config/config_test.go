@@ -35,6 +35,9 @@ func TestLoad_DefaultsOnly(t *testing.T) {
 	assert.Equal(t, "json", cfg.Logging.Format)
 	assert.True(t, cfg.InternalAPI.Enabled)
 	assert.Equal(t, ":8082", cfg.InternalAPI.Address)
+	assert.Equal(t, int64(64), cfg.Cache.BlocklistSizeMB)
+	assert.Equal(t, int64(128), cfg.Cache.AccountingSizeMB)
+	assert.Equal(t, 30, cfg.Cache.SyncTimeoutSeconds)
 
 	// NodeName should be set to hostname when not specified
 	hostname, _ := os.Hostname()
@@ -235,6 +238,11 @@ func TestValidate_ValidConfig(t *testing.T) {
 			Level:  "info",
 			Format: "json",
 		},
+		Cache: CacheConfig{
+			BlocklistSizeMB:    64,
+			AccountingSizeMB:   128,
+			SyncTimeoutSeconds: 30,
+		},
 	}
 
 	err := cfg.Validate()
@@ -255,6 +263,11 @@ func TestValidate_EmptyServiceName(t *testing.T) {
 		Logging: LoggingConfig{
 			Level:  "info",
 			Format: "json",
+		},
+		Cache: CacheConfig{
+			BlocklistSizeMB:    64,
+			AccountingSizeMB:   128,
+			SyncTimeoutSeconds: 30,
 		},
 	}
 
@@ -289,6 +302,11 @@ func TestValidate_InvalidPort(t *testing.T) {
 				Logging: LoggingConfig{
 					Level:  "info",
 					Format: "json",
+				},
+				Cache: CacheConfig{
+					BlocklistSizeMB:    64,
+					AccountingSizeMB:   128,
+					SyncTimeoutSeconds: 30,
 				},
 			}
 
@@ -327,6 +345,11 @@ func TestValidate_ValidPortBoundaries(t *testing.T) {
 					Level:  "info",
 					Format: "json",
 				},
+				Cache: CacheConfig{
+					BlocklistSizeMB:    64,
+					AccountingSizeMB:   128,
+					SyncTimeoutSeconds: 30,
+				},
 			}
 
 			err := cfg.Validate()
@@ -350,6 +373,11 @@ func TestValidate_EmptyBindAddr(t *testing.T) {
 			Level:  "info",
 			Format: "json",
 		},
+		Cache: CacheConfig{
+			BlocklistSizeMB:    64,
+			AccountingSizeMB:   128,
+			SyncTimeoutSeconds: 30,
+		},
 	}
 
 	err := cfg.Validate()
@@ -372,6 +400,11 @@ func TestValidate_EmptyGRPC(t *testing.T) {
 			Level:  "info",
 			Format: "json",
 		},
+		Cache: CacheConfig{
+			BlocklistSizeMB:    64,
+			AccountingSizeMB:   128,
+			SyncTimeoutSeconds: 30,
+		},
 	}
 
 	err := cfg.Validate()
@@ -393,6 +426,11 @@ func TestValidate_EmptyMetrics(t *testing.T) {
 		Logging: LoggingConfig{
 			Level:  "info",
 			Format: "json",
+		},
+		Cache: CacheConfig{
+			BlocklistSizeMB:    64,
+			AccountingSizeMB:   128,
+			SyncTimeoutSeconds: 30,
 		},
 	}
 
@@ -419,6 +457,11 @@ func TestValidate_InvalidLogLevel(t *testing.T) {
 				Logging: LoggingConfig{
 					Level:  level,
 					Format: "json",
+				},
+				Cache: CacheConfig{
+					BlocklistSizeMB:    64,
+					AccountingSizeMB:   128,
+					SyncTimeoutSeconds: 30,
 				},
 			}
 
@@ -448,6 +491,11 @@ func TestValidate_ValidLogLevels(t *testing.T) {
 					Level:  level,
 					Format: "json",
 				},
+				Cache: CacheConfig{
+					BlocklistSizeMB:    64,
+					AccountingSizeMB:   128,
+					SyncTimeoutSeconds: 30,
+				},
 			}
 
 			err := cfg.Validate()
@@ -474,6 +522,11 @@ func TestValidate_InvalidLogFormat(t *testing.T) {
 				Logging: LoggingConfig{
 					Level:  "info",
 					Format: format,
+				},
+				Cache: CacheConfig{
+					BlocklistSizeMB:    64,
+					AccountingSizeMB:   128,
+					SyncTimeoutSeconds: 30,
 				},
 			}
 
@@ -503,6 +556,11 @@ func TestValidate_ValidLogFormats(t *testing.T) {
 					Level:  "info",
 					Format: format,
 				},
+				Cache: CacheConfig{
+					BlocklistSizeMB:    64,
+					AccountingSizeMB:   128,
+					SyncTimeoutSeconds: 30,
+				},
 			}
 
 			err := cfg.Validate()
@@ -526,6 +584,11 @@ func TestValidate_MultipleErrors(t *testing.T) {
 			Level:  "invalid",
 			Format: "invalid",
 		},
+		Cache: CacheConfig{
+			BlocklistSizeMB:    0,
+			AccountingSizeMB:   0,
+			SyncTimeoutSeconds: 0,
+		},
 	}
 
 	err := cfg.Validate()
@@ -539,6 +602,58 @@ func TestValidate_MultipleErrors(t *testing.T) {
 	assert.Contains(t, err.Error(), "listen.metrics cannot be empty")
 	assert.Contains(t, err.Error(), "logging.level must be one of")
 	assert.Contains(t, err.Error(), "logging.format must be one of")
+	assert.Contains(t, err.Error(), "cache.blocklist-size-mb must be at least 1 MB")
+	assert.Contains(t, err.Error(), "cache.accounting-size-mb must be at least 1 MB")
+	assert.Contains(t, err.Error(), "cache.sync-timeout-seconds must be at least 1")
+}
+
+func TestValidate_InvalidCacheConfig(t *testing.T) {
+	tests := []struct {
+		name     string
+		cache    CacheConfig
+		errorMsg string
+	}{
+		{
+			name:     "blocklist size zero",
+			cache:    CacheConfig{BlocklistSizeMB: 0, AccountingSizeMB: 64, SyncTimeoutSeconds: 30},
+			errorMsg: "cache.blocklist-size-mb must be at least 1 MB",
+		},
+		{
+			name:     "accounting size zero",
+			cache:    CacheConfig{BlocklistSizeMB: 64, AccountingSizeMB: 0, SyncTimeoutSeconds: 30},
+			errorMsg: "cache.accounting-size-mb must be at least 1 MB",
+		},
+		{
+			name:     "sync timeout zero",
+			cache:    CacheConfig{BlocklistSizeMB: 64, AccountingSizeMB: 128, SyncTimeoutSeconds: 0},
+			errorMsg: "cache.sync-timeout-seconds must be at least 1",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cfg := &Config{
+				Listen: ListenConfig{
+					GRPC:    ":8081",
+					Metrics: ":9091",
+				},
+				Membership: MembershipConfig{
+					ServiceName: "drl",
+					Port:        7946,
+					BindAddr:    "0.0.0.0",
+				},
+				Logging: LoggingConfig{
+					Level:  "info",
+					Format: "json",
+				},
+				Cache: tt.cache,
+			}
+
+			err := cfg.Validate()
+			assert.Error(t, err)
+			assert.Contains(t, err.Error(), tt.errorMsg)
+		})
+	}
 }
 
 func TestMetricsPort_StandardPort(t *testing.T) {
@@ -760,6 +875,9 @@ func clearEnvVars(t *testing.T) {
 		"DRL_INTERNAL_API_ENABLED",
 		"DRL_INTERNAL_API_ADDRESS",
 		"DRL_PRIVATE_API_KEY",
+		"DRL_CACHE_BLOCKLIST_SIZE_MB",
+		"DRL_CACHE_ACCOUNTING_SIZE_MB",
+		"DRL_CACHE_SYNC_TIMEOUT_SECONDS",
 	}
 
 	for _, env := range envVars {

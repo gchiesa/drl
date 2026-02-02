@@ -16,12 +16,13 @@ import (
 
 // Cluster manages the memberlist cluster membership
 type Cluster struct {
-	config     *config.Config
-	memberlist *memberlist.Memberlist
-	metrics    *metrics.Metrics
-	logger     *slog.Logger
-	mu         sync.RWMutex
-	ready      bool
+	config        *config.Config
+	memberlist    *memberlist.Memberlist
+	metrics       *metrics.Metrics
+	logger        *slog.Logger
+	stateDelegate *StateDelegate
+	mu            sync.RWMutex
+	ready         bool
 }
 
 // NewCluster creates a new Cluster instance
@@ -31,6 +32,20 @@ func NewCluster(cfg *config.Config, m *metrics.Metrics, logger *slog.Logger) *Cl
 		metrics: m,
 		logger:  logger,
 	}
+}
+
+// SetStateDelegate sets the state delegate for state synchronization
+func (c *Cluster) SetStateDelegate(delegate *StateDelegate) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.stateDelegate = delegate
+}
+
+// GetStateDelegate returns the state delegate
+func (c *Cluster) GetStateDelegate() *StateDelegate {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	return c.stateDelegate
 }
 
 // Start initializes and starts the memberlist cluster
@@ -54,6 +69,13 @@ func (c *Cluster) Start() error {
 		cluster: c,
 		logger:  c.logger,
 	}
+
+	// Set up state delegate for Push/Pull state sync if available
+	c.mu.RLock()
+	if c.stateDelegate != nil {
+		mlConfig.Delegate = c.stateDelegate
+	}
+	c.mu.RUnlock()
 
 	// Reduce logging noise from the memberlist
 	mlConfig.LogOutput = &slogWriter{logger: c.logger.With("component", "memberlist")}
@@ -95,7 +117,7 @@ func (c *Cluster) JoinCluster() error {
 			"service_name", c.config.Membership.ServiceName,
 		)
 		// Not fatal - we might be the first node
-		c.setReady(true)
+		c.markReady()
 		return nil
 	}
 
@@ -116,7 +138,7 @@ func (c *Cluster) JoinCluster() error {
 
 	if len(peersToJoin) == 0 {
 		c.logger.Info("no peers to join, starting as first node")
-		c.setReady(true)
+		c.markReady()
 		return nil
 	}
 
@@ -136,9 +158,33 @@ func (c *Cluster) JoinCluster() error {
 	)
 
 	c.updateClusterSize()
-	c.setReady(true)
+
+	// Wait for state sync if delegate is configured
+	c.mu.RLock()
+	delegate := c.stateDelegate
+	c.mu.RUnlock()
+
+	if delegate != nil && numJoined > 0 {
+		// Wait for state sync to complete
+		delegate.WaitForSync()
+	} else {
+		// No delegate or no peers joined, mark as ready immediately
+		c.markReady()
+	}
 
 	return nil
+}
+
+// markReady marks the cluster as ready, handling both delegate and non-delegate cases
+func (c *Cluster) markReady() {
+	c.mu.Lock()
+	c.ready = true
+	delegate := c.stateDelegate
+	c.mu.Unlock()
+
+	if delegate != nil {
+		delegate.MarkReady()
+	}
 }
 
 // discoverPeers resolves the discovery service name to get peer IPs
@@ -177,18 +223,18 @@ func (c *Cluster) updateClusterSize() {
 	)
 }
 
-// setReady marks the cluster as ready
-func (c *Cluster) setReady(ready bool) {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	c.ready = ready
-}
-
 // IsReady returns whether the cluster is ready to serve requests
 func (c *Cluster) IsReady() bool {
 	c.mu.RLock()
-	defer c.mu.RUnlock()
-	return c.ready
+	delegate := c.stateDelegate
+	ready := c.ready
+	c.mu.RUnlock()
+
+	// If we have a delegate, check its readiness
+	if delegate != nil {
+		return delegate.IsReady()
+	}
+	return ready
 }
 
 // Members returns the list of current cluster members
@@ -209,6 +255,16 @@ func (c *Cluster) MemberNames() []string {
 		names[i] = m.Name
 	}
 	return names
+}
+
+// MemberAddrs returns the addresses of all cluster members
+func (c *Cluster) MemberAddrs() []string {
+	members := c.memberlist.Members()
+	addrs := make([]string, len(members))
+	for i, m := range members {
+		addrs[i] = m.Addr.String()
+	}
+	return addrs
 }
 
 // Leave gracefully leaves the cluster
