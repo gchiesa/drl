@@ -288,7 +288,7 @@ func TestStatusEndpoint_NilCluster(t *testing.T) {
 // Helper functions for api_test.go
 
 func extractNonceFromHeader(wwwAuth string) string {
-	params := parseDigestAuth(strings.TrimPrefix(wwwAuth, "Digest "))
+	params := parseDigestAuth(wwwAuth)
 	return params["nonce"]
 }
 

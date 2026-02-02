@@ -10,6 +10,8 @@ import (
 	"time"
 
 	"github.com/gofiber/fiber/v2"
+	"github.com/huandu/xstrings"
+	"github.com/samber/lo"
 )
 
 const (
@@ -19,7 +21,7 @@ const (
 	digestRealm = "DRL Internal API"
 	// digestUsername is the fixed username for internal API authentication
 	digestUsername = "admin"
-	// nonceValidityDuration is how long a nonce is valid
+	// nonceValidityDuration is how long nonce is valid
 	nonceValidityDuration = 5 * time.Minute
 	// nonceLength is the length of the random nonce
 	nonceLength = 32
@@ -28,8 +30,8 @@ const (
 // DigestAuthenticator handles HTTP Digest authentication with SHA-256
 type DigestAuthenticator struct {
 	mu sync.RWMutex
-	// a1Hash stores H(username:realm:password) - never the raw password
-	a1Hash string
+	// hashedCredentials stores H(username:realm:password) - never the raw password
+	hashedCredentials string
 	// nonceStore tracks issued nonces and their creation time
 	nonceStore map[string]time.Time
 }
@@ -39,21 +41,20 @@ func NewDigestAuthenticator(apiKey string) (*DigestAuthenticator, error) {
 	if len(apiKey) < MinAPIKeyLength {
 		return nil, fmt.Errorf("API key must be at least %d characters", MinAPIKeyLength)
 	}
-
-	// Compute A1 hash: H(username:realm:password)
+	// Calculate the hashedCredentials
 	// This ensures the raw API key is never stored in memory after initialization
-	a1 := fmt.Sprintf("%s:%s:%s", digestUsername, digestRealm, apiKey)
-	a1Hash := sha256Sum(a1)
+	credentials := fmt.Sprintf("%s:%s:%s", digestUsername, digestRealm, apiKey)
 
 	return &DigestAuthenticator{
-		a1Hash:     a1Hash,
-		nonceStore: make(map[string]time.Time),
+		hashedCredentials: sha256Sum(credentials),
+		nonceStore:        make(map[string]time.Time),
 	}, nil
 }
 
-// Middleware returns a Fiber middleware for Digest authentication
+// Middleware creates the middleware for Digest authentication for Fiber
 func (a *DigestAuthenticator) Middleware() fiber.Handler {
 	return func(c *fiber.Ctx) error {
+		// get the Header for authorization digest
 		auth := c.Get("Authorization")
 		if auth == "" {
 			return a.sendChallenge(c)
@@ -65,7 +66,7 @@ func (a *DigestAuthenticator) Middleware() fiber.Handler {
 		}
 
 		// Parse the Digest response
-		params := parseDigestAuth(strings.TrimPrefix(auth, "Digest "))
+		params := parseDigestAuth(auth)
 
 		// Validate required parameters
 		if params["username"] == "" || params["realm"] == "" ||
@@ -96,7 +97,7 @@ func (a *DigestAuthenticator) Middleware() fiber.Handler {
 		// Compute expected response
 		// A1 = username:realm:password (we have its hash stored)
 		// A2 = method:uri
-		method := string(c.Method())
+		method := c.Method()
 		uri := params["uri"]
 		a2 := fmt.Sprintf("%s:%s", method, uri)
 		a2Hash := sha256Sum(a2)
@@ -110,11 +111,11 @@ func (a *DigestAuthenticator) Middleware() fiber.Handler {
 				return a.sendChallenge(c)
 			}
 			expectedResponse = sha256Sum(fmt.Sprintf("%s:%s:%s:%s:%s:%s",
-				a.a1Hash, params["nonce"], nc, cnonce, params["qop"], a2Hash))
+				a.hashedCredentials, params["nonce"], nc, cnonce, params["qop"], a2Hash))
 		} else {
 			// response = H(A1:nonce:A2) - RFC 2617 compatible
 			expectedResponse = sha256Sum(fmt.Sprintf("%s:%s:%s",
-				a.a1Hash, params["nonce"], a2Hash))
+				a.hashedCredentials, params["nonce"], a2Hash))
 		}
 
 		// Verify response
@@ -196,62 +197,28 @@ func (a *DigestAuthenticator) cleanupExpiredNonces() {
 	}
 }
 
-// parseDigestAuth parses a Digest authorization header value
+// parseDigestAuth parses a Digest authorization header value into a map of
+// parameters Header is in the form:
+// ```
+// Authorization: Digest username="admin",
+// realm="Access Restricted", nonce="dcd98b7102dd2f0e8b11d0f600bfb0c0",
+// uri="/index.html", qop=auth, nc=00000001, cnonce="0a4f113b",
+// response="6629fae49393a05397450978507c4ef1",
+// opaque="5ccc069c403ebaf9f0171e9517f40e41"
+// ```
 func parseDigestAuth(auth string) map[string]string {
-	params := make(map[string]string)
+	// Remove the initial `Digest`
+	auth = strings.TrimPrefix(auth, "Digest ")
 
-	// Split by comma, but be careful with quoted strings
-	parts := splitDigestParams(auth)
-
-	for _, part := range parts {
-		part = strings.TrimSpace(part)
-		idx := strings.Index(part, "=")
-		if idx == -1 {
-			continue
-		}
-
-		key := strings.TrimSpace(part[:idx])
-		value := strings.TrimSpace(part[idx+1:])
-
-		// Remove quotes if present
-		if len(value) >= 2 && value[0] == '"' && value[len(value)-1] == '"' {
-			value = value[1 : len(value)-1]
-		}
-
-		params[key] = value
-	}
-
-	return params
-}
-
-// splitDigestParams splits Digest auth parameters handling quoted commas
-func splitDigestParams(auth string) []string {
-	var parts []string
-	var current strings.Builder
-	inQuotes := false
-
-	for _, ch := range auth {
-		switch ch {
-		case '"':
-			inQuotes = !inQuotes
-			current.WriteRune(ch)
-		case ',':
-			if inQuotes {
-				current.WriteRune(ch)
-			} else {
-				parts = append(parts, current.String())
-				current.Reset()
-			}
-		default:
-			current.WriteRune(ch)
-		}
-	}
-
-	if current.Len() > 0 {
-		parts = append(parts, current.String())
-	}
-
-	return parts
+	parts := lo.Map(strings.Split(auth, ","), func(s string, _ int) string {
+		return strings.Trim(s, " ")
+	})
+	digestParams := lo.SliceToMap(parts, func(part string) (key, value string) {
+		// e.g. username="admin"
+		key, _, value = xstrings.Partition(part, "=")
+		return key, strings.TrimPrefix(strings.TrimSuffix(value, `"`), `"`)
+	})
+	return digestParams
 }
 
 // sha256Sum computes the SHA-256 hash of a string and returns hex-encoded result
