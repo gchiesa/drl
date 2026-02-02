@@ -600,7 +600,7 @@ func TestGetPrivateAPIKey_Set(t *testing.T) {
 }
 
 func TestGetPrivateAPIKey_NotSet(t *testing.T) {
-	os.Unsetenv("DRL_PRIVATE_API_KEY")
+	_ = os.Unsetenv("DRL_PRIVATE_API_KEY")
 
 	key, exists := GetPrivateAPIKey()
 	assert.False(t, exists)
@@ -623,7 +623,7 @@ func TestValidatePrivateAPIKey_Valid(t *testing.T) {
 }
 
 func TestValidatePrivateAPIKey_NotSet(t *testing.T) {
-	os.Unsetenv("DRL_PRIVATE_API_KEY")
+	_ = os.Unsetenv("DRL_PRIVATE_API_KEY")
 
 	err := ValidatePrivateAPIKey()
 	assert.Error(t, err)
@@ -763,6 +763,6 @@ func clearEnvVars(t *testing.T) {
 	}
 
 	for _, env := range envVars {
-		os.Unsetenv(env)
+		_ = os.Unsetenv(env)
 	}
 }
