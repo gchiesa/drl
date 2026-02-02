@@ -1,0 +1,73 @@
+# Milestone 005: Distributed Cache - COMPLETED
+
+## Summary
+Implemented a dual-purpose, memory-bound caching layer to handle global blocklists (fully replicated) and shadow accounting (partitioned).
+
+## Implementation Details
+
+### 1. Dual-Cache Architecture (Ristretto)
+- **Blocklist Cache** (`internal/cache/blocklist.go`): Fully replicated in-memory store for banned IPs
+  - Configurable max size via `cache.blocklist_size_mb`
+  - TTL-based expiration
+  - Serialization support for state sync via MessagePack
+
+- **Accounting Cache** (`internal/cache/accounting.go`): Partitioned store for request counters
+  - Uses consistent hashing (buraksezer/consistent with xxhash) for IP ownership
+  - Configurable via `cache.accounting_size_mb`
+  - Window-based counter expiration
+
+- **Cache Manager** (`internal/cache/manager.go`): Unified interface for both caches
+
+### 2. Warm Bootstrapping (State Sync)
+- **StateDelegate** (`internal/membership/delegate.go`): Implements `memberlist.Delegate` interface
+  - `LocalState()`: Serializes blocklist for transfer using MessagePack
+  - `MergeRemoteState()`: Merges received state into local blocklist
+  - Readiness gate with configurable timeout (default 30s)
+
+### 3. Observability & Metrics
+Added to `internal/metrics/metrics.go`:
+- `drl_cache_hits_total`: Counter by cache_type (blocklist/accounting)
+- `drl_cache_misses_total`: Counter by cache_type
+- `drl_cache_evictions_total`: Counter by cache_type
+- `drl_cache_memory_bytes`: Gauge by cache_type
+- `drl_sync_duration_seconds`: Histogram for state sync duration
+
+### 4. Configuration
+Added to KDL configuration:
+```kdl
+cache {
+    blocklist-size-mb 64
+    accounting-size-mb 128
+    sync-timeout-seconds 30
+}
+```
+
+### 5. Dependencies Added
+- github.com/dgraph-io/ristretto/v2 - High-performance cache
+- github.com/buraksezer/consistent - Consistent hashing
+- github.com/vmihailenco/msgpack/v5 - Efficient serialization
+
+## Test Coverage
+- `internal/cache/blocklist_test.go`: Comprehensive blocklist tests
+- `internal/cache/accounting_test.go`: Accounting cache and hash ring tests
+- `internal/cache/manager_test.go`: Integration tests
+- `internal/membership/delegate_test.go`: State sync delegate tests
+
+## Files Changed/Added
+- internal/cache/blocklist.go (NEW)
+- internal/cache/accounting.go (NEW)
+- internal/cache/manager.go (NEW)
+- internal/cache/blocklist_test.go (NEW)
+- internal/cache/accounting_test.go (NEW)
+- internal/cache/manager_test.go (NEW)
+- internal/membership/delegate.go (NEW)
+- internal/membership/delegate_test.go (NEW)
+- internal/membership/membership.go (MODIFIED)
+- internal/metrics/metrics.go (MODIFIED)
+- internal/metrics/metrics_test.go (MODIFIED)
+- internal/config/config.go (MODIFIED)
+- internal/config/config_test.go (MODIFIED)
+- internal/config/resources/default.kdl (MODIFIED)
+- main.go (MODIFIED)
+- go.mod (MODIFIED)
+- mise.toml (MODIFIED)

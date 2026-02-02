@@ -37,6 +37,9 @@ type Config struct {
 
 	// InternalAPI configuration
 	InternalAPI InternalAPIConfig `kdl:"internal-api" envPrefix:"DRL_INTERNAL_API_"`
+
+	// Cache configuration
+	Cache CacheConfig `kdl:"cache" envPrefix:"DRL_CACHE_"`
 }
 
 // ListenConfig holds listener configuration
@@ -73,6 +76,16 @@ type InternalAPIConfig struct {
 	Enabled bool `kdl:"enabled" env:"ENABLED"`
 	// Address is the address for the internal API server
 	Address string `kdl:"address" env:"ADDRESS"`
+}
+
+// CacheConfig holds cache configuration
+type CacheConfig struct {
+	// BlocklistSizeMB is the maximum size in MB for the blocklist cache
+	BlocklistSizeMB int64 `kdl:"blocklist-size-mb" env:"BLOCKLIST_SIZE_MB"`
+	// AccountingSizeMB is the maximum size in MB for the accounting cache
+	AccountingSizeMB int64 `kdl:"accounting-size-mb" env:"ACCOUNTING_SIZE_MB"`
+	// SyncTimeoutSeconds is the timeout in seconds for initial state sync
+	SyncTimeoutSeconds int `kdl:"sync-timeout-seconds" env:"SYNC_TIMEOUT_SECONDS"`
 }
 
 func NewConfig() *Config {
@@ -170,6 +183,17 @@ func (c *Config) Validate() error {
 	validFormats := map[string]bool{"json": true, "text": true}
 	if !validFormats[strings.ToLower(c.Logging.Format)] {
 		errs = append(errs, fmt.Sprintf("logging.format must be one of json, text; got %s", c.Logging.Format))
+	}
+
+	// Validate cache
+	if c.Cache.BlocklistSizeMB < 1 {
+		errs = append(errs, fmt.Sprintf("cache.blocklist-size-mb must be at least 1 MB, got %d", c.Cache.BlocklistSizeMB))
+	}
+	if c.Cache.AccountingSizeMB < 1 {
+		errs = append(errs, fmt.Sprintf("cache.accounting-size-mb must be at least 1 MB, got %d", c.Cache.AccountingSizeMB))
+	}
+	if c.Cache.SyncTimeoutSeconds < 1 {
+		errs = append(errs, fmt.Sprintf("cache.sync-timeout-seconds must be at least 1, got %d", c.Cache.SyncTimeoutSeconds))
 	}
 
 	if len(errs) > 0 {

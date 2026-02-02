@@ -22,3 +22,9 @@ internal-api {
     enabled true
     address ":8082"
 }
+
+cache {
+    blocklist-size-mb 64
+    accounting-size-mb 128
+    sync-timeout-seconds 30
+}
