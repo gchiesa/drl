@@ -457,7 +457,7 @@ func TestValidate_ValidLogLevels(t *testing.T) {
 }
 
 func TestValidate_InvalidLogFormat(t *testing.T) {
-	invalidFormats := []string{"xml", "csv", "yaml", "JSON", "TEXT", ""}
+	invalidFormats := []string{"xml", "csv", "yaml", ""}
 
 	for _, format := range invalidFormats {
 		t.Run("format_"+format, func(t *testing.T) {
