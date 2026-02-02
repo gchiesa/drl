@@ -40,11 +40,6 @@ type ServerConfig struct {
 
 // NewServer creates a new internal API server
 func NewServer(cfg ServerConfig) (*Server, error) {
-	// Validate API key
-	if len(cfg.APIKey) < MinAPIKeyLength {
-		return nil, fmt.Errorf("API key must be at least %d characters", MinAPIKeyLength)
-	}
-
 	// Create Digest authenticator
 	auth, err := NewDigestAuthenticator(cfg.APIKey)
 	if err != nil {
@@ -78,24 +73,6 @@ func NewServer(cfg ServerConfig) (*Server, error) {
 func (s *Server) setupRoutes() {
 	// Apply Digest authentication middleware to /status
 	s.app.Get("/status", s.auth.Middleware(), s.handleStatus)
-}
-
-// handleStatus returns the cluster status
-func (s *Server) handleStatus(c *fiber.Ctx) error {
-	uptime := time.Since(s.startTime)
-
-	var activePeers []string
-	if s.cluster != nil {
-		activePeers = s.cluster.MemberNames()
-	}
-
-	return c.JSON(fiber.Map{
-		"cluster_name":   s.clusterName,
-		"node_id":        s.nodeID,
-		"active_peers":   activePeers,
-		"uptime":         uptime.String(),
-		"uptime_seconds": uptime.Seconds(),
-	})
 }
 
 // Start starts the internal API server

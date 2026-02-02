@@ -51,14 +51,14 @@ func TestNewDigestAuthenticator(t *testing.T) {
 				t.Error("NewDigestAuthenticator() returned nil authenticator without error")
 			}
 			if !tt.wantErr {
-				if auth.a1Hash == "" {
-					t.Error("NewDigestAuthenticator() a1Hash is empty")
+				if auth.hashedCredentials == "" {
+					t.Error("NewDigestAuthenticator() hashedCredentials is empty")
 				}
 				// Verify A1 hash is correctly computed
 				expectedA1 := fmt.Sprintf("%s:%s:%s", digestUsername, digestRealm, tt.apiKey)
 				expectedHash := sha256Sum(expectedA1)
-				if auth.a1Hash != expectedHash {
-					t.Errorf("NewDigestAuthenticator() a1Hash = %s, want %s", auth.a1Hash, expectedHash)
+				if auth.hashedCredentials != expectedHash {
+					t.Errorf("NewDigestAuthenticator() hashedCredentials = %s, want %s", auth.hashedCredentials, expectedHash)
 				}
 			}
 		})
@@ -326,7 +326,7 @@ func TestParseDigestAuth(t *testing.T) {
 	}{
 		{
 			name: "standard digest auth",
-			auth: `username="admin", realm="test", nonce="abc123", uri="/test", response="xyz"`,
+			auth: `Digest username="admin", realm="test", nonce="abc123", uri="/test", response="xyz"`,
 			expected: map[string]string{
 				"username": "admin",
 				"realm":    "test",
@@ -337,7 +337,7 @@ func TestParseDigestAuth(t *testing.T) {
 		},
 		{
 			name: "with qop and nc",
-			auth: `username="admin", realm="test", nonce="abc", uri="/", response="xyz", qop=auth, nc=00000001, cnonce="client123"`,
+			auth: `Digest username="admin", realm="test", nonce="abc", uri="/", response="xyz", qop=auth, nc=00000001, cnonce="client123"`,
 			expected: map[string]string{
 				"username": "admin",
 				"realm":    "test",
@@ -377,7 +377,7 @@ func TestSha256Sum(t *testing.T) {
 
 func extractNonceFromWWWAuth(wwwAuth string) string {
 	// Parse: Digest realm="...", nonce="...", algorithm=SHA-256, qop="auth"
-	params := parseDigestAuth(strings.TrimPrefix(wwwAuth, "Digest "))
+	params := parseDigestAuth(wwwAuth)
 	return params["nonce"]
 }
 
