@@ -35,22 +35,18 @@ func NewCluster(cfg *config.Config, m *metrics.Metrics, logger *slog.Logger) *Cl
 
 // Start initializes and starts the memberlist cluster
 func (c *Cluster) Start() error {
-	// Get the actual container IP
-	hostname, _ := os.Hostname()
-	ips, _ := net.LookupIP(hostname)
-	var containerIP string
-	for _, ip := range ips {
-		if ipv4 := ip.To4(); ipv4 != nil {
-			containerIP = ipv4.String()
-			break
-		}
+	// Get the actual instance IP
+	var advertiseIP string
+	var err error
+	if advertiseIP, err = getInstanceIP(); err != nil {
+		return err
 	}
 
 	mlConfig := memberlist.DefaultLANConfig()
 	mlConfig.Name = c.config.NodeName
 	mlConfig.BindAddr = c.config.Membership.BindAddr
 	mlConfig.BindPort = c.config.Membership.Port
-	mlConfig.AdvertiseAddr = containerIP
+	mlConfig.AdvertiseAddr = advertiseIP
 	mlConfig.AdvertisePort = c.config.Membership.Port
 
 	// Set up event delegate for membership events
@@ -59,7 +55,7 @@ func (c *Cluster) Start() error {
 		logger:  c.logger,
 	}
 
-	// Reduce logging noise from memberlist
+	// Reduce logging noise from the memberlist
 	mlConfig.LogOutput = &slogWriter{logger: c.logger.With("component", "memberlist")}
 
 	ml, err := memberlist.Create(mlConfig)
@@ -234,46 +230,19 @@ func (c *Cluster) Leave(timeout time.Duration) error {
 	return c.memberlist.Shutdown()
 }
 
-// eventDelegate handles memberlist events
-type eventDelegate struct {
-	cluster *Cluster
-	logger  *slog.Logger
-}
-
-func (e *eventDelegate) NotifyJoin(node *memberlist.Node) {
-	e.logger.Info("node joined",
-		"node_name", node.Name,
-		"node_addr", node.Addr.String(),
-	)
-	e.cluster.metrics.IncEvent("join")
-	// Run updateClusterSize asynchronously to avoid blocking memberlist's internal operations.
-	// Calling memberlist methods from within event callbacks can cause deadlock/contention.
-	go e.cluster.updateClusterSize()
-}
-
-func (e *eventDelegate) NotifyLeave(node *memberlist.Node) {
-	e.logger.Info("node left",
-		"node_name", node.Name,
-		"node_addr", node.Addr.String(),
-	)
-	e.cluster.metrics.IncEvent("leave")
-	// Run updateClusterSize asynchronously to avoid blocking memberlist's internal operations.
-	go e.cluster.updateClusterSize()
-}
-
-func (e *eventDelegate) NotifyUpdate(node *memberlist.Node) {
-	e.logger.Debug("node updated",
-		"node_name", node.Name,
-		"node_addr", node.Addr.String(),
-	)
-}
-
-// slogWriter adapts slog.Logger to io.Writer for memberlist
-type slogWriter struct {
-	logger *slog.Logger
-}
-
-func (w *slogWriter) Write(p []byte) (n int, err error) {
-	w.logger.Debug(string(p))
-	return len(p), nil
+func getInstanceIP() (string, error) {
+	var instanceIP string
+	// Get the actual instance IP
+	hostname, _ := os.Hostname()
+	ips, err := net.LookupIP(hostname)
+	if err != nil {
+		return instanceIP, err
+	}
+	for _, ip := range ips {
+		if ipv4 := ip.To4(); ipv4 != nil {
+			instanceIP = ipv4.String()
+			break
+		}
+	}
+	return instanceIP, nil
 }

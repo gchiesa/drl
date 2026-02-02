@@ -244,16 +244,3 @@ func TestClusterLeaveWithoutStart(t *testing.T) {
 		t.Errorf("unexpected error leaving unstarted cluster: %v", err)
 	}
 }
-
-func TestSlogWriter(t *testing.T) {
-	logger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelDebug}))
-	writer := &slogWriter{logger: logger}
-
-	n, err := writer.Write([]byte("test message"))
-	if err != nil {
-		t.Errorf("unexpected error: %v", err)
-	}
-	if n != 12 {
-		t.Errorf("expected 12 bytes written, got %d", n)
-	}
-}
