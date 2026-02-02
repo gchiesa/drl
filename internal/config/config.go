@@ -1,146 +1,122 @@
 package config
 
 import (
+	"embed"
 	"fmt"
 	"os"
 	"strconv"
 	"strings"
 	"time"
 
+	"github.com/caarlos0/env/v11"
 	"github.com/sblinch/kdl-go"
 )
 
-// Config holds the DRL configuration
+//go:embed resources/*.kdl
+var res embed.FS
+
+const (
+	defaultConfigSource     = "defaults"
+	kdlConfigSource         = "kdl"
+	environmentConfigSource = "environment"
+	defaultConfigFile       = "resources/default.kdl"
+)
+
 type Config struct {
 	// NodeName is the unique identifier for this node
 	NodeName string
 
 	// Listen configuration
-	Listen ListenConfig
+	Listen ListenConfig `kdl:"listen" envPrefix:"DRL_LISTEN_"`
 
 	// Membership configuration
-	Membership MembershipConfig
+	Membership MembershipConfig `kdl:"membership" envPrefix:"DRL_MEMBERSHIP_"`
 
 	// Logging configuration
-	Logging LoggingConfig
+	Logging LoggingConfig `kdl:"logging" envPrefix:"DRL_LOGGING_"`
 
 	// InternalAPI configuration
-	InternalAPI InternalAPIConfig
-
-	// ConfigSource indicates where the config was loaded from
-	ConfigSource string
+	InternalAPI InternalAPIConfig `kdl:"internal-api" envPrefix:"DRL_INTERNAL_API_"`
 }
 
 // ListenConfig holds listener configuration
 type ListenConfig struct {
 	// GRPC is the address for gRPC server
-	GRPC string
+	GRPC string `kdl:"grpc" env:"GRPC"`
 	// Metrics is the address for Prometheus metrics endpoint
-	Metrics string
+	Metrics string `kdl:"metrics" env:"METRICS"`
 }
 
 // MembershipConfig holds cluster membership configuration
 type MembershipConfig struct {
 	// ServiceName is the DNS name to resolve for peer discovery
-	ServiceName string
+	ServiceName string `kdl:"service-name" env:"SERVICE_NAME"`
 	// Port is the port for memberlist gossip
-	Port int
+	Port int `kdl:"port" env:"PORT"`
 	// BindAddr is the address to bind memberlist to
-	BindAddr string
+	BindAddr string `kdl:"bind-addr" env:"BIND_ADDR"`
 	// StartupDelay is the delay before attempting to join the cluster
-	StartupDelay time.Duration
+	StartupDelay time.Duration `kdl:"startup-delay" env:"STARTUP_DELAY"`
 }
 
 // LoggingConfig holds logging configuration
 type LoggingConfig struct {
 	// Level is the log level (debug, info, warn, error)
-	Level string
+	Level string `kdl:"level" env:"LEVEL"`
 	// Format is the log format (json, text)
-	Format string
+	Format string `kdl:"format" env:"FORMAT"`
 }
 
 // InternalAPIConfig holds internal API configuration
 type InternalAPIConfig struct {
 	// Enabled indicates if the internal API is enabled
-	Enabled bool
+	Enabled bool `kdl:"enabled" env:"ENABLED"`
 	// Address is the address for the internal API server
-	Address string
+	Address string `kdl:"address" env:"ADDRESS"`
 }
 
-// kdlConfig represents the KDL file structure for unmarshaling
-type kdlConfig struct {
-	Listen      kdlListen      `kdl:"listen"`
-	Membership  kdlMembership  `kdl:"membership"`
-	Logging     kdlLogging     `kdl:"logging"`
-	InternalAPI kdlInternalAPI `kdl:"internal-api"`
-}
-
-type kdlListen struct {
-	GRPC    string `kdl:"grpc"`
-	Metrics string `kdl:"metrics"`
-}
-
-type kdlMembership struct {
-	ServiceName  string `kdl:"service-name"`
-	Port         int    `kdl:"port"`
-	BindAddr     string `kdl:"bind-addr"`
-	StartupDelay string `kdl:"startup-delay"`
-}
-
-type kdlLogging struct {
-	Level  string `kdl:"level"`
-	Format string `kdl:"format"`
-}
-
-type kdlInternalAPI struct {
-	Enabled bool   `kdl:"enabled"`
-	Address string `kdl:"address"`
-}
-
-// DefaultConfig returns the default configuration
-func DefaultConfig() *Config {
-	return &Config{
-		NodeName:     getHostname(),
-		ConfigSource: "defaults",
-		Listen: ListenConfig{
-			GRPC:    ":8081",
-			Metrics: ":9091",
-		},
-		Membership: MembershipConfig{
-			ServiceName:  "drl",
-			Port:         7946,
-			BindAddr:     "0.0.0.0",
-			StartupDelay: 3 * time.Second,
-		},
-		Logging: LoggingConfig{
-			Level:  "info",
-			Format: "json",
-		},
-		InternalAPI: InternalAPIConfig{
-			Enabled: true,
-			Address: ":8082",
-		},
-	}
+func NewConfig() *Config {
+	return &Config{}
 }
 
 // Load loads configuration with precedence: Environment > KDL File > Defaults
 func Load(configPath string) (*Config, error) {
-	// Start with defaults
-	cfg := DefaultConfig()
+	// start with defaults
+	cfg := NewConfig()
 
-	// Load from KDL file if provided
-	if configPath != "" {
-		if err := cfg.loadFromKDL(configPath); err != nil {
-			return nil, err
-		}
-		cfg.ConfigSource = configPath
+	// load defaults kdl first
+	var configData []byte
+	var err error
+	if configData, err = res.ReadFile(defaultConfigFile); err != nil {
+		return nil, fmt.Errorf("failed to read default embedded config file: %w", err)
+	}
+	if err = cfg.loadFromKDL(configData); err != nil {
+		return nil, err
 	}
 
-	// Apply environment variable overrides
-	cfg.applyEnvOverrides()
+	// load overrides from user KDL if provided
+	if configPath != "" {
+		configData, err = os.ReadFile(configPath)
+		if err != nil {
+			return nil, fmt.Errorf("failed to read user config file: %w", err)
+		}
+		if err = cfg.loadFromKDL(configData); err != nil {
+			return nil, err
+		}
+	}
+
+	// apply the environment variable overrides
+	if err = cfg.loadFromEnvironment(); err != nil {
+		return nil, err
+	}
+
+	// if hostname is not set we use the current one
+	if cfg.NodeName == "" {
+		cfg.NodeName = getHostname()
+	}
 
 	// Validate the final configuration
-	if err := cfg.Validate(); err != nil {
+	if err = cfg.Validate(); err != nil {
 		return nil, fmt.Errorf("configuration validation failed: %w", err)
 	}
 
@@ -148,135 +124,19 @@ func Load(configPath string) (*Config, error) {
 }
 
 // loadFromKDL loads configuration from a KDL file
-func (c *Config) loadFromKDL(path string) error {
-	data, err := os.ReadFile(path)
-	if err != nil {
-		return fmt.Errorf("failed to read config file %s: %w", path, err)
-	}
-
-	var kdlCfg kdlConfig
-	if err := kdl.Unmarshal(data, &kdlCfg); err != nil {
+func (c *Config) loadFromKDL(data []byte) error {
+	if err := kdl.Unmarshal(data, c); err != nil {
 		return fmt.Errorf("failed to parse KDL config: %w", err)
 	}
-
-	// Apply KDL values (only if set)
-	if kdlCfg.Listen.GRPC != "" {
-		c.Listen.GRPC = kdlCfg.Listen.GRPC
-	}
-	if kdlCfg.Listen.Metrics != "" {
-		c.Listen.Metrics = kdlCfg.Listen.Metrics
-	}
-
-	if kdlCfg.Membership.ServiceName != "" {
-		c.Membership.ServiceName = kdlCfg.Membership.ServiceName
-	}
-	if kdlCfg.Membership.Port != 0 {
-		c.Membership.Port = kdlCfg.Membership.Port
-	}
-	if kdlCfg.Membership.BindAddr != "" {
-		c.Membership.BindAddr = kdlCfg.Membership.BindAddr
-	}
-	if kdlCfg.Membership.StartupDelay != "" {
-		if d, err := time.ParseDuration(kdlCfg.Membership.StartupDelay); err == nil {
-			c.Membership.StartupDelay = d
-		}
-	}
-
-	if kdlCfg.Logging.Level != "" {
-		c.Logging.Level = kdlCfg.Logging.Level
-	}
-	if kdlCfg.Logging.Format != "" {
-		c.Logging.Format = kdlCfg.Logging.Format
-	}
-
-	// Internal API - note: bool default is false, so we check if address is set
-	// to determine if the section was explicitly configured
-	if kdlCfg.InternalAPI.Address != "" {
-		c.InternalAPI.Address = kdlCfg.InternalAPI.Address
-	}
-	// For enabled, we always apply the KDL value since false is a valid setting
-	c.InternalAPI.Enabled = kdlCfg.InternalAPI.Enabled
-
 	return nil
 }
 
-// applyEnvOverrides applies environment variable overrides
-// Environment variables follow the pattern: DRL_<SECTION>_<KEY>
-// e.g., DRL_LISTEN_GRPC, DRL_MEMBERSHIP_SERVICE_NAME, DRL_LOGGING_LEVEL
-func (c *Config) applyEnvOverrides() {
-	// Node name
-	if v := os.Getenv("DRL_NODE_NAME"); v != "" {
-		c.NodeName = v
+// loadFromEnvironment loads configuration values from environment variables and overrides existing config values in the struct.
+func (c *Config) loadFromEnvironment() error {
+	if err := env.Parse(c); err != nil {
+		return fmt.Errorf("failed to parse Environment config: %w", err)
 	}
-	// Legacy support
-	if v := os.Getenv("NODE_NAME"); v != "" {
-		c.NodeName = v
-	}
-
-	// Listen section
-	if v := os.Getenv("DRL_LISTEN_GRPC"); v != "" {
-		c.Listen.GRPC = v
-	}
-	if v := os.Getenv("DRL_LISTEN_METRICS"); v != "" {
-		c.Listen.Metrics = v
-	}
-
-	// Membership section
-	if v := os.Getenv("DRL_MEMBERSHIP_SERVICE_NAME"); v != "" {
-		c.Membership.ServiceName = v
-	}
-	// Legacy support
-	if v := os.Getenv("DISCOVERY_SERVICE_NAME"); v != "" {
-		c.Membership.ServiceName = v
-	}
-
-	if v := os.Getenv("DRL_MEMBERSHIP_PORT"); v != "" {
-		if port, err := strconv.Atoi(v); err == nil {
-			c.Membership.Port = port
-		}
-	}
-	// Legacy support
-	if v := os.Getenv("BIND_PORT"); v != "" {
-		if port, err := strconv.Atoi(v); err == nil {
-			c.Membership.Port = port
-		}
-	}
-
-	if v := os.Getenv("DRL_MEMBERSHIP_BIND_ADDR"); v != "" {
-		c.Membership.BindAddr = v
-	}
-	// Legacy support
-	if v := os.Getenv("BIND_ADDR"); v != "" {
-		c.Membership.BindAddr = v
-	}
-
-	if v := os.Getenv("DRL_MEMBERSHIP_STARTUP_DELAY"); v != "" {
-		if d, err := time.ParseDuration(v); err == nil {
-			c.Membership.StartupDelay = d
-		}
-	}
-	// Legacy support
-	if v := os.Getenv("STARTUP_DELAY"); v != "" {
-		if d, err := time.ParseDuration(v); err == nil {
-			c.Membership.StartupDelay = d
-		}
-	}
-
-	// Logging section
-	if v := os.Getenv("DRL_LOGGING_LEVEL"); v != "" {
-		c.Logging.Level = v
-	}
-	if v := os.Getenv("DRL_LOGGING_FORMAT"); v != "" {
-		c.Logging.Format = v
-	}
-
-	// Internal API section
-	if v := os.Getenv("DRL_INTERNAL_API_ENABLED"); v != "" {
-		c.InternalAPI.Enabled = v == "true" || v == "1"
-	}
-	if v := os.Getenv("DRL_INTERNAL_API_ADDRESS"); v != "" {
-		c.InternalAPI.Address = v
-	}
+	return nil
 }
 
 // Validate validates the configuration
@@ -319,21 +179,6 @@ func (c *Config) Validate() error {
 	return nil
 }
 
-// BindAddr returns the bind address (for backward compatibility)
-func (c *Config) BindAddr() string {
-	return c.Membership.BindAddr
-}
-
-// BindPort returns the bind port (for backward compatibility)
-func (c *Config) BindPort() int {
-	return c.Membership.Port
-}
-
-// DiscoveryServiceName returns the discovery service name (for backward compatibility)
-func (c *Config) DiscoveryServiceName() string {
-	return c.Membership.ServiceName
-}
-
 // MetricsPort returns the metrics port extracted from the address
 func (c *Config) MetricsPort() int {
 	addr := c.Listen.Metrics
@@ -343,22 +188,6 @@ func (c *Config) MetricsPort() int {
 		}
 	}
 	return 9091
-}
-
-// StartupDelay returns the startup delay (for backward compatibility)
-func (c *Config) StartupDelay() time.Duration {
-	return c.Membership.StartupDelay
-}
-
-// InternalAPIPort returns the internal API port extracted from the address
-func (c *Config) InternalAPIPort() int {
-	addr := c.InternalAPI.Address
-	if idx := strings.LastIndex(addr, ":"); idx >= 0 {
-		if port, err := strconv.Atoi(addr[idx+1:]); err == nil {
-			return port
-		}
-	}
-	return 8082
 }
 
 // GetPrivateAPIKey returns the private API key from environment variable

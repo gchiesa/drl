@@ -43,7 +43,6 @@ func main() {
 
 	logger.Info("DRL - Distributed Rate Limiter starting...")
 	logger.Info("configuration loaded",
-		"source", cfg.ConfigSource,
 		"node_name", cfg.NodeName,
 		"grpc_addr", cfg.Listen.GRPC,
 		"metrics_addr", cfg.Listen.Metrics,
