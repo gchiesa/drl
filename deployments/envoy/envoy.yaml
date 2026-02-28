@@ -22,15 +22,15 @@ static_resources:
                     typed_config:
                       "@type": type.googleapis.com/envoy.extensions.access_loggers.stream.v3.StdoutAccessLog
                 http_filters:
-                  # Placeholder for ext_authz filter - to be added in future milestone
-                  # - name: envoy.filters.http.ext_authz
-                  #   typed_config:
-                  #     "@type": type.googleapis.com/envoy.extensions.filters.http.ext_authz.v3.ExtAuthz
-                  #     grpc_service:
-                  #       envoy_grpc:
-                  #         cluster_name: drl_cluster
-                  #       timeout: 0.25s
-                  #     transport_api_version: V3
+                  - name: envoy.filters.http.ext_authz
+                    typed_config:
+                      "@type": type.googleapis.com/envoy.extensions.filters.http.ext_authz.v3.ExtAuthz
+                      grpc_service:
+                        envoy_grpc:
+                          cluster_name: drl_cluster
+                        timeout: 0.25s
+                      transport_api_version: V3
+                      failure_mode_allow: true
                   - name: envoy.filters.http.router
                     typed_config:
                       "@type": type.googleapis.com/envoy.extensions.filters.http.router.v3.Router
@@ -60,22 +60,21 @@ static_resources:
                       address: echo-server
                       port_value: 8080
 
-    # DRL cluster - to be enabled in future milestone
-    # - name: drl_cluster
-    #   connect_timeout: 0.25s
-    #   type: STRICT_DNS
-    #   lb_policy: ROUND_ROBIN
-    #   typed_extension_protocol_options:
-    #     envoy.extensions.upstreams.http.v3.HttpProtocolOptions:
-    #       "@type": type.googleapis.com/envoy.extensions.upstreams.http.v3.HttpProtocolOptions
-    #       explicit_http_config:
-    #         http2_protocol_options: {}
-    #   load_assignment:
-    #     cluster_name: drl_cluster
-    #     endpoints:
-    #       - lb_endpoints:
-    #           - endpoint:
-    #               address:
-    #                 socket_address:
-    #                   address: drl
-    #                   port_value: 8081
+    - name: drl_cluster
+      connect_timeout: 0.25s
+      type: STRICT_DNS
+      lb_policy: ROUND_ROBIN
+      typed_extension_protocol_options:
+        envoy.extensions.upstreams.http.v3.HttpProtocolOptions:
+          "@type": type.googleapis.com/envoy.extensions.upstreams.http.v3.HttpProtocolOptions
+          explicit_http_config:
+            http2_protocol_options: {}
+      load_assignment:
+        cluster_name: drl_cluster
+        endpoints:
+          - lb_endpoints:
+              - endpoint:
+                  address:
+                    socket_address:
+                      address: drl
+                      port_value: 8081

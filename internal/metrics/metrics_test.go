@@ -19,6 +19,10 @@ func TestNewMetrics(t *testing.T) {
 		t.Error("EventsTotal counter should not be nil")
 	}
 
+	if m.GRPCCheckTotal == nil {
+		t.Error("GRPCCheckTotal counter should not be nil")
+	}
+
 	if m.CacheHitsTotal == nil {
 		t.Error("CacheHitsTotal counter should not be nil")
 	}
@@ -64,6 +68,9 @@ func TestIncEvent(t *testing.T) {
 func TestCacheMetrics(t *testing.T) {
 	m := NewMetrics()
 
+	// Test gRPC check metric
+	m.IncGRPCCheck()
+
 	// Test cache hit metrics
 	m.IncCacheHit(CacheTypeBlocklist)
 	m.IncCacheHit(CacheTypeAccounting)
@@ -98,6 +105,7 @@ func TestStartServer(t *testing.T) {
 	m.IncCacheEviction(CacheTypeBlocklist)
 	m.SetCacheMemory(CacheTypeBlocklist, 1024)
 	m.ObserveSyncDuration(0.1)
+	m.IncGRPCCheck()
 
 	// Use a random high port to avoid conflicts
 	port := 19091
@@ -174,6 +182,10 @@ func TestStartServer(t *testing.T) {
 
 	if !strings.Contains(metricsStr, "drl_sync_duration_seconds") {
 		t.Error("expected drl_sync_duration_seconds metric in output")
+	}
+
+	if !strings.Contains(metricsStr, "drl_grpc_check_total") {
+		t.Error("expected drl_grpc_check_total metric in output")
 	}
 }
 

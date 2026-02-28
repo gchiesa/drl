@@ -14,6 +14,7 @@ import (
 	"github.com/gchiesa/drl/internal/api"
 	"github.com/gchiesa/drl/internal/cache"
 	"github.com/gchiesa/drl/internal/config"
+	drlgrpc "github.com/gchiesa/drl/internal/grpc"
 	"github.com/gchiesa/drl/internal/membership"
 	"github.com/gchiesa/drl/internal/metrics"
 )
@@ -177,6 +178,19 @@ func main() {
 		logger.Info("internal API server started", "address", cfg.InternalAPI.Address)
 	}
 
+	// Initialize gRPC ext_authz server
+	grpcServer := drlgrpc.NewServer(drlgrpc.ServerConfig{
+		Address: cfg.Listen.GRPC,
+		Metrics: m,
+		Logger:  logger,
+	})
+	if err := grpcServer.Start(); err != nil {
+		logger.Error("failed to start gRPC server", "error", err)
+		cacheManager.Close()
+		os.Exit(1)
+	}
+	logger.Info("gRPC ext_authz server started", "address", cfg.Listen.GRPC)
+
 	logger.Info("DRL is running")
 
 	// Wait for shutdown signal
@@ -195,6 +209,8 @@ func main() {
 			logger.Error("failed to stop internal API server", "error", err)
 		}
 	}
+
+	grpcServer.Stop(shutdownCtx)
 
 	if err := cluster.Leave(5 * time.Second); err != nil {
 		logger.Error("failed to leave cluster gracefully", "error", err)

@@ -15,6 +15,7 @@ services:
     command: ["-c", "/etc/envoy/envoy.yaml", "--log-level", "info"]
     depends_on:
       - echo-server
+      - drl
     networks:
       - drl-network
 

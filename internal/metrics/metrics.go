@@ -14,6 +14,9 @@ type Metrics struct {
 	ClusterSize prometheus.Gauge
 	EventsTotal *prometheus.CounterVec
 
+	// gRPC metrics
+	GRPCCheckTotal prometheus.Counter
+
 	// Cache metrics
 	CacheHitsTotal      *prometheus.CounterVec
 	CacheMissesTotal    *prometheus.CounterVec
@@ -39,6 +42,12 @@ func NewMetrics() *Metrics {
 			Name: "drl_membership_events_total",
 			Help: "Total number of membership events",
 		}, []string{"event_type"}),
+
+		// gRPC metrics
+		GRPCCheckTotal: prometheus.NewCounter(prometheus.CounterOpts{
+			Name: "drl_grpc_check_total",
+			Help: "Total number of gRPC Check requests received",
+		}),
 
 		// Cache metrics
 		CacheHitsTotal: prometheus.NewCounterVec(prometheus.CounterOpts{
@@ -68,6 +77,7 @@ func NewMetrics() *Metrics {
 
 	registry.MustRegister(m.ClusterSize)
 	registry.MustRegister(m.EventsTotal)
+	registry.MustRegister(m.GRPCCheckTotal)
 	registry.MustRegister(m.CacheHitsTotal)
 	registry.MustRegister(m.CacheMissesTotal)
 	registry.MustRegister(m.CacheEvictionsTotal)
@@ -85,6 +95,11 @@ func (m *Metrics) SetClusterSize(size int) {
 // IncEvent increments the event counter for the given event type
 func (m *Metrics) IncEvent(eventType string) {
 	m.EventsTotal.WithLabelValues(eventType).Inc()
+}
+
+// IncGRPCCheck increments the gRPC Check request counter
+func (m *Metrics) IncGRPCCheck() {
+	m.GRPCCheckTotal.Inc()
 }
 
 // IncCacheHit increments the cache hit counter for the given cache type
