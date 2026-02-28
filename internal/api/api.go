@@ -31,7 +31,7 @@ type BlocklistOperator interface {
 // Broadcaster queues block/unblock events for cluster-wide eventual propagation
 // via the memberlist user-level broadcast mechanism.
 type Broadcaster interface {
-	QueueBlockEvent(key string, ttl time.Duration) error
+	QueueBlockEvent(key string, ttl time.Duration, entity *model.Entity) error
 	QueueUnblockEvent(key string) error
 }
 

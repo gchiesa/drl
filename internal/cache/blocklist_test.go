@@ -410,6 +410,47 @@ func TestBlocklistCache_ListEntries_FiltersExpired(t *testing.T) {
 	assert.Equal(t, "valid", entries[0].Key)
 }
 
+func TestBlocklistCache_MergeState_PreservesLocalMetadata(t *testing.T) {
+	// Simulate: node A has an entry with metadata, node B has the same entry
+	// without metadata. When B's state is merged into A, A should preserve
+	// its local metadata.
+	nodeA, err := NewBlocklistCache(BlocklistConfig{MaxSizeMB: 1})
+	require.NoError(t, err)
+	defer nodeA.Close()
+
+	nodeB, err := NewBlocklistCache(BlocklistConfig{MaxSizeMB: 1})
+	require.NoError(t, err)
+	defer nodeB.Close()
+
+	entity := &model.Entity{
+		IP:      "10.0.0.1",
+		Path:    "api/v1",
+		Headers: map[string]string{"X-Bot": "true"},
+	}
+	key := entity.Key()
+
+	// Node A has the entry with metadata (admin-API block)
+	nodeA.BlockWithMeta(key, 5*time.Second, entity)
+
+	// Node B has the same entry without metadata (broadcast block)
+	nodeB.Block(key, 5*time.Second)
+
+	// Serialize B's state (no metadata)
+	stateB, err := nodeB.GetState()
+	require.NoError(t, err)
+
+	// Merge B's state into A
+	err = nodeA.MergeState(stateB)
+	require.NoError(t, err)
+
+	// A should still have the metadata
+	entries := nodeA.ListEntries()
+	require.Len(t, entries, 1)
+	require.NotNil(t, entries[0].Entity, "local entity metadata must be preserved after merge")
+	assert.Equal(t, "10.0.0.1", entries[0].Entity.IP)
+	assert.Equal(t, "api/v1", entries[0].Entity.Path)
+}
+
 func TestBlocklistCache_MergeState_WithEntityMetadata(t *testing.T) {
 	source, err := NewBlocklistCache(BlocklistConfig{MaxSizeMB: 1})
 	require.NoError(t, err)

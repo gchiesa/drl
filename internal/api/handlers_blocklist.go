@@ -158,7 +158,7 @@ func (s *Server) handleBlockEntityAdd(c *fiber.Ctx) error {
 
 	if s.broadcaster != nil {
 		go func() {
-			if qErr := s.broadcaster.QueueBlockEvent(key, ttl); qErr != nil {
+			if qErr := s.broadcaster.QueueBlockEvent(key, ttl, &entity); qErr != nil {
 				s.logger.Warn("failed to queue block broadcast",
 					"error", qErr,
 					"key", key,

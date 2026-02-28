@@ -8,6 +8,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/gchiesa/drl/internal/cache"
+	"github.com/gchiesa/drl/internal/model"
 )
 
 func TestBroadcastEvent_EncodeDecodeRoundTrip(t *testing.T) {
@@ -70,7 +71,8 @@ func TestStateDelegate_QueueBlockEvent_AppliedViaNotifyMsg(t *testing.T) {
 	const ttl = 10 * time.Minute
 
 	// Queue a block event
-	require.NoError(t, delegate.QueueBlockEvent(key, ttl))
+	entity := &model.Entity{IP: "10.0.0.1", Path: "api/v1"}
+	require.NoError(t, delegate.QueueBlockEvent(key, ttl, entity))
 
 	// Retrieve the broadcast from the queue
 	broadcasts := delegate.GetBroadcasts(0, 65535)
@@ -84,6 +86,50 @@ func TestStateDelegate_QueueBlockEvent_AppliedViaNotifyMsg(t *testing.T) {
 	remotePeerDelegate.NotifyMsg(broadcasts[0])
 
 	assert.True(t, bc.IsBlocked(key), "entity must appear in the blocklist after NotifyMsg")
+}
+
+func TestStateDelegate_QueueBlockEvent_PropagatesEntityMetadata(t *testing.T) {
+	bc, err := cache.NewBlocklistCache(cache.BlocklistConfig{MaxSizeMB: 1})
+	require.NoError(t, err)
+	defer bc.Close()
+
+	delegate := NewStateDelegate(DelegateConfig{
+		Blocklist:   bc,
+		SyncTimeout: 30 * time.Second,
+	})
+
+	entity := &model.Entity{
+		IP:      "10.0.0.1",
+		Path:    "api/v1/payments",
+		Headers: map[string]string{"X-Bot": "true"},
+	}
+	key := entity.Key()
+
+	require.NoError(t, delegate.QueueBlockEvent(key, 10*time.Minute, entity))
+
+	broadcasts := delegate.GetBroadcasts(0, 65535)
+	require.Len(t, broadcasts, 1)
+
+	// Simulate receiving the broadcast on a peer node
+	peerBC, err := cache.NewBlocklistCache(cache.BlocklistConfig{MaxSizeMB: 1})
+	require.NoError(t, err)
+	defer peerBC.Close()
+
+	peerDelegate := NewStateDelegate(DelegateConfig{
+		Blocklist:   peerBC,
+		SyncTimeout: 30 * time.Second,
+	})
+	peerDelegate.NotifyMsg(broadcasts[0])
+
+	assert.True(t, peerBC.IsBlocked(key))
+
+	// Verify entity metadata was propagated
+	entries := peerBC.ListEntries()
+	require.Len(t, entries, 1)
+	require.NotNil(t, entries[0].Entity, "entity metadata must be propagated via broadcast")
+	assert.Equal(t, "10.0.0.1", entries[0].Entity.IP)
+	assert.Equal(t, "api/v1/payments", entries[0].Entity.Path)
+	assert.Equal(t, map[string]string{"X-Bot": "true"}, entries[0].Entity.Headers)
 }
 
 func TestStateDelegate_QueueUnblockEvent_AppliedViaNotifyMsg(t *testing.T) {
@@ -150,8 +196,8 @@ func TestStateDelegate_QueueBlockEvent_MultipleEvents(t *testing.T) {
 		NumNodesFunc: func() int { return 3 },
 	})
 
-	require.NoError(t, delegate.QueueBlockEvent("key1", time.Hour))
-	require.NoError(t, delegate.QueueBlockEvent("key2", time.Hour))
+	require.NoError(t, delegate.QueueBlockEvent("key1", time.Hour, nil))
+	require.NoError(t, delegate.QueueBlockEvent("key2", time.Hour, nil))
 
 	broadcasts := delegate.GetBroadcasts(0, 65535)
 	assert.GreaterOrEqual(t, len(broadcasts), 1, "at least one broadcast must be returned")

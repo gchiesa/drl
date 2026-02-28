@@ -18,10 +18,14 @@ const (
 )
 
 // BroadcastEvent is the payload carried in user-level memberlist broadcasts.
+// Entity fields use `omitempty` for backward compatibility with older nodes.
 type BroadcastEvent struct {
-	Type BroadcastEventType `msgpack:"type"`
-	Key  string             `msgpack:"key"`
-	TTL  time.Duration      `msgpack:"ttl,omitempty"`
+	Type       BroadcastEventType `msgpack:"type"`
+	Key        string             `msgpack:"key"`
+	TTL        time.Duration      `msgpack:"ttl,omitempty"`
+	EntityIP   string             `msgpack:"entity_ip,omitempty"`
+	EntityPath string             `msgpack:"entity_path,omitempty"`
+	EntityHdrs map[string]string  `msgpack:"entity_hdrs,omitempty"`
 }
 
 // encodeBroadcastEvent serialises a BroadcastEvent to msgpack bytes.
