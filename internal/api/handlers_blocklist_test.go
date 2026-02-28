@@ -67,7 +67,7 @@ type mockBroadcaster struct {
 	unblockedKeys []string
 }
 
-func (m *mockBroadcaster) QueueBlockEvent(key string, _ time.Duration) error {
+func (m *mockBroadcaster) QueueBlockEvent(key string, _ time.Duration, _ *model.Entity) error {
 	m.blockedKeys = append(m.blockedKeys, key)
 	return nil
 }

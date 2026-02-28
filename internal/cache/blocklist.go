@@ -237,7 +237,6 @@ func (b *BlocklistCache) MergeState(data []byte) error {
 	for _, entry := range entries {
 		if entry.ExpiresAt.After(now) {
 			ttl := entry.ExpiresAt.Sub(now)
-			b.cache.SetWithTTL(entry.IP, entry.ExpiresAt, 100, ttl)
 
 			ed := &blocklistEntryData{expiresAt: entry.ExpiresAt}
 			if entry.EntityIP != "" || entry.EntityPath != "" {
@@ -247,6 +246,20 @@ func (b *BlocklistCache) MergeState(data []byte) error {
 					Headers: entry.EntityHdrs,
 				}
 			}
+
+			// Preserve local entity metadata when the remote entry lacks it.
+			// This prevents Push/Pull sync from erasing metadata that was
+			// set by the admin API on this node.
+			if ed.entity == nil {
+				if existing, ok := b.entries.Load(entry.IP); ok {
+					local := existing.(*blocklistEntryData)
+					if local.entity != nil {
+						ed.entity = local.entity
+					}
+				}
+			}
+
+			b.cache.SetWithTTL(entry.IP, entry.ExpiresAt, 100, ttl)
 			b.entries.Store(entry.IP, ed)
 			merged++
 		}

@@ -38,7 +38,7 @@ func TestLoad_DefaultsOnly(t *testing.T) {
 	assert.Equal(t, int64(64), cfg.Cache.BlocklistSizeMB)
 	assert.Equal(t, int64(128), cfg.Cache.AccountingSizeMB)
 	assert.Equal(t, 30, cfg.Cache.SyncTimeoutSeconds)
-	assert.Equal(t, 3600, cfg.Cache.BlocklistDefaultTTLSeconds)
+	assert.Equal(t, 300, cfg.Cache.BlocklistDefaultTTLSeconds)
 
 	// NodeName should be set to hostname when not specified
 	hostname, _ := os.Hostname()

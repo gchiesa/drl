@@ -11,6 +11,7 @@ import (
 
 	"github.com/gchiesa/drl/internal/cache"
 	"github.com/gchiesa/drl/internal/metrics"
+	"github.com/gchiesa/drl/internal/model"
 )
 
 // StateDelegate implements memberlist.Delegate interface for state synchronization
@@ -103,11 +104,24 @@ func (d *StateDelegate) NotifyMsg(buf []byte) {
 
 	switch event.Type {
 	case BroadcastEventBlock:
-		d.blocklist.Block(event.Key, event.TTL)
+		var entity *model.Entity
+		if event.EntityIP != "" || event.EntityPath != "" {
+			entity = &model.Entity{
+				IP:      event.EntityIP,
+				Path:    event.EntityPath,
+				Headers: event.EntityHdrs,
+			}
+		}
+		if entity != nil {
+			d.blocklist.BlockWithMeta(event.Key, event.TTL, entity)
+		} else {
+			d.blocklist.Block(event.Key, event.TTL)
+		}
 		if d.logger != nil {
 			d.logger.Debug("applied remote block event",
 				"key", event.Key,
 				"ttl", event.TTL,
+				"has_entity", entity != nil,
 			)
 		}
 	case BroadcastEventUnblock:
@@ -202,8 +216,15 @@ func (d *StateDelegate) MergeRemoteState(buf []byte, join bool) {
 
 // QueueBlockEvent encodes a BroadcastEventBlock and pushes it onto the
 // transmit queue so memberlist will gossip it to all cluster peers.
-func (d *StateDelegate) QueueBlockEvent(key string, ttl time.Duration) error {
+// When entity is non-nil, its metadata is included in the broadcast so
+// that receiving nodes can store it alongside the block entry.
+func (d *StateDelegate) QueueBlockEvent(key string, ttl time.Duration, entity *model.Entity) error {
 	event := BroadcastEvent{Type: BroadcastEventBlock, Key: key, TTL: ttl}
+	if entity != nil {
+		event.EntityIP = entity.IP
+		event.EntityPath = entity.Path
+		event.EntityHdrs = entity.Headers
+	}
 
 	buf := d.bufPool.Get().(*bytes.Buffer)
 	buf.Reset()
