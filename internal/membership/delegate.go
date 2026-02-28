@@ -52,7 +52,7 @@ type DelegateConfig struct {
 func NewStateDelegate(cfg DelegateConfig) *StateDelegate {
 	timeout := cfg.SyncTimeout
 	if timeout == 0 {
-		timeout = 30 * time.Second
+		timeout = 120 * time.Second
 	}
 
 	numNodes := cfg.NumNodesFunc
