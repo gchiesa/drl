@@ -53,6 +53,13 @@ services:
     networks:
       - drl-network
 
+  jumpbox:
+    image: alpine:latest
+    container_name: jumpbox
+    command: ["sleep", "infinity"]
+    networks:
+      - drl-network
+
 networks:
   drl-network:
     driver: bridge

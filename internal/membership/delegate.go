@@ -1,17 +1,21 @@
 package membership
 
 import (
+	"bytes"
 	"log/slog"
 	"sync"
 	"sync/atomic"
 	"time"
+
+	"github.com/hashicorp/memberlist"
 
 	"github.com/gchiesa/drl/internal/cache"
 	"github.com/gchiesa/drl/internal/metrics"
 )
 
 // StateDelegate implements memberlist.Delegate interface for state synchronization
-// It handles TCP Push/Pull state sync for the blocklist cache
+// It handles TCP Push/Pull state sync for the blocklist cache and user-level
+// broadcasts for manual block/unblock operations.
 type StateDelegate struct {
 	blocklist *cache.BlocklistCache
 	metrics   *metrics.Metrics
@@ -25,6 +29,11 @@ type StateDelegate struct {
 
 	// Sync start time for metrics
 	syncStartTime time.Time
+
+	// Broadcast queue for user-level cluster events
+	broadcastQueue *memberlist.TransmitLimitedQueue
+	// bufPool reuses bytes.Buffer allocations for broadcast serialisation
+	bufPool sync.Pool
 }
 
 // DelegateConfig holds configuration for the state delegate
@@ -33,6 +42,10 @@ type DelegateConfig struct {
 	Metrics     *metrics.Metrics
 	Logger      *slog.Logger
 	SyncTimeout time.Duration
+	// NumNodesFunc returns the current number of live cluster nodes.
+	// Used by the TransmitLimitedQueue to calculate retransmit counts.
+	// Defaults to a function that returns 1 when not provided.
+	NumNodesFunc func() int
 }
 
 // NewStateDelegate creates a new state delegate
@@ -42,13 +55,28 @@ func NewStateDelegate(cfg DelegateConfig) *StateDelegate {
 		timeout = 30 * time.Second
 	}
 
-	return &StateDelegate{
+	numNodes := cfg.NumNodesFunc
+	if numNodes == nil {
+		numNodes = func() int { return 1 }
+	}
+
+	d := &StateDelegate{
 		blocklist:    cfg.Blocklist,
 		metrics:      cfg.Metrics,
 		logger:       cfg.Logger,
 		syncComplete: make(chan struct{}),
 		syncTimeout:  timeout,
+		broadcastQueue: &memberlist.TransmitLimitedQueue{
+			NumNodes:       numNodes,
+			RetransmitMult: 3,
+		},
 	}
+
+	d.bufPool = sync.Pool{
+		New: func() any { return new(bytes.Buffer) },
+	}
+
+	return d
 }
 
 // NodeMeta returns metadata to be sent to other nodes.
@@ -57,16 +85,47 @@ func (d *StateDelegate) NodeMeta(limit int) []byte {
 	return nil
 }
 
-// NotifyMsg is called when a user-level message is received.
-// This is for user-level broadcasts, not for state sync.
+// NotifyMsg is called when a user-level broadcast is received from a peer.
+// It decodes the BroadcastEvent and applies the block or unblock operation
+// to the local Ristretto blocklist cache.
 func (d *StateDelegate) NotifyMsg(buf []byte) {
-	// We don't use user-level broadcasts for now
+	if len(buf) == 0 || d.blocklist == nil {
+		return
+	}
+
+	event, err := decodeBroadcastEvent(buf)
+	if err != nil {
+		if d.logger != nil {
+			d.logger.Warn("failed to decode broadcast event", "error", err)
+		}
+		return
+	}
+
+	switch event.Type {
+	case BroadcastEventBlock:
+		d.blocklist.Block(event.Key, event.TTL)
+		if d.logger != nil {
+			d.logger.Debug("applied remote block event",
+				"key", event.Key,
+				"ttl", event.TTL,
+			)
+		}
+	case BroadcastEventUnblock:
+		d.blocklist.Unblock(event.Key)
+		if d.logger != nil {
+			d.logger.Debug("applied remote unblock event", "key", event.Key)
+		}
+	default:
+		if d.logger != nil {
+			d.logger.Warn("unknown broadcast event type", "type", event.Type)
+		}
+	}
 }
 
-// GetBroadcasts is called when memberlist wants broadcasts to send.
-// We don't use broadcasts for state sync.
+// GetBroadcasts is called by memberlist when it wants messages to broadcast.
+// Returns pending block/unblock events from the transmit queue.
 func (d *StateDelegate) GetBroadcasts(overhead, limit int) [][]byte {
-	return nil
+	return d.broadcastQueue.GetBroadcasts(overhead, limit)
 }
 
 // LocalState returns the local state to be sent to peers during Push/Pull sync.
@@ -141,6 +200,48 @@ func (d *StateDelegate) MergeRemoteState(buf []byte, join bool) {
 	}
 }
 
+// QueueBlockEvent encodes a BroadcastEventBlock and pushes it onto the
+// transmit queue so memberlist will gossip it to all cluster peers.
+func (d *StateDelegate) QueueBlockEvent(key string, ttl time.Duration) error {
+	event := BroadcastEvent{Type: BroadcastEventBlock, Key: key, TTL: ttl}
+
+	buf := d.bufPool.Get().(*bytes.Buffer)
+	buf.Reset()
+
+	if err := encodeBroadcastEventInto(event, buf); err != nil {
+		d.bufPool.Put(buf)
+		return err
+	}
+
+	data := make([]byte, buf.Len())
+	copy(data, buf.Bytes())
+	d.bufPool.Put(buf)
+
+	d.broadcastQueue.QueueBroadcast(&blocklistBroadcast{data: data})
+	return nil
+}
+
+// QueueUnblockEvent encodes a BroadcastEventUnblock and pushes it onto the
+// transmit queue so memberlist will gossip it to all cluster peers.
+func (d *StateDelegate) QueueUnblockEvent(key string) error {
+	event := BroadcastEvent{Type: BroadcastEventUnblock, Key: key}
+
+	buf := d.bufPool.Get().(*bytes.Buffer)
+	buf.Reset()
+
+	if err := encodeBroadcastEventInto(event, buf); err != nil {
+		d.bufPool.Put(buf)
+		return err
+	}
+
+	data := make([]byte, buf.Len())
+	copy(data, buf.Bytes())
+	d.bufPool.Put(buf)
+
+	d.broadcastQueue.QueueBroadcast(&blocklistBroadcast{data: data})
+	return nil
+}
+
 // markSyncComplete marks the state sync as complete and signals readiness
 func (d *StateDelegate) markSyncComplete() {
 	d.ready.Store(true)
@@ -198,4 +299,15 @@ func (d *StateDelegate) SetBlocklist(blocklist *cache.BlocklistCache) {
 // GetBlocklist returns the blocklist cache reference
 func (d *StateDelegate) GetBlocklist() *cache.BlocklistCache {
 	return d.blocklist
+}
+
+// encodeBroadcastEventInto encodes event into buf using msgpack.
+// Reuses the pool-allocated buffer to avoid allocations on the hot path.
+func encodeBroadcastEventInto(event BroadcastEvent, buf *bytes.Buffer) error {
+	data, err := encodeBroadcastEvent(event)
+	if err != nil {
+		return err
+	}
+	buf.Write(data)
+	return nil
 }

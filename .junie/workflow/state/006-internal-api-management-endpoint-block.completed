@@ -1,0 +1,6 @@
+Milestone 006 completed.
+
+Update: Entity model extracted to internal/model/entity.go.
+IP is now part of the composite entity key (IP + Path + SortedHeaders → xxHash-64).
+API routes updated to /blocked-entity/:ip/_path/* pattern.
+Response body includes ip, uriPath, headers fields.

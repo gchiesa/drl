@@ -98,16 +98,28 @@ func main() {
 		"accounting_size_mb", cfg.Cache.AccountingSizeMB,
 	)
 
+	// clusterRef is captured by the NumNodesFunc closure below.
+	// It is assigned immediately after NewCluster returns, before any broadcast
+	// can be triggered, so no additional synchronisation is required.
+	var clusterRef *membership.Cluster
+
 	// Create state delegate for blocklist sync
 	stateDelegate := membership.NewStateDelegate(membership.DelegateConfig{
 		Blocklist:   cacheManager.Blocklist,
 		Metrics:     m,
 		Logger:      logger,
 		SyncTimeout: time.Duration(cfg.Cache.SyncTimeoutSeconds) * time.Second,
+		NumNodesFunc: func() int {
+			if clusterRef == nil {
+				return 1
+			}
+			return clusterRef.NumMembers()
+		},
 	})
 
 	// Initialize cluster membership
 	cluster := membership.NewCluster(cfg, m, logger)
+	clusterRef = cluster
 
 	// Set state delegate before starting the cluster
 	cluster.SetStateDelegate(stateDelegate)
@@ -147,6 +159,8 @@ func main() {
 			NodeID:      cfg.NodeName,
 			Cluster:     cluster,
 			Logger:      logger,
+			Blocklist:   cacheManager.Blocklist,
+			Broadcaster: stateDelegate,
 		})
 		if err != nil {
 			logger.Error("failed to create internal API server", "error", err)

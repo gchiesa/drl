@@ -6,6 +6,9 @@ import (
 	"testing"
 	"time"
 
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+
 	"github.com/gchiesa/drl/internal/config"
 	"github.com/gchiesa/drl/internal/metrics"
 )
@@ -32,22 +35,11 @@ func TestNewCluster(t *testing.T) {
 	logger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelError}))
 
 	cluster := NewCluster(cfg, m, logger)
+	require.NotNil(t, cluster, "expected non-nil cluster")
 
-	if cluster == nil {
-		t.Fatal("expected non-nil cluster")
-	}
-
-	if cluster.config != cfg {
-		t.Error("config not set correctly")
-	}
-
-	if cluster.metrics != m {
-		t.Error("metrics not set correctly")
-	}
-
-	if cluster.logger != logger {
-		t.Error("logger not set correctly")
-	}
+	assert.Equal(t, cfg, cluster.config, "config not set correctly")
+	assert.Equal(t, m, cluster.metrics, "metrics not set correctly")
+	assert.Equal(t, logger, cluster.logger, "logger not set correctly")
 }
 
 func TestClusterStart(t *testing.T) {

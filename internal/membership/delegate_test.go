@@ -45,12 +45,12 @@ func TestStateDelegate_NotifyMsg(t *testing.T) {
 	delegate.NotifyMsg([]byte("test"))
 }
 
-func TestStateDelegate_GetBroadcasts(t *testing.T) {
+func TestStateDelegate_GetBroadcasts_EmptyQueue(t *testing.T) {
 	delegate := NewStateDelegate(DelegateConfig{
 		SyncTimeout: 30 * time.Second,
 	})
 
-	// GetBroadcasts should return nil (we don't use broadcasts)
+	// An empty broadcast queue must return nil (no pending events)
 	broadcasts := delegate.GetBroadcasts(10, 100)
 	assert.Nil(t, broadcasts)
 }

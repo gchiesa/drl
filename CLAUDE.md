@@ -12,20 +12,30 @@ latency of external databases by using a Peer-to-Peer (P2P) Hybrid Architecture:
 DRL can be installed as a sidecar next to Envoy or as a separate fleet of instances dedicated to take decision on the
 rate limit upon received Envoy requests
 
+### Rate limit entity model
+
+The rate limiter is not based solely on IP but instead it uses a configurable entity. Entity is a composition of:
+
+IP + uriPath + optional:zero or more Headers key-value pairs
+
 ### 1 - The Request Path (Envoy → DRL)
 
-* Step 1 (Check): DRL receives a gRPC CheckRequest (localhost or remote host)
-* Step 2 (Local Blocklist): DRL queries its local, fully replicated in-memory Blocklist Cache.
-    * If IP is present $\to$ Return DENIED (429) immediately.
+* Step 1 (Check): DRL receives a gRPC CheckRequest (localhost or remote host). The request should contain IP + uriPath +
+  Headers
+* Step 2 (Local Blocklist): DRL queries its local, fully replicated in-memory Blocklist Cache. It maintains a
+  configurable (via config file) map of entities which are used for perform accounting and rate limiting.
+    * each entity is a composition of IP + uriPath + zero or more Headers to calculate the requests. We do not rate
+      limit solely on IP but with an higher granularity represented by the information on this entity
+    * If IP + uriPath + Headers tuple is present $\to$ Return DENIED (429) immediately.
 * Step 3 (Optimistic OK): If not blocked, $\to$ Return OK to Envoy.
-* Step 4 (Async Sync): In a background goroutine, DRL hashes the IP to find the Owner Node and sends an Increment (IP)
-  signal via internal gRPC/UDP.
+* Step 4 (Async Sync): In a background goroutine, DRL hashes the multiple information in the entity to find the Owner
+  Node and sends an Increment signal via internal gRPC/UDP.
 
 ### 2 - The Accounting & Propagation Path
 
 * Step 5 (Ownership): The Owner Node updates the counter in its Hashed Accounting Cache.
 * Step 6 (Violation): If the limit is breached, the Owner Node:
-    * Adds the IP to its local Blocklist.
+    * Adds the entity to its local Blocklist.
     * Broadcasts a Block(IP, TTL) event to the cluster using Serf/Memberlist.
 * Step 7 (Convergence): All nodes receive the event and update their local Blocklist, ensuring the next request from any
   Envoy is blocked at Step 2.
