@@ -7,6 +7,8 @@ import (
 	"time"
 
 	"github.com/gofiber/fiber/v2"
+
+	"github.com/gchiesa/drl/internal/model"
 )
 
 // ClusterInfo provides cluster information for the status endpoint
@@ -20,8 +22,10 @@ type ClusterInfo interface {
 // Ristretto blocklist cache.
 type BlocklistOperator interface {
 	Block(key string, ttl time.Duration)
+	BlockWithMeta(key string, ttl time.Duration, entity *model.Entity)
 	Unblock(key string)
 	IsBlocked(key string) bool
+	ListEntries() []model.BlockedEntityInfo
 }
 
 // Broadcaster queues block/unblock events for cluster-wide eventual propagation
@@ -33,16 +37,17 @@ type Broadcaster interface {
 
 // Server represents the internal API server
 type Server struct {
-	app         *fiber.App
-	auth        *DigestAuthenticator
-	logger      *slog.Logger
-	address     string
-	clusterName string
-	nodeID      string
-	cluster     ClusterInfo
-	startTime   time.Time
-	blocklist   BlocklistOperator
-	broadcaster Broadcaster
+	app             *fiber.App
+	auth            *DigestAuthenticator
+	logger          *slog.Logger
+	address         string
+	clusterName     string
+	nodeID          string
+	cluster         ClusterInfo
+	startTime       time.Time
+	blocklist       BlocklistOperator
+	broadcaster     Broadcaster
+	defaultBlockTTL time.Duration
 }
 
 // ServerConfig holds configuration for the API server
@@ -58,6 +63,9 @@ type ServerConfig struct {
 	// Broadcaster is optional; when set, admin block/unblock events are gossiped
 	// to the rest of the cluster.
 	Broadcaster Broadcaster
+	// DefaultBlockTTL is the default time-to-live for admin-API blocks.
+	// Overridden per-request via ?ttl= query parameter.
+	DefaultBlockTTL time.Duration
 }
 
 // NewServer creates a new internal API server
@@ -74,17 +82,23 @@ func NewServer(cfg ServerConfig) (*Server, error) {
 		AppName:               "DRL Internal API",
 	})
 
+	defaultTTL := cfg.DefaultBlockTTL
+	if defaultTTL == 0 {
+		defaultTTL = 24 * time.Hour
+	}
+
 	server := &Server{
-		app:         app,
-		auth:        auth,
-		logger:      cfg.Logger,
-		address:     cfg.Address,
-		clusterName: cfg.ClusterName,
-		nodeID:      cfg.NodeID,
-		cluster:     cfg.Cluster,
-		startTime:   time.Now(),
-		blocklist:   cfg.Blocklist,
-		broadcaster: cfg.Broadcaster,
+		app:             app,
+		auth:            auth,
+		logger:          cfg.Logger,
+		address:         cfg.Address,
+		clusterName:     cfg.ClusterName,
+		nodeID:          cfg.NodeID,
+		cluster:         cfg.Cluster,
+		startTime:       time.Now(),
+		blocklist:       cfg.Blocklist,
+		broadcaster:     cfg.Broadcaster,
+		defaultBlockTTL: defaultTTL,
 	}
 
 	// Setup routes
@@ -101,6 +115,8 @@ func (s *Server) setupRoutes() {
 	s.app.Get("/status", authMW, s.handleStatus)
 
 	// Admin blocklist management.
+	s.app.Get("/blocked-entity", authMW, s.handleBlockEntityList)
+
 	// :ip captures the client IP, then the greedy wildcard captures the full
 	// URI path and optional /_headers/<key:val,...> suffix.
 	s.app.Post("/blocked-entity/:ip/_path/*", authMW, s.handleBlockEntityAdd)

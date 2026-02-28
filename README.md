@@ -128,6 +128,12 @@ curl --digest -u ":$DRL_PRIVATE_API_KEY" http://localhost:8082/status
 
 # Or with explicit admin username
 curl --digest -u "admin:$DRL_PRIVATE_API_KEY" http://localhost:8082/status
+
+# Get the blocked entities 
+curl --silent --digest -u "admin:$DRL_PRIVATE_API_KEY" drl-drl-1:8082/blocked-entity/ | jq
+
+# Add an entitiy
+
 ```
 
 #### Authentication Flow

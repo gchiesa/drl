@@ -7,6 +7,8 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/gchiesa/drl/internal/model"
 )
 
 func TestNewBlocklistCache(t *testing.T) {
@@ -319,4 +321,124 @@ func TestBlocklistCache_ConcurrentAccess(t *testing.T) {
 	}
 
 	wg.Wait()
+}
+
+func TestBlocklistCache_BlockWithMeta(t *testing.T) {
+	bc, err := NewBlocklistCache(BlocklistConfig{
+		MaxSizeMB: 1,
+	})
+	require.NoError(t, err)
+	defer bc.Close()
+
+	entity := &model.Entity{
+		IP:      "10.0.0.1",
+		Path:    "api/v1/payments",
+		Headers: map[string]string{"User-Agent": "Bot"},
+	}
+	key := entity.Key()
+
+	bc.BlockWithMeta(key, 5*time.Second, entity)
+	assert.True(t, bc.IsBlocked(key))
+}
+
+func TestBlocklistCache_ListEntries_Empty(t *testing.T) {
+	bc, err := NewBlocklistCache(BlocklistConfig{
+		MaxSizeMB: 1,
+	})
+	require.NoError(t, err)
+	defer bc.Close()
+
+	entries := bc.ListEntries()
+	assert.Empty(t, entries)
+}
+
+func TestBlocklistCache_ListEntries_WithMetadata(t *testing.T) {
+	bc, err := NewBlocklistCache(BlocklistConfig{
+		MaxSizeMB: 1,
+	})
+	require.NoError(t, err)
+	defer bc.Close()
+
+	entity := &model.Entity{
+		IP:      "10.0.0.1",
+		Path:    "api/v1",
+		Headers: map[string]string{"X-Bot": "true"},
+	}
+	key := entity.Key()
+	bc.BlockWithMeta(key, 5*time.Second, entity)
+
+	entries := bc.ListEntries()
+	require.Len(t, entries, 1)
+	assert.Equal(t, key, entries[0].Key)
+	assert.NotNil(t, entries[0].Entity)
+	assert.Equal(t, "10.0.0.1", entries[0].Entity.IP)
+	assert.Equal(t, "api/v1", entries[0].Entity.Path)
+	assert.Equal(t, map[string]string{"X-Bot": "true"}, entries[0].Entity.Headers)
+	assert.True(t, entries[0].ExpiresAt.After(time.Now()))
+}
+
+func TestBlocklistCache_ListEntries_WithoutMetadata(t *testing.T) {
+	bc, err := NewBlocklistCache(BlocklistConfig{
+		MaxSizeMB: 1,
+	})
+	require.NoError(t, err)
+	defer bc.Close()
+
+	// Block without metadata (automatic rate-limiter block)
+	bc.Block("somekey", 5*time.Second)
+
+	entries := bc.ListEntries()
+	require.Len(t, entries, 1)
+	assert.Equal(t, "somekey", entries[0].Key)
+	assert.Nil(t, entries[0].Entity)
+}
+
+func TestBlocklistCache_ListEntries_FiltersExpired(t *testing.T) {
+	bc, err := NewBlocklistCache(BlocklistConfig{
+		MaxSizeMB: 1,
+	})
+	require.NoError(t, err)
+	defer bc.Close()
+
+	bc.Block("expired", 50*time.Millisecond)
+	bc.Block("valid", 5*time.Second)
+
+	time.Sleep(100 * time.Millisecond)
+
+	entries := bc.ListEntries()
+	require.Len(t, entries, 1)
+	assert.Equal(t, "valid", entries[0].Key)
+}
+
+func TestBlocklistCache_MergeState_WithEntityMetadata(t *testing.T) {
+	source, err := NewBlocklistCache(BlocklistConfig{MaxSizeMB: 1})
+	require.NoError(t, err)
+	defer source.Close()
+
+	dest, err := NewBlocklistCache(BlocklistConfig{MaxSizeMB: 1})
+	require.NoError(t, err)
+	defer dest.Close()
+
+	entity := &model.Entity{
+		IP:      "10.0.0.1",
+		Path:    "api/v1",
+		Headers: map[string]string{"X-Bot": "true"},
+	}
+	source.BlockWithMeta(entity.Key(), 5*time.Second, entity)
+
+	state, err := source.GetState()
+	require.NoError(t, err)
+
+	err = dest.MergeState(state)
+	require.NoError(t, err)
+
+	assert.True(t, dest.IsBlocked(entity.Key()))
+
+	// Verify metadata was transferred
+	entries := dest.ListEntries()
+	require.Len(t, entries, 1)
+	require.NotNil(t, entries[0].Entity)
+	assert.Equal(t, "10.0.0.1", entries[0].Entity.IP)
+	assert.Equal(t, "api/v1", entries[0].Entity.Path)
+	assert.Equal(t, map[string]string{"X-Bot": "true"}, entries[0].Entity.Headers)
 }

@@ -8,18 +8,31 @@ import (
 	"github.com/dgraph-io/ristretto/v2"
 	"github.com/samber/lo"
 	"github.com/vmihailenco/msgpack/v5"
+
+	"github.com/gchiesa/drl/internal/model"
 )
 
-// BlocklistEntry represents a blocked IP with its TTL
+// BlocklistEntry is the wire format used for state sync (Push/Pull).
+// New fields use `omitempty` so that nodes running older code can still
+// deserialise the payload without errors.
 type BlocklistEntry struct {
-	IP        string    `msgpack:"ip"`
-	ExpiresAt time.Time `msgpack:"expires_at"`
+	IP         string            `msgpack:"ip"`                    // cache key (entity hash)
+	ExpiresAt  time.Time         `msgpack:"expires_at"`            // absolute expiration
+	EntityIP   string            `msgpack:"entity_ip,omitempty"`   // original IP
+	EntityPath string            `msgpack:"entity_path,omitempty"` // original URI path
+	EntityHdrs map[string]string `msgpack:"entity_hdrs,omitempty"` // original headers
+}
+
+// blocklistEntryData is the value stored in the entries sync.Map.
+type blocklistEntryData struct {
+	expiresAt time.Time
+	entity    *model.Entity // nil for automatic (rate-limiter) blocks
 }
 
 // BlocklistCache is a fully replicated in-memory cache for banned IPs
 type BlocklistCache struct {
 	cache   *ristretto.Cache[string, time.Time]
-	entries sync.Map // map[string]time.Time for tracking all entries
+	entries sync.Map // map[string]*blocklistEntryData
 	logger  *slog.Logger
 	maxCost int64
 
@@ -65,7 +78,7 @@ func NewBlocklistCache(cfg BlocklistConfig) (*BlocklistCache, error) {
 			}
 		},
 		Cost: func(value time.Time) int64 {
-			// Each entry is approximately: IP string (~40 bytes) + time.Time (24 bytes) + overhead
+			// Each entry is approximately: key string (~40 bytes) + time.Time (24 bytes) + overhead
 			return 100
 		},
 	})
@@ -77,9 +90,9 @@ func NewBlocklistCache(cfg BlocklistConfig) (*BlocklistCache, error) {
 	return bc, nil
 }
 
-// IsBlocked checks if an IP is in the blocklist
-func (b *BlocklistCache) IsBlocked(ip string) bool {
-	expiresAt, found := b.cache.Get(ip)
+// IsBlocked checks if a key is in the blocklist
+func (b *BlocklistCache) IsBlocked(key string) bool {
+	expiresAt, found := b.cache.Get(key)
 	if !found {
 		if b.onMiss != nil {
 			b.onMiss()
@@ -89,8 +102,8 @@ func (b *BlocklistCache) IsBlocked(ip string) bool {
 
 	// Check if expired
 	if time.Now().After(expiresAt) {
-		b.cache.Del(ip)
-		b.entries.Delete(ip)
+		b.cache.Del(key)
+		b.entries.Delete(key)
 		if b.onMiss != nil {
 			b.onMiss()
 		}
@@ -103,29 +116,70 @@ func (b *BlocklistCache) IsBlocked(ip string) bool {
 	return true
 }
 
-// Block adds an IP to the blocklist with a TTL
-func (b *BlocklistCache) Block(ip string, ttl time.Duration) {
+// Block adds a key to the blocklist with a TTL.
+// No entity metadata is stored — use BlockWithMeta for admin-API blocks.
+func (b *BlocklistCache) Block(key string, ttl time.Duration) {
 	expiresAt := time.Now().Add(ttl)
-	b.cache.SetWithTTL(ip, expiresAt, 100, ttl)
-	b.entries.Store(ip, expiresAt)
-	b.cache.Wait() // Ensure the value is set before returning
+	b.cache.SetWithTTL(key, expiresAt, 100, ttl)
+	b.entries.Store(key, &blocklistEntryData{expiresAt: expiresAt})
+	b.cache.Wait()
 
 	if b.logger != nil {
-		b.logger.Debug("IP blocked",
-			"ip", ip,
+		b.logger.Debug("entity blocked",
+			"key", key,
 			"ttl", ttl,
 			"expires_at", expiresAt,
 		)
 	}
 }
 
-// Unblock removes an IP from the blocklist
-func (b *BlocklistCache) Unblock(ip string) {
-	b.cache.Del(ip)
-	b.entries.Delete(ip)
+// BlockWithMeta adds a key to the blocklist with a TTL and entity metadata.
+// The metadata is preserved in the secondary index so that ListEntries can
+// reconstruct the original entity for the admin GET endpoint.
+func (b *BlocklistCache) BlockWithMeta(key string, ttl time.Duration, entity *model.Entity) {
+	expiresAt := time.Now().Add(ttl)
+	b.cache.SetWithTTL(key, expiresAt, 100, ttl)
+	b.entries.Store(key, &blocklistEntryData{expiresAt: expiresAt, entity: entity})
+	b.cache.Wait()
+
 	if b.logger != nil {
-		b.logger.Debug("IP unblocked", "ip", ip)
+		b.logger.Debug("entity blocked with metadata",
+			"key", key,
+			"ttl", ttl,
+			"expires_at", expiresAt,
+		)
 	}
+}
+
+// Unblock removes a key from the blocklist
+func (b *BlocklistCache) Unblock(key string) {
+	b.cache.Del(key)
+	b.entries.Delete(key)
+	if b.logger != nil {
+		b.logger.Debug("entity unblocked", "key", key)
+	}
+}
+
+// ListEntries returns all current blocklist entries with their metadata.
+// Entries whose TTL has expired are filtered out.
+func (b *BlocklistCache) ListEntries() []model.BlockedEntityInfo {
+	now := time.Now()
+	var result []model.BlockedEntityInfo
+
+	b.entries.Range(func(k, v any) bool {
+		key := k.(string)
+		data := v.(*blocklistEntryData)
+		if data.expiresAt.After(now) {
+			result = append(result, model.BlockedEntityInfo{
+				Key:       key,
+				ExpiresAt: data.expiresAt,
+				Entity:    data.entity,
+			})
+		}
+		return true
+	})
+
+	return result
 }
 
 // GetState serializes the current blocklist state for sync
@@ -133,17 +187,21 @@ func (b *BlocklistCache) GetState() ([]byte, error) {
 	now := time.Now()
 	entries := make([]BlocklistEntry, 0)
 
-	// Iterate through tracked entries
-	b.entries.Range(func(key, value any) bool {
-		ip := key.(string)
-		expiresAt := value.(time.Time)
+	b.entries.Range(func(k, v any) bool {
+		key := k.(string)
+		data := v.(*blocklistEntryData)
 
-		// Only include non-expired entries
-		if expiresAt.After(now) {
-			entries = append(entries, BlocklistEntry{
-				IP:        ip,
-				ExpiresAt: expiresAt,
-			})
+		if data.expiresAt.After(now) {
+			entry := BlocklistEntry{
+				IP:        key,
+				ExpiresAt: data.expiresAt,
+			}
+			if data.entity != nil {
+				entry.EntityIP = data.entity.IP
+				entry.EntityPath = data.entity.Path
+				entry.EntityHdrs = data.entity.Headers
+			}
+			entries = append(entries, entry)
 		}
 		return true
 	})
@@ -177,11 +235,19 @@ func (b *BlocklistCache) MergeState(data []byte) error {
 	merged := 0
 
 	for _, entry := range entries {
-		// Only add if not expired
 		if entry.ExpiresAt.After(now) {
 			ttl := entry.ExpiresAt.Sub(now)
 			b.cache.SetWithTTL(entry.IP, entry.ExpiresAt, 100, ttl)
-			b.entries.Store(entry.IP, entry.ExpiresAt)
+
+			ed := &blocklistEntryData{expiresAt: entry.ExpiresAt}
+			if entry.EntityIP != "" || entry.EntityPath != "" {
+				ed.entity = &model.Entity{
+					IP:      entry.EntityIP,
+					Path:    entry.EntityPath,
+					Headers: entry.EntityHdrs,
+				}
+			}
+			b.entries.Store(entry.IP, ed)
 			merged++
 		}
 	}
@@ -213,15 +279,21 @@ func (b *BlocklistCache) Entries() []BlocklistEntry {
 	now := time.Now()
 	entries := make([]BlocklistEntry, 0)
 
-	b.entries.Range(func(key, value any) bool {
-		ip := key.(string)
-		expiresAt := value.(time.Time)
+	b.entries.Range(func(k, v any) bool {
+		key := k.(string)
+		data := v.(*blocklistEntryData)
 
-		if expiresAt.After(now) {
-			entries = append(entries, BlocklistEntry{
-				IP:        ip,
-				ExpiresAt: expiresAt,
-			})
+		if data.expiresAt.After(now) {
+			entry := BlocklistEntry{
+				IP:        key,
+				ExpiresAt: data.expiresAt,
+			}
+			if data.entity != nil {
+				entry.EntityIP = data.entity.IP
+				entry.EntityPath = data.entity.Path
+				entry.EntityHdrs = data.entity.Headers
+			}
+			entries = append(entries, entry)
 		}
 		return true
 	})
@@ -232,9 +304,9 @@ func (b *BlocklistCache) Entries() []BlocklistEntry {
 // Clear removes all entries from the blocklist
 func (b *BlocklistCache) Clear() {
 	b.entries.Range(func(key, _ any) bool {
-		ip := key.(string)
-		b.cache.Del(ip)
-		b.entries.Delete(ip)
+		k := key.(string)
+		b.cache.Del(k)
+		b.entries.Delete(k)
 		return true
 	})
 	b.cache.Wait()

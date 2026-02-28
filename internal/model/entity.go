@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/cespare/xxhash/v2"
 )
@@ -47,4 +48,14 @@ func (e Entity) Key() string {
 
 	hash := xxhash.Sum64String(sb.String())
 	return fmt.Sprintf("%016x", hash)
+}
+
+// BlockedEntityInfo is returned by the blocklist cache when listing entries.
+// It pairs the cache key with its expiration and the optional originating
+// entity metadata (populated only for admin-API blocks, nil for automatic
+// rate-limiter blocks).
+type BlockedEntityInfo struct {
+	Key       string
+	ExpiresAt time.Time
+	Entity    *Entity
 }

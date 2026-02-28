@@ -57,6 +57,8 @@ services:
     image: alpine:latest
     container_name: jumpbox
     command: ["sleep", "infinity"]
+    environment:
+      DRL_PRIVATE_API_KEY: "Test5ecretPrivateAPIKey!"
     networks:
       - drl-network
 

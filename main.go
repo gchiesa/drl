@@ -153,14 +153,15 @@ func main() {
 
 		apiKey, _ := config.GetPrivateAPIKey()
 		apiServer, err = api.NewServer(api.ServerConfig{
-			Address:     cfg.InternalAPI.Address,
-			APIKey:      apiKey,
-			ClusterName: cfg.Membership.ServiceName,
-			NodeID:      cfg.NodeName,
-			Cluster:     cluster,
-			Logger:      logger,
-			Blocklist:   cacheManager.Blocklist,
-			Broadcaster: stateDelegate,
+			Address:         cfg.InternalAPI.Address,
+			APIKey:          apiKey,
+			ClusterName:     cfg.Membership.ServiceName,
+			NodeID:          cfg.NodeName,
+			Cluster:         cluster,
+			Logger:          logger,
+			Blocklist:       cacheManager.Blocklist,
+			Broadcaster:     stateDelegate,
+			DefaultBlockTTL: time.Duration(cfg.Cache.BlocklistDefaultTTLSeconds) * time.Second,
 		})
 		if err != nil {
 			logger.Error("failed to create internal API server", "error", err)
