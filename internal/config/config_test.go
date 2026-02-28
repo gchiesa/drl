@@ -38,6 +38,7 @@ func TestLoad_DefaultsOnly(t *testing.T) {
 	assert.Equal(t, int64(64), cfg.Cache.BlocklistSizeMB)
 	assert.Equal(t, int64(128), cfg.Cache.AccountingSizeMB)
 	assert.Equal(t, 30, cfg.Cache.SyncTimeoutSeconds)
+	assert.Equal(t, 3600, cfg.Cache.BlocklistDefaultTTLSeconds)
 
 	// NodeName should be set to hostname when not specified
 	hostname, _ := os.Hostname()
@@ -239,9 +240,10 @@ func TestValidate_ValidConfig(t *testing.T) {
 			Format: "json",
 		},
 		Cache: CacheConfig{
-			BlocklistSizeMB:    64,
-			AccountingSizeMB:   128,
-			SyncTimeoutSeconds: 30,
+			BlocklistSizeMB:            64,
+			AccountingSizeMB:           128,
+			SyncTimeoutSeconds:         30,
+			BlocklistDefaultTTLSeconds: 3600,
 		},
 	}
 
@@ -265,9 +267,10 @@ func TestValidate_EmptyServiceName(t *testing.T) {
 			Format: "json",
 		},
 		Cache: CacheConfig{
-			BlocklistSizeMB:    64,
-			AccountingSizeMB:   128,
-			SyncTimeoutSeconds: 30,
+			BlocklistSizeMB:            64,
+			AccountingSizeMB:           128,
+			SyncTimeoutSeconds:         30,
+			BlocklistDefaultTTLSeconds: 3600,
 		},
 	}
 
@@ -304,9 +307,10 @@ func TestValidate_InvalidPort(t *testing.T) {
 					Format: "json",
 				},
 				Cache: CacheConfig{
-					BlocklistSizeMB:    64,
-					AccountingSizeMB:   128,
-					SyncTimeoutSeconds: 30,
+					BlocklistSizeMB:            64,
+					AccountingSizeMB:           128,
+					SyncTimeoutSeconds:         30,
+					BlocklistDefaultTTLSeconds: 3600,
 				},
 			}
 
@@ -346,9 +350,10 @@ func TestValidate_ValidPortBoundaries(t *testing.T) {
 					Format: "json",
 				},
 				Cache: CacheConfig{
-					BlocklistSizeMB:    64,
-					AccountingSizeMB:   128,
-					SyncTimeoutSeconds: 30,
+					BlocklistSizeMB:            64,
+					AccountingSizeMB:           128,
+					SyncTimeoutSeconds:         30,
+					BlocklistDefaultTTLSeconds: 3600,
 				},
 			}
 
@@ -374,9 +379,10 @@ func TestValidate_EmptyBindAddr(t *testing.T) {
 			Format: "json",
 		},
 		Cache: CacheConfig{
-			BlocklistSizeMB:    64,
-			AccountingSizeMB:   128,
-			SyncTimeoutSeconds: 30,
+			BlocklistSizeMB:            64,
+			AccountingSizeMB:           128,
+			SyncTimeoutSeconds:         30,
+			BlocklistDefaultTTLSeconds: 3600,
 		},
 	}
 
@@ -401,9 +407,10 @@ func TestValidate_EmptyGRPC(t *testing.T) {
 			Format: "json",
 		},
 		Cache: CacheConfig{
-			BlocklistSizeMB:    64,
-			AccountingSizeMB:   128,
-			SyncTimeoutSeconds: 30,
+			BlocklistSizeMB:            64,
+			AccountingSizeMB:           128,
+			SyncTimeoutSeconds:         30,
+			BlocklistDefaultTTLSeconds: 3600,
 		},
 	}
 
@@ -428,9 +435,10 @@ func TestValidate_EmptyMetrics(t *testing.T) {
 			Format: "json",
 		},
 		Cache: CacheConfig{
-			BlocklistSizeMB:    64,
-			AccountingSizeMB:   128,
-			SyncTimeoutSeconds: 30,
+			BlocklistSizeMB:            64,
+			AccountingSizeMB:           128,
+			SyncTimeoutSeconds:         30,
+			BlocklistDefaultTTLSeconds: 3600,
 		},
 	}
 
@@ -459,9 +467,10 @@ func TestValidate_InvalidLogLevel(t *testing.T) {
 					Format: "json",
 				},
 				Cache: CacheConfig{
-					BlocklistSizeMB:    64,
-					AccountingSizeMB:   128,
-					SyncTimeoutSeconds: 30,
+					BlocklistSizeMB:            64,
+					AccountingSizeMB:           128,
+					SyncTimeoutSeconds:         30,
+					BlocklistDefaultTTLSeconds: 3600,
 				},
 			}
 
@@ -492,9 +501,10 @@ func TestValidate_ValidLogLevels(t *testing.T) {
 					Format: "json",
 				},
 				Cache: CacheConfig{
-					BlocklistSizeMB:    64,
-					AccountingSizeMB:   128,
-					SyncTimeoutSeconds: 30,
+					BlocklistSizeMB:            64,
+					AccountingSizeMB:           128,
+					SyncTimeoutSeconds:         30,
+					BlocklistDefaultTTLSeconds: 3600,
 				},
 			}
 
@@ -524,9 +534,10 @@ func TestValidate_InvalidLogFormat(t *testing.T) {
 					Format: format,
 				},
 				Cache: CacheConfig{
-					BlocklistSizeMB:    64,
-					AccountingSizeMB:   128,
-					SyncTimeoutSeconds: 30,
+					BlocklistSizeMB:            64,
+					AccountingSizeMB:           128,
+					SyncTimeoutSeconds:         30,
+					BlocklistDefaultTTLSeconds: 3600,
 				},
 			}
 
@@ -557,9 +568,10 @@ func TestValidate_ValidLogFormats(t *testing.T) {
 					Format: format,
 				},
 				Cache: CacheConfig{
-					BlocklistSizeMB:    64,
-					AccountingSizeMB:   128,
-					SyncTimeoutSeconds: 30,
+					BlocklistSizeMB:            64,
+					AccountingSizeMB:           128,
+					SyncTimeoutSeconds:         30,
+					BlocklistDefaultTTLSeconds: 3600,
 				},
 			}
 
@@ -605,6 +617,7 @@ func TestValidate_MultipleErrors(t *testing.T) {
 	assert.Contains(t, err.Error(), "cache.blocklist-size-mb must be at least 1 MB")
 	assert.Contains(t, err.Error(), "cache.accounting-size-mb must be at least 1 MB")
 	assert.Contains(t, err.Error(), "cache.sync-timeout-seconds must be at least 1")
+	assert.Contains(t, err.Error(), "cache.blocklist-default-ttl-seconds must be at least 1")
 }
 
 func TestValidate_InvalidCacheConfig(t *testing.T) {
@@ -615,18 +628,23 @@ func TestValidate_InvalidCacheConfig(t *testing.T) {
 	}{
 		{
 			name:     "blocklist size zero",
-			cache:    CacheConfig{BlocklistSizeMB: 0, AccountingSizeMB: 64, SyncTimeoutSeconds: 30},
+			cache:    CacheConfig{BlocklistSizeMB: 0, AccountingSizeMB: 64, SyncTimeoutSeconds: 30, BlocklistDefaultTTLSeconds: 3600},
 			errorMsg: "cache.blocklist-size-mb must be at least 1 MB",
 		},
 		{
 			name:     "accounting size zero",
-			cache:    CacheConfig{BlocklistSizeMB: 64, AccountingSizeMB: 0, SyncTimeoutSeconds: 30},
+			cache:    CacheConfig{BlocklistSizeMB: 64, AccountingSizeMB: 0, SyncTimeoutSeconds: 30, BlocklistDefaultTTLSeconds: 3600},
 			errorMsg: "cache.accounting-size-mb must be at least 1 MB",
 		},
 		{
 			name:     "sync timeout zero",
-			cache:    CacheConfig{BlocklistSizeMB: 64, AccountingSizeMB: 128, SyncTimeoutSeconds: 0},
+			cache:    CacheConfig{BlocklistSizeMB: 64, AccountingSizeMB: 128, SyncTimeoutSeconds: 0, BlocklistDefaultTTLSeconds: 3600},
 			errorMsg: "cache.sync-timeout-seconds must be at least 1",
+		},
+		{
+			name:     "blocklist default ttl zero",
+			cache:    CacheConfig{BlocklistSizeMB: 64, AccountingSizeMB: 128, SyncTimeoutSeconds: 30, BlocklistDefaultTTLSeconds: 0},
+			errorMsg: "cache.blocklist-default-ttl-seconds must be at least 1",
 		},
 	}
 
@@ -878,6 +896,7 @@ func clearEnvVars(t *testing.T) {
 		"DRL_CACHE_BLOCKLIST_SIZE_MB",
 		"DRL_CACHE_ACCOUNTING_SIZE_MB",
 		"DRL_CACHE_SYNC_TIMEOUT_SECONDS",
+		"DRL_CACHE_BLOCKLIST_DEFAULT_TTL_SECONDS",
 	}
 
 	for _, env := range envVars {

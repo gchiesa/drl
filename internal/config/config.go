@@ -86,6 +86,8 @@ type CacheConfig struct {
 	AccountingSizeMB int64 `kdl:"accounting-size-mb" env:"ACCOUNTING_SIZE_MB"`
 	// SyncTimeoutSeconds is the timeout in seconds for initial state sync
 	SyncTimeoutSeconds int `kdl:"sync-timeout-seconds" env:"SYNC_TIMEOUT_SECONDS"`
+	// BlocklistDefaultTTLSeconds is the default TTL in seconds for admin-API blocks
+	BlocklistDefaultTTLSeconds int `kdl:"blocklist-default-ttl-seconds" env:"BLOCKLIST_DEFAULT_TTL_SECONDS"`
 }
 
 func NewConfig() *Config {
@@ -194,6 +196,9 @@ func (c *Config) Validate() error {
 	}
 	if c.Cache.SyncTimeoutSeconds < 1 {
 		errs = append(errs, fmt.Sprintf("cache.sync-timeout-seconds must be at least 1, got %d", c.Cache.SyncTimeoutSeconds))
+	}
+	if c.Cache.BlocklistDefaultTTLSeconds < 1 {
+		errs = append(errs, fmt.Sprintf("cache.blocklist-default-ttl-seconds must be at least 1, got %d", c.Cache.BlocklistDefaultTTLSeconds))
 	}
 
 	if len(errs) > 0 {

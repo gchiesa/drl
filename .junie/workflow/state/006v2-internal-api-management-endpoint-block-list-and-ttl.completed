@@ -1,0 +1,12 @@
+Milestone 006v2 completed on 2026-02-28.
+
+Changes implemented:
+1. GET /blocked-entity endpoint returns JSON array of all blocked entities with id, ip, uriPath, headers, expires_at (RFC3339)
+2. Configurable default TTL via cache.blocklist-default-ttl-seconds in KDL config (default: 3600s)
+3. Optional ?ttl=N query parameter on POST /blocked-entity to override default TTL
+4. Entity metadata stored alongside blocklist entries via BlockWithMeta for admin-API blocks
+5. BlockedEntityInfo model type for listing entries with metadata
+6. Updated state sync serialization to include entity metadata (backward compatible via omitempty)
+7. Fixed Fiber fasthttp buffer reuse bug: strings from c.Params() now cloned before storing in entity metadata
+
+All tests pass. Lint clean.
