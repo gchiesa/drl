@@ -40,7 +40,6 @@ services:
       dockerfile: Dockerfile
     volumes:
       - ./deployments/drl/config.kdl:/etc/drl/config.kdl:ro
-    command: ["--config", "/etc/drl/config.kdl"]
     healthcheck:
       test: ["CMD", "wget", "-q", "--spider", "http://localhost:9091/health"]
       interval: 5s
@@ -50,6 +49,7 @@ services:
     deploy:
       replicas: 3
     environment:
+      DRL_CONFIG_PATH: /etc/drl/config.kdl
       DRL_PRIVATE_API_KEY: "Test5ecretPrivateAPIKey!"
     networks:
       - drl-network
