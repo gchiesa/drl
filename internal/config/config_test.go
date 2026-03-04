@@ -907,33 +907,38 @@ func TestAccountingConfig_KDLParsing(t *testing.T) {
 
 	kdlConfig := `
 accounting {
-    rule "/api/v1" {
-        headers "X-API-KEY-ID" "X-Consumer-Type"
-        limit 100 per="minute"
-    }
-    rule "/health" {
-        limit 500 per="second"
-    }
+	rules {
+		"api-v1" {
+			path-prefix "/api/v1" 
+			headers "X-API-KEY-ID" "X-Consumer-Type"
+			limit 100 
+			per "minute"
+		}
+		"health" {
+			path-prefix "/health" 
+			limit 500 
+			per "second"
+		}
+	}
 }
 `
 	err := os.WriteFile(configPath, []byte(kdlConfig), 0644)
 	require.NoError(t, err)
-
 	cfg, err := Load(configPath)
 	require.NoError(t, err)
 	require.Len(t, cfg.Accounting.Rules, 2)
 
 	// First rule
-	assert.Equal(t, "/api/v1", cfg.Accounting.Rules[0].PathPrefix)
-	assert.Equal(t, []string{"X-API-KEY-ID", "X-Consumer-Type"}, cfg.Accounting.Rules[0].Headers)
-	assert.Equal(t, int64(100), cfg.Accounting.Rules[0].Limit)
-	assert.Equal(t, "minute", cfg.Accounting.Rules[0].Per)
+	assert.Equal(t, "/api/v1", cfg.Accounting.Rules["api-v1"].PathPrefix)
+	assert.Equal(t, []string{"X-API-KEY-ID", "X-Consumer-Type"}, cfg.Accounting.Rules["api-v1"].Headers)
+	assert.Equal(t, int64(100), cfg.Accounting.Rules["api-v1"].Limit)
+	assert.Equal(t, "minute", cfg.Accounting.Rules["api-v1"].Per)
 
 	// Second rule
-	assert.Equal(t, "/health", cfg.Accounting.Rules[1].PathPrefix)
-	assert.Empty(t, cfg.Accounting.Rules[1].Headers)
-	assert.Equal(t, int64(500), cfg.Accounting.Rules[1].Limit)
-	assert.Equal(t, "second", cfg.Accounting.Rules[1].Per)
+	assert.Equal(t, "/health", cfg.Accounting.Rules["health"].PathPrefix)
+	assert.Empty(t, cfg.Accounting.Rules["health"].Headers)
+	assert.Equal(t, int64(500), cfg.Accounting.Rules["health"].Limit)
+	assert.Equal(t, "second", cfg.Accounting.Rules["health"].Per)
 }
 
 func TestAccountingConfig_EmptyBlock(t *testing.T) {
@@ -968,12 +973,14 @@ func TestAccountingConfig_ValidationErrors(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			rules := make(map[string]AccountingRule)
+			rules[tt.name] = tt.rule
 			cfg := &Config{
 				Listen:     ListenConfig{GRPC: ":8081", Metrics: ":9091"},
 				Membership: MembershipConfig{ServiceName: "drl", Port: 7946, BindAddr: "0.0.0.0"},
 				Logging:    LoggingConfig{Level: "info", Format: "json"},
 				Cache:      CacheConfig{BlocklistSizeMB: 64, AccountingSizeMB: 128, SyncTimeoutSeconds: 30, BlocklistDefaultTTLSeconds: 3600},
-				Accounting: AccountingConfig{Rules: []AccountingRule{tt.rule}},
+				Accounting: AccountingConfig{Rules: rules},
 			}
 			err := cfg.Validate()
 			assert.Error(t, err)
