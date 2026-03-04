@@ -9,6 +9,7 @@ import (
 	"github.com/gchiesa/drl/internal/cache"
 	"github.com/gchiesa/drl/internal/config"
 	"github.com/gchiesa/drl/internal/metrics"
+	"github.com/samber/lo"
 )
 
 // newAccountingEngine initializes and returns a new accounting.Engine based on the provided configuration and dependencies.
@@ -36,7 +37,7 @@ func newAccountingEngine(cfg *config.Config, cacheManager *cache.Manager, metric
 		log.Info("accounting flusher started", "sync_port", accounting.DefaultSyncPort)
 
 		engine = accounting.NewEngine(accounting.EngineConfig{
-			Rules:      cfg.Accounting.Rules,
+			Rules:      lo.Values(cfg.Accounting.Rules),
 			Accounting: cacheManager.Accounting,
 			Flusher:    flusher,
 			Logger:     log,

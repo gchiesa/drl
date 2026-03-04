@@ -44,6 +44,7 @@ func NewEngine(cfg EngineConfig) *Engine {
 	}
 }
 
+// GetFlusher returns the Flusher instance associated with the Engine, allowing interaction with batching and flushing.
 func (e *Engine) GetFlusher() *Flusher {
 	return e.flusher
 }
