@@ -1,0 +1,86 @@
+# Milestone 008: gRPC Entities Accounting & Sync - COMPLETED
+
+## Date: 2026-03-01
+
+## Summary
+Implemented the distributed accounting engine that transitions DRL from passive
+gRPC receiver to an active distributed accounting system.
+
+## What was implemented
+
+### Step 1: Protobuf Tooling
+- Added `protoc` v29.6 to `mise.toml`
+- Created `ci/scripts/proto-gen.sh` for code generation
+- Added `mise run proto-gen` task
+
+### Step 2: Protobuf Schema
+- Created `internal/proto/accounting.proto` with CounterBatch/CounterEntry messages
+- Generated `internal/proto/accounting.pb.go`
+
+### Step 3: Accounting Configuration
+- Added `AccountingConfig` and `AccountingRule` types to `internal/config/config.go`
+- Implemented custom KDL `UnmarshalKDL` for parsing accounting rules
+- Added `WindowDuration()` helper
+- Added validation for rules (path prefix, limit, per)
+- Updated `default.kdl` with empty accounting block
+- Updated `deployments/drl/config.kdl` with sample rules
+- Added config tests for KDL parsing and validation
+
+### Step 4: Accounting Metrics
+- Added 4 Prometheus counters: local_increments, remote_increments, flush, udp_recv
+- Added helper methods: IncAccountingLocal/Remote/Flush/UDPRecv
+- Updated metrics tests
+
+### Step 5: UDP Counter Flusher
+- Created `internal/accounting/flusher.go` with UDP batching protocol
+- Enqueue/flush/receive loop with configurable interval and batch size
+- sync.Pool for protobuf object reuse
+- 6 tests covering enqueue, flush, receive, batch limits, lifecycle, protobuf roundtrip
+
+### Step 6: Accounting Engine
+- Created `internal/accounting/engine.go` with rule matching and entity tracking
+- Process() matches rules, builds entities, determines ownership, increments locally or enqueues remotely
+- 8 tests covering rule matching, local/remote processing, header filtering, stats
+
+### Step 7: gRPC Server Integration
+- Added `AccountingEngine` interface to `internal/grpc/server.go`
+- Fire-and-forget `go s.engine.Process()` in Check() handler
+- Added TestCheck_WithEngine test
+
+### Step 8: Accounting Stats API
+- Added `AccountingStatsProvider` interface to `internal/api/api.go`
+- Created `GET /accounting/stats` endpoint (auth protected)
+- Returns local_node_id, monitored_entities_count, batched_updates_pending
+- 3 tests: unauthorized, with provider, nil provider
+
+### Step 9: Main.go Wiring
+- Creates Flusher and Engine when accounting rules are configured
+- Passes engine to gRPC server and API server
+- Flusher.Stop() in shutdown sequence
+
+## Test Results
+- All 257 tests pass
+- All packages lint clean
+- Coverage: accounting 86.1%, api 94.5%, config 92.2%, grpc 90.0%, metrics 97.5%
+
+## Files Modified/Created
+- mise.toml (modified)
+- ci/scripts/proto-gen.sh (created)
+- internal/proto/accounting.proto (created)
+- internal/proto/accounting.pb.go (generated)
+- internal/config/config.go (modified)
+- internal/config/config_test.go (modified)
+- internal/config/resources/default.kdl (modified)
+- deployments/drl/config.kdl (modified)
+- internal/metrics/metrics.go (modified)
+- internal/metrics/metrics_test.go (modified)
+- internal/accounting/flusher.go (created)
+- internal/accounting/flusher_test.go (created)
+- internal/accounting/engine.go (created)
+- internal/accounting/engine_test.go (created)
+- internal/grpc/server.go (modified)
+- internal/grpc/server_test.go (modified)
+- internal/api/api.go (modified)
+- internal/api/handlers_accounting.go (created)
+- internal/api/handlers_accounting_test.go (created)
+- main.go (modified)

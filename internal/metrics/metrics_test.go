@@ -43,6 +43,22 @@ func TestNewMetrics(t *testing.T) {
 		t.Error("SyncDurationSeconds histogram should not be nil")
 	}
 
+	if m.AccountingLocalIncTotal == nil {
+		t.Error("AccountingLocalIncTotal counter should not be nil")
+	}
+
+	if m.AccountingRemoteIncTotal == nil {
+		t.Error("AccountingRemoteIncTotal counter should not be nil")
+	}
+
+	if m.AccountingFlushTotal == nil {
+		t.Error("AccountingFlushTotal counter should not be nil")
+	}
+
+	if m.AccountingUDPRecvTotal == nil {
+		t.Error("AccountingUDPRecvTotal counter should not be nil")
+	}
+
 	if m.registry == nil {
 		t.Error("registry should not be nil")
 	}
@@ -90,6 +106,12 @@ func TestCacheMetrics(t *testing.T) {
 	// Test sync duration
 	m.ObserveSyncDuration(0.5)
 	m.ObserveSyncDuration(1.2)
+
+	// Test accounting metrics
+	m.IncAccountingLocal()
+	m.IncAccountingRemote()
+	m.IncAccountingFlush()
+	m.IncAccountingUDPRecv()
 }
 
 func TestStartServer(t *testing.T) {
@@ -186,6 +208,22 @@ func TestStartServer(t *testing.T) {
 
 	if !strings.Contains(metricsStr, "drl_grpc_check_total") {
 		t.Error("expected drl_grpc_check_total metric in output")
+	}
+
+	if !strings.Contains(metricsStr, "drl_accounting_local_increments_total") {
+		t.Error("expected drl_accounting_local_increments_total metric in output")
+	}
+
+	if !strings.Contains(metricsStr, "drl_accounting_remote_increments_total") {
+		t.Error("expected drl_accounting_remote_increments_total metric in output")
+	}
+
+	if !strings.Contains(metricsStr, "drl_accounting_flush_total") {
+		t.Error("expected drl_accounting_flush_total metric in output")
+	}
+
+	if !strings.Contains(metricsStr, "drl_accounting_udp_recv_total") {
+		t.Error("expected drl_accounting_udp_recv_total metric in output")
 	}
 }
 

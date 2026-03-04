@@ -24,6 +24,12 @@ type Metrics struct {
 	CacheMemoryBytes    *prometheus.GaugeVec
 	SyncDurationSeconds prometheus.Histogram
 
+	// Accounting metrics
+	AccountingLocalIncTotal  prometheus.Counter
+	AccountingRemoteIncTotal prometheus.Counter
+	AccountingFlushTotal     prometheus.Counter
+	AccountingUDPRecvTotal   prometheus.Counter
+
 	registry *prometheus.Registry
 	server   *http.Server
 }
@@ -72,6 +78,24 @@ func NewMetrics() *Metrics {
 			Buckets: prometheus.ExponentialBuckets(0.001, 2, 15), // 1ms to ~16s
 		}),
 
+		// Accounting metrics
+		AccountingLocalIncTotal: prometheus.NewCounter(prometheus.CounterOpts{
+			Name: "drl_accounting_local_increments_total",
+			Help: "Total number of local accounting increments (this node is owner)",
+		}),
+		AccountingRemoteIncTotal: prometheus.NewCounter(prometheus.CounterOpts{
+			Name: "drl_accounting_remote_increments_total",
+			Help: "Total number of remote accounting increments (forwarded to owner)",
+		}),
+		AccountingFlushTotal: prometheus.NewCounter(prometheus.CounterOpts{
+			Name: "drl_accounting_flush_total",
+			Help: "Total number of UDP batch flushes sent",
+		}),
+		AccountingUDPRecvTotal: prometheus.NewCounter(prometheus.CounterOpts{
+			Name: "drl_accounting_udp_recv_total",
+			Help: "Total number of UDP batch messages received",
+		}),
+
 		registry: registry,
 	}
 
@@ -83,6 +107,10 @@ func NewMetrics() *Metrics {
 	registry.MustRegister(m.CacheEvictionsTotal)
 	registry.MustRegister(m.CacheMemoryBytes)
 	registry.MustRegister(m.SyncDurationSeconds)
+	registry.MustRegister(m.AccountingLocalIncTotal)
+	registry.MustRegister(m.AccountingRemoteIncTotal)
+	registry.MustRegister(m.AccountingFlushTotal)
+	registry.MustRegister(m.AccountingUDPRecvTotal)
 
 	return m
 }
@@ -125,6 +153,26 @@ func (m *Metrics) SetCacheMemory(cacheType string, bytes int64) {
 // ObserveSyncDuration records the duration of a state sync operation
 func (m *Metrics) ObserveSyncDuration(seconds float64) {
 	m.SyncDurationSeconds.Observe(seconds)
+}
+
+// IncAccountingLocal increments the local accounting increment counter
+func (m *Metrics) IncAccountingLocal() {
+	m.AccountingLocalIncTotal.Inc()
+}
+
+// IncAccountingRemote increments the remote accounting increment counter
+func (m *Metrics) IncAccountingRemote() {
+	m.AccountingRemoteIncTotal.Inc()
+}
+
+// IncAccountingFlush increments the accounting flush counter
+func (m *Metrics) IncAccountingFlush() {
+	m.AccountingFlushTotal.Inc()
+}
+
+// IncAccountingUDPRecv increments the UDP receive counter
+func (m *Metrics) IncAccountingUDPRecv() {
+	m.AccountingUDPRecvTotal.Inc()
 }
 
 // StartServer starts the HTTP server for metrics

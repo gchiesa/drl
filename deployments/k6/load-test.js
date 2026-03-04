@@ -17,7 +17,7 @@ export const options = {
 };
 
 export default function () {
-    const res = http.get(`${TARGET_URL}/get`);
+    const res = http.get(`${TARGET_URL}/status/200`);
 
     check(res, {
         'status is 200': (r) => r.status === 200,

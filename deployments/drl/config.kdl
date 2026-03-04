@@ -22,3 +22,12 @@ internal-api {
     enabled true
     address ":8082"
 }
+
+accounting {
+    rule "/anything" {
+        limit 100 per="minute"
+    }
+    rule "/status" {
+        limit 20 per="minute"
+    }
+}

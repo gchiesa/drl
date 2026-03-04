@@ -55,7 +55,7 @@ services:
       - drl-network
 
   jumpbox:
-    image: alpine:latest
+    image: apteno/alpine-jq:latest
     container_name: jumpbox
     command: ["sleep", "infinity"]
     environment:

@@ -4,6 +4,7 @@ import (
 	"context"
 	"io"
 	"log/slog"
+	"sync"
 	"testing"
 	"time"
 
@@ -18,6 +19,32 @@ import (
 
 	"github.com/gchiesa/drl/internal/metrics"
 )
+
+// mockEngine records Process calls for testing.
+type mockEngine struct {
+	mu    sync.Mutex
+	calls []processCall
+}
+
+type processCall struct {
+	SourceIP string
+	Path     string
+	Headers  map[string]string
+}
+
+func (m *mockEngine) Process(sourceIP, path string, headers map[string]string) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.calls = append(m.calls, processCall{SourceIP: sourceIP, Path: path, Headers: headers})
+}
+
+func (m *mockEngine) getCalls() []processCall {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	result := make([]processCall, len(m.calls))
+	copy(result, m.calls)
+	return result
+}
 
 func testConfig() ServerConfig {
 	return ServerConfig{
@@ -117,6 +144,46 @@ func TestServerStartStop(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
 	s.Stop(ctx) // should not panic or block
+}
+
+func TestCheck_WithEngine(t *testing.T) {
+	engine := &mockEngine{}
+	cfg := testConfig()
+	cfg.Engine = engine
+
+	s := NewServer(cfg)
+	req := &authv3.CheckRequest{
+		Attributes: &authv3.AttributeContext{
+			Source: &authv3.AttributeContext_Peer{
+				Address: &corev3.Address{
+					Address: &corev3.Address_SocketAddress{
+						SocketAddress: &corev3.SocketAddress{
+							Address: "192.168.1.50",
+						},
+					},
+				},
+			},
+			Request: &authv3.AttributeContext_Request{
+				Http: &authv3.AttributeContext_HttpRequest{
+					Path:    "/api/v1/test",
+					Headers: map[string]string{"x-api-key": "key123"},
+				},
+			},
+		},
+	}
+
+	resp, err := s.Check(context.Background(), req)
+	require.NoError(t, err)
+	assert.Equal(t, int32(codes.OK), resp.GetStatus().GetCode())
+
+	// Give the goroutine time to execute
+	time.Sleep(50 * time.Millisecond)
+
+	calls := engine.getCalls()
+	require.Len(t, calls, 1)
+	assert.Equal(t, "192.168.1.50", calls[0].SourceIP)
+	assert.Equal(t, "/api/v1/test", calls[0].Path)
+	assert.Equal(t, "key123", calls[0].Headers["x-api-key"])
 }
 
 func TestServerStartStop_WithGRPCClient(t *testing.T) {
