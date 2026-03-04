@@ -10,6 +10,7 @@ import (
 
 	"github.com/caarlos0/env/v11"
 	"github.com/sblinch/kdl-go"
+	"github.com/sblinch/kdl-go/document"
 )
 
 //go:embed resources/*.kdl
@@ -40,6 +41,74 @@ type Config struct {
 
 	// Cache configuration
 	Cache CacheConfig `kdl:"cache" envPrefix:"DRL_CACHE_"`
+
+	// Accounting configuration
+	Accounting AccountingConfig `kdl:"accounting"`
+}
+
+// AccountingConfig holds accounting rules for entity rate limiting
+type AccountingConfig struct {
+	Rules []AccountingRule
+}
+
+// AccountingRule defines a rate-limiting rule for a path prefix
+type AccountingRule struct {
+	PathPrefix string
+	Headers    []string
+	Limit      int64
+	Per        string // "second" or "minute"
+}
+
+// WindowDuration returns the time.Duration for the rule's rate window
+func (r AccountingRule) WindowDuration() time.Duration {
+	if strings.ToLower(r.Per) == "second" {
+		return time.Second
+	}
+	return time.Minute
+}
+
+// UnmarshalKDL implements kdl.Unmarshaler for custom KDL parsing of accounting config
+func (a *AccountingConfig) UnmarshalKDL(node *document.Node) error {
+	a.Rules = nil
+	for _, child := range node.Children {
+		if child.Name.String() != "rule" {
+			continue
+		}
+
+		rule := AccountingRule{}
+
+		// Path prefix from first argument
+		if len(child.Arguments) > 0 {
+			rule.PathPrefix = fmt.Sprintf("%v", child.Arguments[0].Value)
+		}
+
+		// Parse rule children: headers and limit
+		for _, ruleChild := range child.Children {
+			switch ruleChild.Name.String() {
+			case "headers":
+				for _, arg := range ruleChild.Arguments {
+					rule.Headers = append(rule.Headers, fmt.Sprintf("%v", arg.Value))
+				}
+			case "limit":
+				if len(ruleChild.Arguments) > 0 {
+					switch v := ruleChild.Arguments[0].Value.(type) {
+					case int64:
+						rule.Limit = v
+					case float64:
+						rule.Limit = int64(v)
+					default:
+						rule.Limit, _ = strconv.ParseInt(fmt.Sprintf("%v", v), 10, 64)
+					}
+				}
+				if perVal, ok := ruleChild.Properties.Get("per"); ok {
+					rule.Per = fmt.Sprintf("%v", perVal.Value)
+				}
+			}
+		}
+
+		a.Rules = append(a.Rules, rule)
+	}
+	return nil
 }
 
 // ListenConfig holds listener configuration
@@ -199,6 +268,20 @@ func (c *Config) Validate() error {
 	}
 	if c.Cache.BlocklistDefaultTTLSeconds < 1 {
 		errs = append(errs, fmt.Sprintf("cache.blocklist-default-ttl-seconds must be at least 1, got %d", c.Cache.BlocklistDefaultTTLSeconds))
+	}
+
+	// Validate accounting rules
+	for i, rule := range c.Accounting.Rules {
+		if rule.PathPrefix == "" {
+			errs = append(errs, fmt.Sprintf("accounting.rules[%d].path-prefix cannot be empty", i))
+		}
+		if rule.Limit < 1 {
+			errs = append(errs, fmt.Sprintf("accounting.rules[%d].limit must be at least 1, got %d", i, rule.Limit))
+		}
+		validPer := map[string]bool{"second": true, "minute": true}
+		if !validPer[strings.ToLower(rule.Per)] {
+			errs = append(errs, fmt.Sprintf("accounting.rules[%d].per must be one of second, minute; got %q", i, rule.Per))
+		}
 	}
 
 	if len(errs) > 0 {

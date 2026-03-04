@@ -29,3 +29,6 @@ cache {
     sync-timeout-seconds 30
     blocklist-default-ttl-seconds 300
 }
+
+accounting {
+}

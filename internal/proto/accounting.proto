@@ -1,0 +1,14 @@
+syntax = "proto3";
+package drl.v1;
+option go_package = "github.com/gchiesa/drl/internal/proto";
+
+message CounterEntry {
+  fixed64 entity_hash = 1;
+  uint32 hits = 2;
+}
+
+message CounterBatch {
+  uint64 sender_id = 1;
+  uint64 timestamp = 2;
+  repeated CounterEntry entries = 3;
+}

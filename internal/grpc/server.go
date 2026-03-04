@@ -13,11 +13,17 @@ import (
 	"github.com/gchiesa/drl/internal/metrics"
 )
 
+// AccountingEngine provides async request accounting.
+type AccountingEngine interface {
+	Process(sourceIP, path string, headers map[string]string)
+}
+
 // ServerConfig holds configuration for the gRPC ext_authz server.
 type ServerConfig struct {
 	Address string
 	Metrics *metrics.Metrics
 	Logger  *slog.Logger
+	Engine  AccountingEngine
 }
 
 // Server implements the Envoy ext_authz v3 Authorization gRPC service.
@@ -29,6 +35,7 @@ type Server struct {
 	metrics    *metrics.Metrics
 	logger     *slog.Logger
 	listener   net.Listener
+	engine     AccountingEngine
 }
 
 // NewServer creates a new gRPC ext_authz server.
@@ -40,6 +47,7 @@ func NewServer(cfg ServerConfig) *Server {
 		address:    cfg.Address,
 		metrics:    cfg.Metrics,
 		logger:     cfg.Logger,
+		engine:     cfg.Engine,
 	}
 
 	authv3.RegisterAuthorizationServer(gs, s)
@@ -76,6 +84,10 @@ func (s *Server) Check(_ context.Context, req *authv3.CheckRequest) (*authv3.Che
 		"path", path,
 		"headers", headers,
 	)
+
+	if s.engine != nil {
+		go s.engine.Process(sourceIP, path, headers)
+	}
 
 	return &authv3.CheckResponse{
 		Status: &status.Status{

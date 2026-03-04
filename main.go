@@ -11,6 +11,9 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/cespare/xxhash/v2"
+
+	"github.com/gchiesa/drl/internal/accounting"
 	"github.com/gchiesa/drl/internal/api"
 	"github.com/gchiesa/drl/internal/cache"
 	"github.com/gchiesa/drl/internal/config"
@@ -142,6 +145,37 @@ func main() {
 		cacheManager.UpdateNodes(cluster.MemberAddrs())
 	}()
 
+	// Initialize accounting flusher and engine
+	var flusher *accounting.Flusher
+	var engine *accounting.Engine
+
+	if len(cfg.Accounting.Rules) > 0 {
+		senderID := xxhash.Sum64String(cfg.NodeName)
+
+		flusher = accounting.NewFlusher(accounting.FlusherConfig{
+			SenderID:   senderID,
+			Accounting: cacheManager.Accounting,
+			Logger:     logger,
+			Metrics:    m,
+			SyncPort:   accounting.DefaultSyncPort,
+		})
+		if err := flusher.Start(); err != nil {
+			logger.Error("failed to start accounting flusher", "error", err)
+			cacheManager.Close()
+			os.Exit(1)
+		}
+		logger.Info("accounting flusher started", "sync_port", accounting.DefaultSyncPort)
+
+		engine = accounting.NewEngine(accounting.EngineConfig{
+			Rules:      cfg.Accounting.Rules,
+			Accounting: cacheManager.Accounting,
+			Flusher:    flusher,
+			Logger:     logger,
+			Metrics:    m,
+		})
+		logger.Info("accounting engine initialized", "rules", len(cfg.Accounting.Rules))
+	}
+
 	// Initialize internal API if enabled
 	var apiServer *api.Server
 	if cfg.InternalAPI.Enabled {
@@ -153,7 +187,7 @@ func main() {
 		}
 
 		apiKey, _ := config.GetPrivateAPIKey()
-		apiServer, err = api.NewServer(api.ServerConfig{
+		apiCfg := api.ServerConfig{
 			Address:         cfg.InternalAPI.Address,
 			APIKey:          apiKey,
 			ClusterName:     cfg.Membership.ServiceName,
@@ -163,7 +197,11 @@ func main() {
 			Blocklist:       cacheManager.Blocklist,
 			Broadcaster:     stateDelegate,
 			DefaultBlockTTL: time.Duration(cfg.Cache.BlocklistDefaultTTLSeconds) * time.Second,
-		})
+		}
+		if engine != nil {
+			apiCfg.AccountingStats = engine
+		}
+		apiServer, err = api.NewServer(apiCfg)
 		if err != nil {
 			logger.Error("failed to create internal API server", "error", err)
 			cacheManager.Close()
@@ -179,11 +217,15 @@ func main() {
 	}
 
 	// Initialize gRPC ext_authz server
-	grpcServer := drlgrpc.NewServer(drlgrpc.ServerConfig{
+	grpcCfg := drlgrpc.ServerConfig{
 		Address: cfg.Listen.GRPC,
 		Metrics: m,
 		Logger:  logger,
-	})
+	}
+	if engine != nil {
+		grpcCfg.Engine = engine
+	}
+	grpcServer := drlgrpc.NewServer(grpcCfg)
 	if err := grpcServer.Start(); err != nil {
 		logger.Error("failed to start gRPC server", "error", err)
 		cacheManager.Close()
@@ -211,6 +253,10 @@ func main() {
 	}
 
 	grpcServer.Stop(shutdownCtx)
+
+	if flusher != nil {
+		flusher.Stop()
+	}
 
 	if err := cluster.Leave(5 * time.Second); err != nil {
 		logger.Error("failed to leave cluster gracefully", "error", err)

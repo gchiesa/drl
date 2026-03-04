@@ -4,6 +4,7 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -876,6 +877,109 @@ membership {
 	// Note: The startup-delay is stored as a string in KDL but may be parsed as duration
 	// This tests that the config loads without error
 	assert.NotNil(t, cfg)
+}
+
+func TestAccountingRule_WindowDuration(t *testing.T) {
+	tests := []struct {
+		name     string
+		per      string
+		expected time.Duration
+	}{
+		{"second", "second", time.Second},
+		{"minute", "minute", time.Minute},
+		{"SECOND uppercase", "SECOND", time.Second},
+		{"MINUTE uppercase", "MINUTE", time.Minute},
+		{"default to minute", "unknown", time.Minute},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			rule := AccountingRule{Per: tt.per}
+			assert.Equal(t, tt.expected, rule.WindowDuration())
+		})
+	}
+}
+
+func TestAccountingConfig_KDLParsing(t *testing.T) {
+	clearEnvVars(t)
+
+	tmpDir := t.TempDir()
+	configPath := filepath.Join(tmpDir, "accounting.kdl")
+
+	kdlConfig := `
+accounting {
+    rule "/api/v1" {
+        headers "X-API-KEY-ID" "X-Consumer-Type"
+        limit 100 per="minute"
+    }
+    rule "/health" {
+        limit 500 per="second"
+    }
+}
+`
+	err := os.WriteFile(configPath, []byte(kdlConfig), 0644)
+	require.NoError(t, err)
+
+	cfg, err := Load(configPath)
+	require.NoError(t, err)
+	require.Len(t, cfg.Accounting.Rules, 2)
+
+	// First rule
+	assert.Equal(t, "/api/v1", cfg.Accounting.Rules[0].PathPrefix)
+	assert.Equal(t, []string{"X-API-KEY-ID", "X-Consumer-Type"}, cfg.Accounting.Rules[0].Headers)
+	assert.Equal(t, int64(100), cfg.Accounting.Rules[0].Limit)
+	assert.Equal(t, "minute", cfg.Accounting.Rules[0].Per)
+
+	// Second rule
+	assert.Equal(t, "/health", cfg.Accounting.Rules[1].PathPrefix)
+	assert.Empty(t, cfg.Accounting.Rules[1].Headers)
+	assert.Equal(t, int64(500), cfg.Accounting.Rules[1].Limit)
+	assert.Equal(t, "second", cfg.Accounting.Rules[1].Per)
+}
+
+func TestAccountingConfig_EmptyBlock(t *testing.T) {
+	clearEnvVars(t)
+
+	cfg, err := Load("")
+	require.NoError(t, err)
+	assert.Empty(t, cfg.Accounting.Rules)
+}
+
+func TestAccountingConfig_ValidationErrors(t *testing.T) {
+	tests := []struct {
+		name     string
+		rule     AccountingRule
+		errorMsg string
+	}{
+		{
+			name:     "empty path prefix",
+			rule:     AccountingRule{PathPrefix: "", Limit: 100, Per: "minute"},
+			errorMsg: "path-prefix cannot be empty",
+		},
+		{
+			name:     "zero limit",
+			rule:     AccountingRule{PathPrefix: "/api", Limit: 0, Per: "minute"},
+			errorMsg: "limit must be at least 1",
+		},
+		{
+			name:     "invalid per",
+			rule:     AccountingRule{PathPrefix: "/api", Limit: 100, Per: "hour"},
+			errorMsg: "per must be one of second, minute",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cfg := &Config{
+				Listen:     ListenConfig{GRPC: ":8081", Metrics: ":9091"},
+				Membership: MembershipConfig{ServiceName: "drl", Port: 7946, BindAddr: "0.0.0.0"},
+				Logging:    LoggingConfig{Level: "info", Format: "json"},
+				Cache:      CacheConfig{BlocklistSizeMB: 64, AccountingSizeMB: 128, SyncTimeoutSeconds: 30, BlocklistDefaultTTLSeconds: 3600},
+				Accounting: AccountingConfig{Rules: []AccountingRule{tt.rule}},
+			}
+			err := cfg.Validate()
+			assert.Error(t, err)
+			assert.Contains(t, err.Error(), tt.errorMsg)
+		})
+	}
 }
 
 // clearEnvVars clears all DRL_ environment variables to ensure test isolation

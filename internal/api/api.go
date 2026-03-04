@@ -35,6 +35,12 @@ type Broadcaster interface {
 	QueueUnblockEvent(key string) error
 }
 
+// AccountingStatsProvider exposes accounting statistics for the stats endpoint.
+type AccountingStatsProvider interface {
+	PendingUpdates() int64
+	TrackedEntities() int64
+}
+
 // Server represents the internal API server
 type Server struct {
 	app             *fiber.App
@@ -48,6 +54,7 @@ type Server struct {
 	blocklist       BlocklistOperator
 	broadcaster     Broadcaster
 	defaultBlockTTL time.Duration
+	accountingStats AccountingStatsProvider
 }
 
 // ServerConfig holds configuration for the API server
@@ -66,6 +73,8 @@ type ServerConfig struct {
 	// DefaultBlockTTL is the default time-to-live for admin-API blocks.
 	// Overridden per-request via ?ttl= query parameter.
 	DefaultBlockTTL time.Duration
+	// AccountingStats is optional; when set, the /accounting/stats endpoint is active.
+	AccountingStats AccountingStatsProvider
 }
 
 // NewServer creates a new internal API server
@@ -99,6 +108,7 @@ func NewServer(cfg ServerConfig) (*Server, error) {
 		blocklist:       cfg.Blocklist,
 		broadcaster:     cfg.Broadcaster,
 		defaultBlockTTL: defaultTTL,
+		accountingStats: cfg.AccountingStats,
 	}
 
 	// Setup routes
@@ -121,6 +131,9 @@ func (s *Server) setupRoutes() {
 	// URI path and optional /_headers/<key:val,...> suffix.
 	s.app.Post("/blocked-entity/:ip/_path/*", authMW, s.handleBlockEntityAdd)
 	s.app.Delete("/blocked-entity/:ip/_path/*", authMW, s.handleBlockEntityDelete)
+
+	// Accounting stats
+	s.app.Get("/accounting/stats", authMW, s.handleAccountingStats)
 }
 
 // Start starts the internal API server
