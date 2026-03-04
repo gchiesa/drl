@@ -44,6 +44,10 @@ func NewEngine(cfg EngineConfig) *Engine {
 	}
 }
 
+func (e *Engine) GetFlusher() *Flusher {
+	return e.flusher
+}
+
 // Process evaluates the incoming request against accounting rules. If a rule
 // matches, the entity is hashed and either counted locally (if this node is
 // the owner) or enqueued for remote flushing.
