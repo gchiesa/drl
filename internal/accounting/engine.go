@@ -3,20 +3,20 @@ package accounting
 import (
 	"log/slog"
 	"strconv"
-	"strings"
 	"sync/atomic"
 
 	"github.com/gchiesa/drl/internal/cache"
 	"github.com/gchiesa/drl/internal/config"
 	"github.com/gchiesa/drl/internal/metrics"
 	"github.com/gchiesa/drl/internal/model"
+	"github.com/hashicorp/go-immutable-radix/v2"
 )
 
 // Engine is the accounting engine that matches incoming requests against
 // configurable rules, hashes the entity to determine the owner node, and
 // either increments locally or enqueues a remote update via the Flusher.
 type Engine struct {
-	rules      []config.AccountingRule
+	rules      *iradix.Tree[*config.AccountingRule]
 	accounting *cache.AccountingCache
 	flusher    *Flusher
 	logger     *slog.Logger
@@ -35,13 +35,22 @@ type EngineConfig struct {
 
 // NewEngine creates a new accounting Engine.
 func NewEngine(cfg EngineConfig) *Engine {
-	return &Engine{
-		rules:      cfg.Rules,
+	e := &Engine{
+		rules:      createPathRadixTree(cfg.Rules),
 		accounting: cfg.Accounting,
 		flusher:    cfg.Flusher,
 		logger:     cfg.Logger,
 		metrics:    cfg.Metrics,
 	}
+	for _, rule := range cfg.Rules {
+		e.logger.Info("accounting rule loaded",
+			"path_prefix", rule.PathPrefix,
+			"limit", rule.Limit,
+			"per", rule.Per,
+			"headers", rule.Headers,
+		)
+	}
+	return e
 }
 
 // GetFlusher returns the Flusher instance associated with the Engine, allowing interaction with batching and flushing.
@@ -53,7 +62,7 @@ func (e *Engine) GetFlusher() *Flusher {
 // matches, the entity is hashed and either counted locally (if this node is
 // the owner) or enqueued for remote flushing.
 func (e *Engine) Process(sourceIP, path string, headers map[string]string) {
-	rule := e.matchRule(path)
+	rule := e.matchRuleV2(path)
 	if rule == nil {
 		return
 	}
@@ -116,11 +125,23 @@ func (e *Engine) TrackedEntities() int64 {
 }
 
 // matchRule returns the first rule whose PathPrefix matches the given path.
-func (e *Engine) matchRule(path string) *config.AccountingRule {
-	for i := range e.rules {
-		if strings.HasPrefix(path, e.rules[i].PathPrefix) {
-			return &e.rules[i]
-		}
+// TODO: reconsider radix.tree if rules are > 20
+// see -> github.com/armon/go-radix
+//func (e *Engine) matchRule(path string) *config.AccountingRule {
+//	for i := range e.rules {
+//		if strings.HasPrefix(path, e.rules[i].PathPrefix) {
+//			return &e.rules[i]
+//		}
+//	}
+//	return nil
+//}
+
+// matchRuleV2 attempts to find the longest prefix match for the given path in the rules and returns the corresponding rule.
+// Returns nil if no matching rule is found.
+func (e *Engine) matchRuleV2(path string) *config.AccountingRule {
+	_, rule, found := e.rules.Root().LongestPrefix([]byte(path))
+	if found {
+		return rule
 	}
 	return nil
 }
@@ -140,4 +161,14 @@ func filterHeaders(headers map[string]string, keys []string) map[string]string {
 		return nil
 	}
 	return result
+}
+
+// createPathRadixTree constructs a radix tree to efficiently match paths to accounting rules based on their PathPrefix.
+func createPathRadixTree(rules []config.AccountingRule) *iradix.Tree[*config.AccountingRule] {
+	// create the tree
+	r := iradix.New[*config.AccountingRule]()
+	for _, rule := range rules {
+		r, _, _ = r.Insert([]byte(rule.PathPrefix), &rule)
+	}
+	return r
 }

@@ -49,17 +49,17 @@ func TestEngine_MatchRule(t *testing.T) {
 	defer ac.Close()
 
 	// Match first rule
-	rule := e.matchRule("/api/v1/users")
+	rule := e.matchRuleV2("/api/v1/users")
 	require.NotNil(t, rule)
 	assert.Equal(t, "/api/v1", rule.PathPrefix)
 
 	// Match second rule
-	rule = e.matchRule("/health")
+	rule = e.matchRuleV2("/health")
 	require.NotNil(t, rule)
 	assert.Equal(t, "/health", rule.PathPrefix)
 
 	// No match
-	rule = e.matchRule("/unknown/path")
+	rule = e.matchRuleV2("/unknown/path")
 	assert.Nil(t, rule)
 }
 

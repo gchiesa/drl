@@ -14,7 +14,8 @@ import (
 )
 
 var args struct {
-	configPath string `arg:"required,env:DRL_CONFIG_PATH" help:"Path to KDL configuration file"`
+	ConfigPath string `arg:"env:DRL_CONFIG_PATH" help:"Path to KDL configuration file"`
+	Version    bool   `arg:"-v,--version" help:"Show version"`
 }
 
 // global log
@@ -23,26 +24,32 @@ var log *slog.Logger
 // Execute initializes and runs the main application lifecycle for the Distributed Rate Limiter (DRL).
 // It handles configuration loading, logger initialization, and startup of core components such as metrics, cache, and gRPC server.
 // The function facilitates graceful shutdown on receiving termination signals.
-func Execute() {
+func Execute(version string) {
 	// Parse command line flags
 	arg.MustParse(&args)
 
+	if args.Version {
+		_, _ = fmt.Fprintf(os.Stdout, "drl version: %s\n", version)
+		os.Exit(0)
+	}
+
 	// Load configuration
-	cfg, err := config.Load(args.configPath)
+	cfg, err := config.Load(args.ConfigPath)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+		_, _ = fmt.Fprintf(os.Stderr, "Error: %v\n", err)
 		os.Exit(1)
 	}
 
 	// Initialize a structured log based on config
 	log, err = newLoggerSlogCompatible(cfg)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+		_, _ = fmt.Fprintf(os.Stderr, "Error: %v\n", err)
 		os.Exit(1)
 	}
 
 	log.Info("DRL - Distributed Rate Limiter starting...")
 	log.Info("configuration loaded",
+		"config_file_path", cfg.GetConfigFilePath(),
 		"node_name", cfg.NodeName,
 		"grpc_addr", cfg.Listen.GRPC,
 		"metrics_addr", cfg.Listen.Metrics,
@@ -51,6 +58,8 @@ func Execute() {
 		"log_level", cfg.Logging.Level,
 		"cache_blocklist_size_mb", cfg.Cache.BlocklistSizeMB,
 		"cache_accounting_size_mb", cfg.Cache.AccountingSizeMB,
+		"accounting_rules", cfg.Accounting.Rules,
+		"accounting_rules_count", len(cfg.Accounting.Rules),
 	)
 
 	// Initialize metricsManager

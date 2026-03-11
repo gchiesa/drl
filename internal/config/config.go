@@ -43,11 +43,14 @@ type Config struct {
 
 	// Accounting configuration
 	Accounting AccountingConfig `kdl:"accounting"`
+
+	// meta
+	externalConfigFilePath string
 }
 
 // AccountingConfig holds accounting rules for entity rate limiting
 type AccountingConfig struct {
-	Rules map[string]AccountingRule
+	Rules map[string]AccountingRule `kdl:"rules"`
 }
 
 // AccountingRule defines a rate-limiting rule for a path prefix
@@ -135,6 +138,7 @@ func Load(configPath string) (*Config, error) {
 
 	// load overrides from user KDL if provided
 	if configPath != "" {
+		cfg.externalConfigFilePath = configPath
 		configData, err = os.ReadFile(configPath)
 		if err != nil {
 			return nil, fmt.Errorf("failed to read user config file: %w", err)
@@ -176,6 +180,15 @@ func (c *Config) loadFromEnvironment() error {
 		return fmt.Errorf("failed to parse Environment config: %w", err)
 	}
 	return nil
+}
+
+// GetConfigFilePath returns the path to the configuration file.
+// If an external path is specified, it is returned; otherwise, the default path is used.
+func (c *Config) GetConfigFilePath() string {
+	if c.externalConfigFilePath != "" {
+		return c.externalConfigFilePath
+	}
+	return defaultConfigFile
 }
 
 // Validate validates the configuration

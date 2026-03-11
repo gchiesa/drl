@@ -7,6 +7,6 @@ import (
 var version = "development"
 
 func main() {
-	cmd.Execute()
+	cmd.Execute(version)
 
 }
