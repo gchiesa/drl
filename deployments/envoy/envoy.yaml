@@ -30,7 +30,7 @@ static_resources:
                           cluster_name: drl_cluster
                         timeout: 0.25s
                       transport_api_version: V3
-                      failure_mode_allow: true
+                      failure_mode_allow: false
                   - name: envoy.filters.http.router
                     typed_config:
                       "@type": type.googleapis.com/envoy.extensions.filters.http.router.v3.Router
@@ -43,22 +43,22 @@ static_resources:
                         - match:
                             prefix: "/"
                           route:
-                            cluster: echo_server_cluster
+                            cluster: static-responder
 
   clusters:
-    - name: echo_server_cluster
+    - name: static-responder
       connect_timeout: 5s
       type: STRICT_DNS
       lb_policy: ROUND_ROBIN
       load_assignment:
-        cluster_name: echo_server_cluster
+        cluster_name: static-responder
         endpoints:
           - lb_endpoints:
               - endpoint:
                   address:
                     socket_address:
-                      address: echo-server
-                      port_value: 8080
+                      address: static-responder
+                      port_value: 80
 
     - name: drl_cluster
       connect_timeout: 0.25s

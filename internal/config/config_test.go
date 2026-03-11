@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/samber/lo"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -927,6 +928,7 @@ accounting {
 	cfg, err := Load(configPath)
 	require.NoError(t, err)
 	require.Len(t, cfg.Accounting.Rules, 2)
+	assert.NotEmpty(t, lo.Values(cfg.Accounting.Rules))
 
 	// First rule
 	assert.Equal(t, "/api/v1", cfg.Accounting.Rules["api-v1"].PathPrefix)

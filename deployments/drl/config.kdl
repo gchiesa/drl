@@ -25,7 +25,15 @@ internal-api {
 
 accounting {
     rules {
-        anything path-prefix="/anything" limit=100 per="minute"
-        status path-prefix="/status" limit=20 per="second"
+        "catch-all" {
+            path-prefix "/"
+            limit 100
+            per "minute"
+        }
+        "anything" {
+            path-prefix "/anything"
+            limit 100
+            per "minute"
+        }
     }
 }
