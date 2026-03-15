@@ -24,9 +24,10 @@ func newGRPCServer(
 	log *slog.Logger) *grpc.Server {
 	// Initialize gRPC ext_authz server for envoy
 	grpcCfg := grpc.ServerConfig{
-		Address: cfg.Listen.GRPC,
-		Metrics: metricsManager,
-		Logger:  log,
+		Address:   cfg.Listen.GRPC,
+		Metrics:   metricsManager,
+		Logger:    log,
+		Blocklist: cacheManager.Blocklist,
 	}
 
 	if accountingEngine != nil {

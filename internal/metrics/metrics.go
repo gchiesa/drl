@@ -30,6 +30,11 @@ type Metrics struct {
 	AccountingFlushTotal     prometheus.Counter
 	AccountingUDPRecvTotal   prometheus.Counter
 
+	// Rate limiting metrics
+	RateLimitBlocksTotal          *prometheus.CounterVec
+	RateLimitPropagationLatencyMs prometheus.Histogram
+	GRPCResponseCodeTotal         *prometheus.CounterVec
+
 	registry *prometheus.Registry
 	server   *http.Server
 }
@@ -96,6 +101,21 @@ func NewMetrics() *Metrics {
 			Help: "Total number of UDP batch messages received",
 		}),
 
+		// Rate limiting metrics
+		RateLimitBlocksTotal: prometheus.NewCounterVec(prometheus.CounterOpts{
+			Name: "drl_ratelimit_blocks_total",
+			Help: "Total number of entities blocked by the rate limiter",
+		}, []string{"rule_name", "reason"}),
+		RateLimitPropagationLatencyMs: prometheus.NewHistogram(prometheus.HistogramOpts{
+			Name:    "drl_ratelimit_propagation_latency_ms",
+			Help:    "Time from local block to cluster-wide propagation in milliseconds",
+			Buckets: prometheus.ExponentialBuckets(1, 2, 12), // 1ms to ~2s
+		}),
+		GRPCResponseCodeTotal: prometheus.NewCounterVec(prometheus.CounterOpts{
+			Name: "drl_grpc_response_code_total",
+			Help: "Total gRPC Check responses by code",
+		}, []string{"code"}),
+
 		registry: registry,
 	}
 
@@ -111,6 +131,9 @@ func NewMetrics() *Metrics {
 	registry.MustRegister(m.AccountingRemoteIncTotal)
 	registry.MustRegister(m.AccountingFlushTotal)
 	registry.MustRegister(m.AccountingUDPRecvTotal)
+	registry.MustRegister(m.RateLimitBlocksTotal)
+	registry.MustRegister(m.RateLimitPropagationLatencyMs)
+	registry.MustRegister(m.GRPCResponseCodeTotal)
 
 	return m
 }
@@ -173,6 +196,21 @@ func (m *Metrics) IncAccountingFlush() {
 // IncAccountingUDPRecv increments the UDP receive counter
 func (m *Metrics) IncAccountingUDPRecv() {
 	m.AccountingUDPRecvTotal.Inc()
+}
+
+// IncRateLimitBlock increments the rate limit block counter for the given rule and reason
+func (m *Metrics) IncRateLimitBlock(ruleName, reason string) {
+	m.RateLimitBlocksTotal.WithLabelValues(ruleName, reason).Inc()
+}
+
+// ObservePropagationLatency records the propagation latency in milliseconds
+func (m *Metrics) ObservePropagationLatency(ms float64) {
+	m.RateLimitPropagationLatencyMs.Observe(ms)
+}
+
+// IncGRPCResponseCode increments the gRPC response code counter
+func (m *Metrics) IncGRPCResponseCode(code string) {
+	m.GRPCResponseCodeTotal.WithLabelValues(code).Inc()
 }
 
 // StartServer starts the HTTP server for metrics

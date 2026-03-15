@@ -18,6 +18,7 @@ import (
 	"google.golang.org/grpc/credentials/insecure"
 
 	"github.com/gchiesa/drl/internal/metrics"
+	"github.com/gchiesa/drl/internal/model"
 )
 
 // mockEngine records Process calls for testing.
@@ -184,6 +185,91 @@ func TestCheck_WithEngine(t *testing.T) {
 	assert.Equal(t, "192.168.1.50", calls[0].SourceIP)
 	assert.Equal(t, "/api/v1/test", calls[0].Path)
 	assert.Equal(t, "key123", calls[0].Headers["x-api-key"])
+}
+
+// mockBlocklist implements BlocklistChecker for testing.
+type mockBlocklist struct {
+	blocked map[string]bool
+}
+
+func (m *mockBlocklist) IsBlocked(key string) bool {
+	return m.blocked[key]
+}
+
+func TestCheck_BlockedEntity(t *testing.T) {
+	bl := &mockBlocklist{blocked: make(map[string]bool)}
+	cfg := testConfig()
+	cfg.Blocklist = bl
+
+	s := NewServer(cfg)
+
+	// Build the entity key that would be generated from this request
+	entity := model.Entity{
+		IP:      "10.0.0.1",
+		Path:    "/api/v1/resource",
+		Headers: map[string]string{"x-api-key": "abc123"},
+	}
+	key := entity.Key()
+	bl.blocked[key] = true
+
+	req := &authv3.CheckRequest{
+		Attributes: &authv3.AttributeContext{
+			Source: &authv3.AttributeContext_Peer{
+				Address: &corev3.Address{
+					Address: &corev3.Address_SocketAddress{
+						SocketAddress: &corev3.SocketAddress{
+							Address: "10.0.0.1",
+						},
+					},
+				},
+			},
+			Request: &authv3.AttributeContext_Request{
+				Http: &authv3.AttributeContext_HttpRequest{
+					Path:    "/api/v1/resource",
+					Headers: map[string]string{"x-api-key": "abc123"},
+				},
+			},
+		},
+	}
+
+	resp, err := s.Check(context.Background(), req)
+	require.NoError(t, err)
+	assert.Equal(t, int32(codes.PermissionDenied), resp.GetStatus().GetCode())
+
+	denied := resp.GetDeniedResponse()
+	require.NotNil(t, denied)
+	assert.Equal(t, int32(429), int32(denied.GetStatus().GetCode()))
+}
+
+func TestCheck_NotBlockedEntity(t *testing.T) {
+	bl := &mockBlocklist{blocked: make(map[string]bool)}
+	cfg := testConfig()
+	cfg.Blocklist = bl
+
+	s := NewServer(cfg)
+
+	req := &authv3.CheckRequest{
+		Attributes: &authv3.AttributeContext{
+			Source: &authv3.AttributeContext_Peer{
+				Address: &corev3.Address{
+					Address: &corev3.Address_SocketAddress{
+						SocketAddress: &corev3.SocketAddress{
+							Address: "10.0.0.2",
+						},
+					},
+				},
+			},
+			Request: &authv3.AttributeContext_Request{
+				Http: &authv3.AttributeContext_HttpRequest{
+					Path: "/api/v1/resource",
+				},
+			},
+		},
+	}
+
+	resp, err := s.Check(context.Background(), req)
+	require.NoError(t, err)
+	assert.Equal(t, int32(codes.OK), resp.GetStatus().GetCode())
 }
 
 func TestServerStartStop_WithGRPCClient(t *testing.T) {

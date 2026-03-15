@@ -31,4 +31,8 @@ cache {
 }
 
 accounting {
+    settings {
+        algorithm "sliding-window"
+        retry-after-type "delay-seconds"
+    }
 }

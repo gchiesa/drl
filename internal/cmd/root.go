@@ -72,7 +72,7 @@ func Execute(version string) {
 	clusterManager := newCluster(cfg, cacheManager, metricsManager, log)
 
 	// Initialize Accounting Engine
-	accountingEngine := newAccountingEngine(cfg, cacheManager, metricsManager, log)
+	accountingEngine := newAccountingEngine(cfg, cacheManager, metricsManager, cacheManager.Blocklist, clusterManager.GetStateDelegate(), log)
 
 	// Initialize internal API if enabled
 	apiServer := newApiServer(cfg, cacheManager, clusterManager, accountingEngine, log)

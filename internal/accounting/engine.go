@@ -4,46 +4,82 @@ import (
 	"log/slog"
 	"strconv"
 	"sync/atomic"
+	"time"
 
 	"github.com/gchiesa/drl/internal/cache"
 	"github.com/gchiesa/drl/internal/config"
 	"github.com/gchiesa/drl/internal/metrics"
 	"github.com/gchiesa/drl/internal/model"
+	"github.com/gchiesa/drl/internal/ratelimit"
 	"github.com/hashicorp/go-immutable-radix/v2"
 )
+
+// BlocklistEnforcer allows the engine to block entities without importing
+// the cache package's concrete type (avoiding circular dependencies in tests).
+type BlocklistEnforcer interface {
+	IsBlocked(key string) bool
+	Block(key string, ttl time.Duration)
+}
+
+// BlockBroadcaster queues block events for cluster-wide propagation.
+type BlockBroadcaster interface {
+	QueueBlockEvent(key string, ttl time.Duration, entity *model.Entity) error
+}
 
 // Engine is the accounting engine that matches incoming requests against
 // configurable rules, hashes the entity to determine the owner node, and
 // either increments locally or enqueues a remote update via the Flusher.
+// When a threshold is exceeded, it blocks the entity locally and broadcasts.
 type Engine struct {
-	rules      *iradix.Tree[*config.AccountingRule]
-	accounting *cache.AccountingCache
-	flusher    *Flusher
-	logger     *slog.Logger
-	metrics    *metrics.Metrics
-	tracked    atomic.Int64
+	rules       *iradix.Tree[*accountingRuleWithName]
+	accounting  *cache.AccountingCache
+	flusher     *Flusher
+	logger      *slog.Logger
+	metrics     *metrics.Metrics
+	tracked     atomic.Int64
+	limiter     ratelimit.RateLimiter
+	blocklist   BlocklistEnforcer
+	broadcaster BlockBroadcaster
+}
+
+// accountingRuleWithName pairs a rule with its config map key (for metrics labels).
+type accountingRuleWithName struct {
+	config.AccountingRule
+	Name string
 }
 
 // EngineConfig holds the configuration for creating an Engine.
 type EngineConfig struct {
-	Rules      []config.AccountingRule
-	Accounting *cache.AccountingCache
-	Flusher    *Flusher
-	Logger     *slog.Logger
-	Metrics    *metrics.Metrics
+	Rules       map[string]config.AccountingRule
+	Accounting  *cache.AccountingCache
+	Flusher     *Flusher
+	Logger      *slog.Logger
+	Metrics     *metrics.Metrics
+	Limiter     ratelimit.RateLimiter
+	Blocklist   BlocklistEnforcer
+	Broadcaster BlockBroadcaster
 }
 
 // NewEngine creates a new accounting Engine.
 func NewEngine(cfg EngineConfig) *Engine {
-	e := &Engine{
-		rules:      createPathRadixTree(cfg.Rules),
-		accounting: cfg.Accounting,
-		flusher:    cfg.Flusher,
-		logger:     cfg.Logger,
-		metrics:    cfg.Metrics,
+	limiter := cfg.Limiter
+	if limiter == nil {
+		limiter = ratelimit.NewSlidingWindow()
 	}
-	for _, rule := range cfg.Rules {
+
+	e := &Engine{
+		rules:       createPathRadixTree(cfg.Rules),
+		accounting:  cfg.Accounting,
+		flusher:     cfg.Flusher,
+		logger:      cfg.Logger,
+		metrics:     cfg.Metrics,
+		limiter:     limiter,
+		blocklist:   cfg.Blocklist,
+		broadcaster: cfg.Broadcaster,
+	}
+	for name, rule := range cfg.Rules {
 		e.logger.Info("accounting rule loaded",
+			"name", name,
 			"path_prefix", rule.PathPrefix,
 			"limit", rule.Limit,
 			"per", rule.Per,
@@ -60,7 +96,9 @@ func (e *Engine) GetFlusher() *Flusher {
 
 // Process evaluates the incoming request against accounting rules. If a rule
 // matches, the entity is hashed and either counted locally (if this node is
-// the owner) or enqueued for remote flushing.
+// the owner) or enqueued for remote flushing. When a local increment causes
+// the counter to exceed the rule's limit, the entity is blocked and a block
+// event is broadcast cluster-wide.
 func (e *Engine) Process(sourceIP, path string, headers map[string]string) {
 	rule := e.matchRuleV2(path)
 	if rule == nil {
@@ -83,8 +121,8 @@ func (e *Engine) Process(sourceIP, path string, headers map[string]string) {
 
 	ownerAddr := e.accounting.GetOwner(key)
 	if e.accounting.IsOwner(key) {
-		// Local increment
-		e.accounting.Increment(key)
+		// Local increment and threshold check
+		newCount := e.accounting.Increment(key)
 		if e.metrics != nil {
 			e.metrics.IncAccountingLocal()
 		}
@@ -93,7 +131,28 @@ func (e *Engine) Process(sourceIP, path string, headers map[string]string) {
 			"owner", ownerAddr,
 			"source_ip", sourceIP,
 			"path", path,
+			"count", newCount,
 		)
+
+		// Evaluate rate limit
+		decision := e.limiter.Evaluate(newCount, &rule.AccountingRule, rule.Name)
+		if decision.Blocked {
+			e.logger.Warn("rate limit exceeded, blocking entity",
+				"key", key,
+				"rule", rule.Name,
+				"count", newCount,
+				"limit", rule.Limit,
+			)
+			if e.blocklist != nil {
+				e.blocklist.Block(key, decision.RetryAfter)
+			}
+			if e.broadcaster != nil {
+				_ = e.broadcaster.QueueBlockEvent(key, decision.RetryAfter, &entity)
+			}
+			if e.metrics != nil {
+				e.metrics.IncRateLimitBlock(rule.Name, "threshold_exceeded")
+			}
+		}
 	} else {
 		// Remote enqueue
 		if e.flusher != nil {
@@ -124,21 +183,9 @@ func (e *Engine) TrackedEntities() int64 {
 	return e.tracked.Load()
 }
 
-// matchRule returns the first rule whose PathPrefix matches the given path.
-// TODO: reconsider radix.tree if rules are > 20
-// see -> github.com/armon/go-radix
-//func (e *Engine) matchRule(path string) *config.AccountingRule {
-//	for i := range e.rules {
-//		if strings.HasPrefix(path, e.rules[i].PathPrefix) {
-//			return &e.rules[i]
-//		}
-//	}
-//	return nil
-//}
-
 // matchRuleV2 attempts to find the longest prefix match for the given path in the rules and returns the corresponding rule.
 // Returns nil if no matching rule is found.
-func (e *Engine) matchRuleV2(path string) *config.AccountingRule {
+func (e *Engine) matchRuleV2(path string) *accountingRuleWithName {
 	_, rule, found := e.rules.Root().LongestPrefix([]byte(path))
 	if found {
 		return rule
@@ -164,11 +211,11 @@ func filterHeaders(headers map[string]string, keys []string) map[string]string {
 }
 
 // createPathRadixTree constructs a radix tree to efficiently match paths to accounting rules based on their PathPrefix.
-func createPathRadixTree(rules []config.AccountingRule) *iradix.Tree[*config.AccountingRule] {
-	// create the tree
-	r := iradix.New[*config.AccountingRule]()
-	for _, rule := range rules {
-		r, _, _ = r.Insert([]byte(rule.PathPrefix), &rule)
+func createPathRadixTree(rules map[string]config.AccountingRule) *iradix.Tree[*accountingRuleWithName] {
+	r := iradix.New[*accountingRuleWithName]()
+	for name, rule := range rules {
+		entry := &accountingRuleWithName{AccountingRule: rule, Name: name}
+		r, _, _ = r.Insert([]byte(rule.PathPrefix), entry)
 	}
 	return r
 }

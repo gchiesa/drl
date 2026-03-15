@@ -2,15 +2,19 @@ package grpc
 
 import (
 	"context"
+	"fmt"
 	"log/slog"
 	"net"
 
+	corev3 "github.com/envoyproxy/go-control-plane/envoy/config/core/v3"
 	authv3 "github.com/envoyproxy/go-control-plane/envoy/service/auth/v3"
+	typev3 "github.com/envoyproxy/go-control-plane/envoy/type/v3"
 	"google.golang.org/genproto/googleapis/rpc/status"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 
 	"github.com/gchiesa/drl/internal/metrics"
+	"github.com/gchiesa/drl/internal/model"
 )
 
 // AccountingEngine provides async request accounting.
@@ -18,12 +22,18 @@ type AccountingEngine interface {
 	Process(sourceIP, path string, headers map[string]string)
 }
 
+// BlocklistChecker checks whether an entity key is blocked.
+type BlocklistChecker interface {
+	IsBlocked(key string) bool
+}
+
 // ServerConfig holds configuration for the gRPC ext_authz server.
 type ServerConfig struct {
-	Address string
-	Metrics *metrics.Metrics
-	Logger  *slog.Logger
-	Engine  AccountingEngine
+	Address   string
+	Metrics   *metrics.Metrics
+	Logger    *slog.Logger
+	Engine    AccountingEngine
+	Blocklist BlocklistChecker
 }
 
 // Server implements the Envoy ext_authz v3 Authorization gRPC service.
@@ -36,6 +46,7 @@ type Server struct {
 	logger     *slog.Logger
 	listener   net.Listener
 	engine     AccountingEngine
+	blocklist  BlocklistChecker
 }
 
 // NewServer creates a new gRPC ext_authz server.
@@ -48,6 +59,7 @@ func NewServer(cfg ServerConfig) *Server {
 		metrics:    cfg.Metrics,
 		logger:     cfg.Logger,
 		engine:     cfg.Engine,
+		blocklist:  cfg.Blocklist,
 	}
 
 	authv3.RegisterAuthorizationServer(gs, s)
@@ -56,7 +68,9 @@ func NewServer(cfg ServerConfig) *Server {
 }
 
 // Check implements the ext_authz v3 Authorization Check RPC.
-// In dry-run mode it always returns OK while parsing and logging request metadata.
+// It checks the blocklist first; if the entity is blocked, it returns
+// PermissionDenied (429) with a Retry-After header. Otherwise it returns OK
+// and fires async accounting.
 func (s *Server) Check(_ context.Context, req *authv3.CheckRequest) (*authv3.CheckResponse, error) {
 	s.metrics.IncGRPCCheck()
 
@@ -85,8 +99,54 @@ func (s *Server) Check(_ context.Context, req *authv3.CheckRequest) (*authv3.Che
 		"headers", headers,
 	)
 
+	// Check blocklist before accounting
+	if s.blocklist != nil {
+		entity := model.Entity{
+			IP:      sourceIP,
+			Path:    path,
+			Headers: headers,
+		}
+		key := entity.Key()
+
+		if s.blocklist.IsBlocked(key) {
+			s.logger.Debug("entity blocked",
+				"key", key,
+				"source_ip", sourceIP,
+				"path", path,
+			)
+			if s.metrics != nil {
+				s.metrics.IncGRPCResponseCode("DENIED")
+			}
+			return &authv3.CheckResponse{
+				Status: &status.Status{
+					Code:    int32(codes.PermissionDenied),
+					Message: "rate limit exceeded",
+				},
+				HttpResponse: &authv3.CheckResponse_DeniedResponse{
+					DeniedResponse: &authv3.DeniedHttpResponse{
+						Status: &typev3.HttpStatus{
+							Code: typev3.StatusCode_TooManyRequests,
+						},
+						Headers: []*corev3.HeaderValueOption{
+							{
+								Header: &corev3.HeaderValue{
+									Key:   "Retry-After",
+									Value: fmt.Sprintf("%d", 60),
+								},
+							},
+						},
+					},
+				},
+			}, nil
+		}
+	}
+
 	if s.engine != nil {
 		go s.engine.Process(sourceIP, path, headers)
+	}
+
+	if s.metrics != nil {
+		s.metrics.IncGRPCResponseCode("OK")
 	}
 
 	return &authv3.CheckResponse{
