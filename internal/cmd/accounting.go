@@ -9,13 +9,18 @@ import (
 	"github.com/gchiesa/drl/internal/cache"
 	"github.com/gchiesa/drl/internal/config"
 	"github.com/gchiesa/drl/internal/metrics"
-	"github.com/samber/lo"
 )
 
 // newAccountingEngine initializes and returns a new accounting.Engine based on the provided configuration and dependencies.
 // It sets up the accounting flusher and applies the accounting rules. If initialization fails, the application exits.
-func newAccountingEngine(cfg *config.Config, cacheManager *cache.Manager, metricsManager *metrics.Metrics, log *slog.Logger) *accounting.Engine {
-	// Initialize accounting flusher and engine
+func newAccountingEngine(
+	cfg *config.Config,
+	cacheManager *cache.Manager,
+	metricsManager *metrics.Metrics,
+	blocklist accounting.BlocklistEnforcer,
+	broadcaster accounting.BlockBroadcaster,
+	log *slog.Logger,
+) *accounting.Engine {
 	var flusher *accounting.Flusher
 	var engine *accounting.Engine
 
@@ -37,11 +42,13 @@ func newAccountingEngine(cfg *config.Config, cacheManager *cache.Manager, metric
 		log.Info("accounting flusher started", "sync_port", accounting.DefaultSyncPort)
 
 		engine = accounting.NewEngine(accounting.EngineConfig{
-			Rules:      lo.Values(cfg.Accounting.Rules),
-			Accounting: cacheManager.Accounting,
-			Flusher:    flusher,
-			Logger:     log,
-			Metrics:    metricsManager,
+			Rules:       cfg.Accounting.Rules,
+			Accounting:  cacheManager.Accounting,
+			Flusher:     flusher,
+			Logger:      log,
+			Metrics:     metricsManager,
+			Blocklist:   blocklist,
+			Broadcaster: broadcaster,
 		})
 		log.Info("accounting engine initialized", "rules", len(cfg.Accounting.Rules))
 	}

@@ -59,6 +59,18 @@ func TestNewMetrics(t *testing.T) {
 		t.Error("AccountingUDPRecvTotal counter should not be nil")
 	}
 
+	if m.RateLimitBlocksTotal == nil {
+		t.Error("RateLimitBlocksTotal counter should not be nil")
+	}
+
+	if m.RateLimitPropagationLatencyMs == nil {
+		t.Error("RateLimitPropagationLatencyMs histogram should not be nil")
+	}
+
+	if m.GRPCResponseCodeTotal == nil {
+		t.Error("GRPCResponseCodeTotal counter should not be nil")
+	}
+
 	if m.registry == nil {
 		t.Error("registry should not be nil")
 	}
@@ -112,6 +124,12 @@ func TestCacheMetrics(t *testing.T) {
 	m.IncAccountingRemote()
 	m.IncAccountingFlush()
 	m.IncAccountingUDPRecv()
+
+	// Test rate limiting metrics
+	m.IncRateLimitBlock("api-limit", "threshold_exceeded")
+	m.ObservePropagationLatency(5.2)
+	m.IncGRPCResponseCode("OK")
+	m.IncGRPCResponseCode("DENIED")
 }
 
 func TestStartServer(t *testing.T) {
@@ -128,6 +146,9 @@ func TestStartServer(t *testing.T) {
 	m.SetCacheMemory(CacheTypeBlocklist, 1024)
 	m.ObserveSyncDuration(0.1)
 	m.IncGRPCCheck()
+	m.IncRateLimitBlock("test-rule", "threshold_exceeded")
+	m.ObservePropagationLatency(1.0)
+	m.IncGRPCResponseCode("OK")
 
 	// Use a random high port to avoid conflicts
 	port := 19091
@@ -224,6 +245,18 @@ func TestStartServer(t *testing.T) {
 
 	if !strings.Contains(metricsStr, "drl_accounting_udp_recv_total") {
 		t.Error("expected drl_accounting_udp_recv_total metric in output")
+	}
+
+	if !strings.Contains(metricsStr, "drl_ratelimit_blocks_total") {
+		t.Error("expected drl_ratelimit_blocks_total metric in output")
+	}
+
+	if !strings.Contains(metricsStr, "drl_ratelimit_propagation_latency_ms") {
+		t.Error("expected drl_ratelimit_propagation_latency_ms metric in output")
+	}
+
+	if !strings.Contains(metricsStr, "drl_grpc_response_code_total") {
+		t.Error("expected drl_grpc_response_code_total metric in output")
 	}
 }
 

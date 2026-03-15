@@ -50,7 +50,16 @@ type Config struct {
 
 // AccountingConfig holds accounting rules for entity rate limiting
 type AccountingConfig struct {
-	Rules map[string]AccountingRule `kdl:"rules"`
+	Settings AccountingSettings        `kdl:"settings"`
+	Rules    map[string]AccountingRule `kdl:"rules"`
+}
+
+// AccountingSettings holds global accounting settings
+type AccountingSettings struct {
+	// Algorithm is the rate limiting algorithm ("sliding-window" is default)
+	Algorithm string `kdl:"algorithm"`
+	// RetryAfterType determines the Retry-After header format: "delay-seconds" or "http-date"
+	RetryAfterType string `kdl:"retry-after-type"`
 }
 
 // AccountingRule defines a rate-limiting rule for a path prefix
@@ -236,6 +245,24 @@ func (c *Config) Validate() error {
 	}
 	if c.Cache.BlocklistDefaultTTLSeconds < 1 {
 		errs = append(errs, fmt.Sprintf("cache.blocklist-default-ttl-seconds must be at least 1, got %d", c.Cache.BlocklistDefaultTTLSeconds))
+	}
+
+	// Apply accounting settings defaults
+	if c.Accounting.Settings.Algorithm == "" {
+		c.Accounting.Settings.Algorithm = "sliding-window"
+	}
+	if c.Accounting.Settings.RetryAfterType == "" {
+		c.Accounting.Settings.RetryAfterType = "delay-seconds"
+	}
+
+	// Validate accounting settings
+	validAlgorithms := map[string]bool{"sliding-window": true}
+	if !validAlgorithms[strings.ToLower(c.Accounting.Settings.Algorithm)] {
+		errs = append(errs, fmt.Sprintf("accounting.settings.algorithm must be one of sliding-window; got %q", c.Accounting.Settings.Algorithm))
+	}
+	validRetryAfter := map[string]bool{"delay-seconds": true, "http-date": true}
+	if !validRetryAfter[strings.ToLower(c.Accounting.Settings.RetryAfterType)] {
+		errs = append(errs, fmt.Sprintf("accounting.settings.retry-after-type must be one of delay-seconds, http-date; got %q", c.Accounting.Settings.RetryAfterType))
 	}
 
 	// Validate accounting rules

@@ -1,6 +1,7 @@
 package accounting
 
 import (
+	"sync"
 	"testing"
 	"time"
 
@@ -25,7 +26,7 @@ func testEngineAccountingCache(t *testing.T) *cache.AccountingCache {
 	return ac
 }
 
-func testEngine(t *testing.T, rules []config.AccountingRule) (*Engine, *cache.AccountingCache) {
+func testEngine(t *testing.T, rules map[string]config.AccountingRule) (*Engine, *cache.AccountingCache) {
 	t.Helper()
 	ac := testEngineAccountingCache(t)
 	m := metrics.NewMetrics()
@@ -41,9 +42,9 @@ func testEngine(t *testing.T, rules []config.AccountingRule) (*Engine, *cache.Ac
 }
 
 func TestEngine_MatchRule(t *testing.T) {
-	rules := []config.AccountingRule{
-		{PathPrefix: "/api/v1", Headers: []string{"X-API-Key"}, Limit: 100, Per: "minute"},
-		{PathPrefix: "/health", Limit: 500, Per: "second"},
+	rules := map[string]config.AccountingRule{
+		"api-limit":    {PathPrefix: "/api/v1", Headers: []string{"X-API-Key"}, Limit: 100, Per: "minute"},
+		"health-limit": {PathPrefix: "/health", Limit: 500, Per: "second"},
 	}
 	e, ac := testEngine(t, rules)
 	defer ac.Close()
@@ -52,11 +53,13 @@ func TestEngine_MatchRule(t *testing.T) {
 	rule := e.matchRuleV2("/api/v1/users")
 	require.NotNil(t, rule)
 	assert.Equal(t, "/api/v1", rule.PathPrefix)
+	assert.Equal(t, "api-limit", rule.Name)
 
 	// Match second rule
 	rule = e.matchRuleV2("/health")
 	require.NotNil(t, rule)
 	assert.Equal(t, "/health", rule.PathPrefix)
+	assert.Equal(t, "health-limit", rule.Name)
 
 	// No match
 	rule = e.matchRuleV2("/unknown/path")
@@ -64,8 +67,8 @@ func TestEngine_MatchRule(t *testing.T) {
 }
 
 func TestEngine_Process_LocalOwner(t *testing.T) {
-	rules := []config.AccountingRule{
-		{PathPrefix: "/api", Limit: 100, Per: "minute"},
+	rules := map[string]config.AccountingRule{
+		"api-limit": {PathPrefix: "/api", Limit: 100, Per: "minute"},
 	}
 	e, ac := testEngine(t, rules)
 	defer ac.Close()
@@ -95,8 +98,8 @@ func TestEngine_Process_RemoteOwner(t *testing.T) {
 	// Add a remote node so that some keys are not local
 	ac.AddNode("remote-node-1")
 
-	rules := []config.AccountingRule{
-		{PathPrefix: "/api", Limit: 100, Per: "minute"},
+	rules := map[string]config.AccountingRule{
+		"api-limit": {PathPrefix: "/api", Limit: 100, Per: "minute"},
 	}
 
 	e := NewEngine(EngineConfig{
@@ -132,8 +135,8 @@ func TestEngine_Process_RemoteOwner(t *testing.T) {
 }
 
 func TestEngine_Process_NoMatch(t *testing.T) {
-	rules := []config.AccountingRule{
-		{PathPrefix: "/api", Limit: 100, Per: "minute"},
+	rules := map[string]config.AccountingRule{
+		"api-limit": {PathPrefix: "/api", Limit: 100, Per: "minute"},
 	}
 	e, ac := testEngine(t, rules)
 	defer ac.Close()
@@ -143,8 +146,8 @@ func TestEngine_Process_NoMatch(t *testing.T) {
 }
 
 func TestEngine_Process_WithHeaders(t *testing.T) {
-	rules := []config.AccountingRule{
-		{PathPrefix: "/api", Headers: []string{"X-API-Key"}, Limit: 100, Per: "minute"},
+	rules := map[string]config.AccountingRule{
+		"api-limit": {PathPrefix: "/api", Headers: []string{"X-API-Key"}, Limit: 100, Per: "minute"},
 	}
 	e, ac := testEngine(t, rules)
 	defer ac.Close()
@@ -193,8 +196,8 @@ func TestEngine_PendingUpdates(t *testing.T) {
 }
 
 func TestEngine_TrackedEntities(t *testing.T) {
-	rules := []config.AccountingRule{
-		{PathPrefix: "/", Limit: 1000, Per: "minute"},
+	rules := map[string]config.AccountingRule{
+		"root": {PathPrefix: "/", Limit: 1000, Per: "minute"},
 	}
 	e, ac := testEngine(t, rules)
 	defer ac.Close()
@@ -206,6 +209,86 @@ func TestEngine_TrackedEntities(t *testing.T) {
 	e.Process("10.0.0.3", "/path", nil)
 
 	assert.Equal(t, int64(3), e.TrackedEntities())
+}
+
+// mockBlocklist records Block calls for testing.
+type mockBlocklist struct {
+	mu      sync.Mutex
+	blocked map[string]time.Duration
+}
+
+func newMockBlocklist() *mockBlocklist {
+	return &mockBlocklist{blocked: make(map[string]time.Duration)}
+}
+
+func (m *mockBlocklist) IsBlocked(key string) bool {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	_, ok := m.blocked[key]
+	return ok
+}
+
+func (m *mockBlocklist) Block(key string, ttl time.Duration) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.blocked[key] = ttl
+}
+
+func (m *mockBlocklist) blockedCount() int {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return len(m.blocked)
+}
+
+// mockBroadcaster records QueueBlockEvent calls.
+type mockBroadcaster struct {
+	mu     sync.Mutex
+	events []string
+}
+
+func (m *mockBroadcaster) QueueBlockEvent(key string, _ time.Duration, _ *model.Entity) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.events = append(m.events, key)
+	return nil
+}
+
+func (m *mockBroadcaster) eventCount() int {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return len(m.events)
+}
+
+func TestEngine_Process_ThresholdBlocking(t *testing.T) {
+	ac := testEngineAccountingCache(t)
+	defer ac.Close()
+	m := metrics.NewMetrics()
+	bl := newMockBlocklist()
+	bc := &mockBroadcaster{}
+
+	rules := map[string]config.AccountingRule{
+		"api-limit": {PathPrefix: "/api", Limit: 3, Per: "minute"},
+	}
+
+	e := NewEngine(EngineConfig{
+		Rules:       rules,
+		Accounting:  ac,
+		Logger:      testLogger(),
+		Metrics:     m,
+		Blocklist:   bl,
+		Broadcaster: bc,
+	})
+
+	// Process 3 requests (at limit, not blocked)
+	for range 3 {
+		e.Process("10.0.0.1", "/api/resource", nil)
+	}
+	assert.Equal(t, 0, bl.blockedCount(), "should not be blocked at limit")
+
+	// 4th request exceeds the limit
+	e.Process("10.0.0.1", "/api/resource", nil)
+	assert.Equal(t, 1, bl.blockedCount(), "should be blocked after exceeding limit")
+	assert.Equal(t, 1, bc.eventCount(), "should broadcast block event")
 }
 
 func TestFilterHeaders(t *testing.T) {

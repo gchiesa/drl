@@ -24,6 +24,10 @@ internal-api {
 }
 
 accounting {
+    settings {
+        algorithm "sliding-window"
+        retry-after-type "delay-seconds"
+    }
     rules {
         "catch-all" {
             path-prefix "/"
