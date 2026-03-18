@@ -63,8 +63,8 @@ func TestStateDelegate_LocalState(t *testing.T) {
 	defer bc.Close()
 
 	// Add some blocked IPs
-	bc.Block("192.168.1.1", 5*time.Second)
-	bc.Block("192.168.1.2", 5*time.Second)
+	bc.Block("192.168.1.1", nil, 5*time.Second)
+	bc.Block("192.168.1.2", nil, 5*time.Second)
 
 	delegate := NewStateDelegate(DelegateConfig{
 		Blocklist:   bc,
@@ -98,8 +98,8 @@ func TestStateDelegate_MergeRemoteState(t *testing.T) {
 	require.NoError(t, err)
 	defer sourceBC.Close()
 
-	sourceBC.Block("192.168.1.1", 5*time.Second)
-	sourceBC.Block("192.168.1.2", 5*time.Second)
+	sourceBC.Block("192.168.1.1", nil, 5*time.Second)
+	sourceBC.Block("192.168.1.2", nil, 5*time.Second)
 
 	// Get state from source
 	state, err := sourceBC.GetState()
@@ -263,7 +263,7 @@ func TestStateDelegate_SyncDurationMetric(t *testing.T) {
 	require.NoError(t, err)
 	defer sourceBC.Close()
 
-	sourceBC.Block("192.168.1.1", 5*time.Second)
+	sourceBC.Block("192.168.1.1", nil, 5*time.Second)
 	state, err := sourceBC.GetState()
 	require.NoError(t, err)
 

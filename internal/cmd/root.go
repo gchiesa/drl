@@ -11,6 +11,7 @@ import (
 
 	"github.com/alexflint/go-arg"
 	"github.com/gchiesa/drl/internal/config"
+	"github.com/gchiesa/drl/internal/utils"
 )
 
 var args struct {
@@ -47,10 +48,17 @@ func Execute(version string) {
 		os.Exit(1)
 	}
 
+	// Resolve the local instance IP once — used as the node identity everywhere.
+	localIP, err := utils.GetInstanceIP()
+	if err != nil {
+		_, _ = fmt.Fprintf(os.Stderr, "Error resolving instance IP: %v\n", err)
+		os.Exit(1)
+	}
+
 	log.Info("DRL - Distributed Rate Limiter starting...")
 	log.Info("configuration loaded",
 		"config_file_path", cfg.GetConfigFilePath(),
-		"node_name", cfg.NodeName,
+		"node_ip", localIP,
 		"grpc_addr", cfg.Listen.GRPC,
 		"metrics_addr", cfg.Listen.Metrics,
 		"membership_service", cfg.Membership.ServiceName,
@@ -66,16 +74,16 @@ func Execute(version string) {
 	metricsManager := newMetrics(cfg, log)
 
 	// Initialize cache manager
-	cacheManager := newCache(cfg, metricsManager, log)
+	cacheManager := newCache(cfg, localIP, metricsManager, log)
 
 	// Initialize cluster manager
-	clusterManager := newCluster(cfg, cacheManager, metricsManager, log)
+	clusterManager := newCluster(cfg, localIP, cacheManager, metricsManager, log)
 
 	// Initialize Accounting Engine
-	accountingEngine := newAccountingEngine(cfg, cacheManager, metricsManager, cacheManager.Blocklist, clusterManager.GetStateDelegate(), log)
+	accountingEngine := newAccountingEngine(cfg, localIP, cacheManager, metricsManager, cacheManager.Blocklist, clusterManager.GetStateDelegate(), log)
 
 	// Initialize internal API if enabled
-	apiServer := newApiServer(cfg, cacheManager, clusterManager, accountingEngine, log)
+	apiServer := newApiServer(cfg, localIP, cacheManager, clusterManager, accountingEngine, log)
 
 	// Initialize gRPC ext_authz server for Envoy
 	grpcServer := newGRPCServer(cfg, cacheManager, accountingEngine, apiServer, metricsManager, log)

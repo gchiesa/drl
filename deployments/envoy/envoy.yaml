@@ -43,22 +43,22 @@ static_resources:
                         - match:
                             prefix: "/"
                           route:
-                            cluster: static-responder
+                            cluster: echo-server
 
   clusters:
-    - name: static-responder
+    - name: echo-server
       connect_timeout: 5s
       type: STRICT_DNS
       lb_policy: ROUND_ROBIN
       load_assignment:
-        cluster_name: static-responder
+        cluster_name: echo-server
         endpoints:
           - lb_endpoints:
               - endpoint:
                   address:
                     socket_address:
-                      address: static-responder
-                      port_value: 80
+                      address: echo-server
+                      port_value: 8080
 
     - name: drl_cluster
       connect_timeout: 0.25s

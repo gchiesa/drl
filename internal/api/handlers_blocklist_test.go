@@ -31,8 +31,8 @@ func newMockBlocklist() *mockBlocklist {
 	return &mockBlocklist{blocked: make(map[string]mockBlockEntry)}
 }
 
-func (m *mockBlocklist) Block(key string, ttl time.Duration) {
-	m.blocked[key] = mockBlockEntry{ttl: ttl}
+func (m *mockBlocklist) Block(key string, entity *model.Entity, ttl time.Duration) {
+	m.blocked[key] = mockBlockEntry{ttl: ttl, entity: entity}
 }
 
 func (m *mockBlocklist) BlockWithMeta(key string, ttl time.Duration, entity *model.Entity) {
@@ -227,7 +227,7 @@ func TestBlockEntityDelete_Success(t *testing.T) {
 
 	// Pre-populate the blocklist
 	key := model.Entity{IP: "10.0.0.1", Path: "api/v1/payments"}.Key()
-	bl.Block(key, 24*time.Hour)
+	bl.Block(key, nil, 24*time.Hour)
 	require.True(t, bl.IsBlocked(key))
 
 	uri := "/blocked-entity/10.0.0.1/_path/api/v1/payments"

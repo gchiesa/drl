@@ -118,10 +118,10 @@ func (b *BlocklistCache) IsBlocked(key string) bool {
 
 // Block adds a key to the blocklist with a TTL.
 // No entity metadata is stored — use BlockWithMeta for admin-API blocks.
-func (b *BlocklistCache) Block(key string, ttl time.Duration) {
+func (b *BlocklistCache) Block(key string, entity *model.Entity, ttl time.Duration) {
 	expiresAt := time.Now().Add(ttl)
 	b.cache.SetWithTTL(key, expiresAt, 100, ttl)
-	b.entries.Store(key, &blocklistEntryData{expiresAt: expiresAt})
+	b.entries.Store(key, &blocklistEntryData{expiresAt: expiresAt, entity: entity})
 	b.cache.Wait()
 
 	if b.logger != nil {

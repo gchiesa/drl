@@ -14,7 +14,6 @@ import (
 func TestNewConfig(t *testing.T) {
 	cfg := NewConfig()
 	assert.NotNil(t, cfg)
-	assert.Equal(t, "", cfg.NodeName)
 	assert.Equal(t, "", cfg.Listen.GRPC)
 	assert.Equal(t, "", cfg.Listen.Metrics)
 }
@@ -42,11 +41,6 @@ func TestLoad_DefaultsOnly(t *testing.T) {
 	assert.Equal(t, 30, cfg.Cache.SyncTimeoutSeconds)
 	assert.Equal(t, 300, cfg.Cache.BlocklistDefaultTTLSeconds)
 
-	// NodeName should be set to hostname when not specified
-	hostname, _ := os.Hostname()
-	if hostname != "" {
-		assert.Equal(t, hostname, cfg.NodeName)
-	}
 }
 
 func TestLoad_WithCustomKDLFile(t *testing.T) {
@@ -227,7 +221,6 @@ func TestLoad_ValidationFailure(t *testing.T) {
 
 func TestValidate_ValidConfig(t *testing.T) {
 	cfg := &Config{
-		NodeName: "test-node",
 		Listen: ListenConfig{
 			GRPC:    ":8081",
 			Metrics: ":9091",

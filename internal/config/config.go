@@ -23,9 +23,6 @@ const (
 )
 
 type Config struct {
-	// NodeName is the unique identifier for this node
-	NodeName string
-
 	// Listen configuration
 	Listen ListenConfig `kdl:"listen" envPrefix:"DRL_LISTEN_"`
 
@@ -160,11 +157,6 @@ func Load(configPath string) (*Config, error) {
 	// apply the environment variable overrides
 	if err = cfg.loadFromEnvironment(); err != nil {
 		return nil, err
-	}
-
-	// if hostname is not set we use the current one
-	if cfg.NodeName == "" {
-		cfg.NodeName = getHostname()
 	}
 
 	// Validate the final configuration
@@ -315,12 +307,4 @@ func ValidatePrivateAPIKey() error {
 		return fmt.Errorf("DRL_PRIVATE_API_KEY must be at least 16 characters, got %d", len(key))
 	}
 	return nil
-}
-
-func getHostname() string {
-	hostname, err := os.Hostname()
-	if err != nil {
-		return "unknown"
-	}
-	return hostname
 }

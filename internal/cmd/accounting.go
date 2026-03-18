@@ -15,6 +15,7 @@ import (
 // It sets up the accounting flusher and applies the accounting rules. If initialization fails, the application exits.
 func newAccountingEngine(
 	cfg *config.Config,
+	localIP string,
 	cacheManager *cache.Manager,
 	metricsManager *metrics.Metrics,
 	blocklist accounting.BlocklistEnforcer,
@@ -25,7 +26,7 @@ func newAccountingEngine(
 	var engine *accounting.Engine
 
 	if len(cfg.Accounting.Rules) > 0 {
-		senderID := xxhash.Sum64String(cfg.NodeName)
+		senderID := xxhash.Sum64String(localIP)
 
 		flusher = accounting.NewFlusher(accounting.FlusherConfig{
 			SenderID:   senderID,

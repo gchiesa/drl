@@ -1,19 +1,19 @@
 services:
-#  echo-server:
-#    image: mccutchen/go-httpbin:latest
+  echo-server:
+    image: mccutchen/go-httpbin:latest
 #    container_name: echo-server
-#    profiles:
-#      - echo
-#    networks:
-#      - drl-network
-
-  static-responder:
-    image: nginx:alpine
-    container_name: static-responder
-    volumes:
-      - ./deployments/nginx/default.conf:/etc/nginx/conf.d/default.conf:ro
+    deploy:
+      replicas: 3
     networks:
       - drl-network
+
+#  static-responder:
+#    image: nginx:alpine
+#    container_name: static-responder
+#    volumes:
+#      - ./deployments/nginx/default.conf:/etc/nginx/conf.d/default.conf:ro
+#    networks:
+#      - drl-network
 
   envoy:
     image: envoyproxy/envoy:v1.30-latest
@@ -25,7 +25,7 @@ services:
     command: ["-c", "/etc/envoy/envoy.yaml", "--log-level", "info"]
     # command: ["-c", "/etc/envoy/envoy.yaml", "--log-level", "info", "--component-log-level", "ext_authz:debug,connection:debug"]
     depends_on:
-      - static-responder
+      - echo-server
       - drl
     networks:
       - drl-network

@@ -23,6 +23,7 @@ import (
 // Returns an initialized and running *api.Server instance or nil on failure.
 func newApiServer(
 	cfg *config.Config,
+	localIP string,
 	cacheManager *cache.Manager,
 	clusterManager *membership.Cluster,
 	accountingEngine *accounting.Engine,
@@ -45,7 +46,7 @@ func newApiServer(
 			Address:         cfg.InternalAPI.Address,
 			APIKey:          apiKey,
 			ClusterName:     cfg.Membership.ServiceName,
-			NodeID:          cfg.NodeName,
+			NodeID:          localIP,
 			Cluster:         clusterManager,
 			Logger:          log,
 			Blocklist:       cacheManager.Blocklist,

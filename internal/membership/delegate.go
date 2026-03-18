@@ -115,7 +115,7 @@ func (d *StateDelegate) NotifyMsg(buf []byte) {
 		if entity != nil {
 			d.blocklist.BlockWithMeta(event.Key, event.TTL, entity)
 		} else {
-			d.blocklist.Block(event.Key, event.TTL)
+			d.blocklist.Block(event.Key, nil, event.TTL)
 		}
 		if d.logger != nil {
 			d.logger.Debug("applied remote block event",
