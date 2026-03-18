@@ -39,6 +39,14 @@ func (m *mockEngine) Process(sourceIP, path string, headers map[string]string) {
 	m.calls = append(m.calls, processCall{SourceIP: sourceIP, Path: path, Headers: headers})
 }
 
+func (m *mockEngine) BuildEntityKey(sourceIP, path string, headers map[string]string) string {
+	// In tests, build the key the same way the real engine does — using
+	// the model.Entity directly (no header filtering, since the mock has
+	// no rules). Tests that need header filtering should use the real engine.
+	entity := model.Entity{IP: sourceIP, Path: path, Headers: headers}
+	return entity.Key()
+}
+
 func (m *mockEngine) getCalls() []processCall {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -192,24 +200,21 @@ type mockBlocklist struct {
 	blocked map[string]bool
 }
 
-func (m *mockBlocklist) IsBlocked(key string) bool {
-	return m.blocked[key]
+func (m *mockBlocklist) IsBlockedWithExpiration(key string) (time.Time, bool) {
+	return time.Now(), m.blocked[key]
 }
 
 func TestCheck_BlockedEntity(t *testing.T) {
+	engine := &mockEngine{}
 	bl := &mockBlocklist{blocked: make(map[string]bool)}
 	cfg := testConfig()
+	cfg.Engine = engine
 	cfg.Blocklist = bl
 
 	s := NewServer(cfg)
 
-	// Build the entity key that would be generated from this request
-	entity := model.Entity{
-		IP:      "10.0.0.1",
-		Path:    "/api/v1/resource",
-		Headers: map[string]string{"x-api-key": "abc123"},
-	}
-	key := entity.Key()
+	// Build the key via the engine (same path the Check handler uses)
+	key := engine.BuildEntityKey("10.0.0.1", "/api/v1/resource", map[string]string{"x-api-key": "abc123"})
 	bl.blocked[key] = true
 
 	req := &authv3.CheckRequest{
@@ -242,8 +247,10 @@ func TestCheck_BlockedEntity(t *testing.T) {
 }
 
 func TestCheck_NotBlockedEntity(t *testing.T) {
+	engine := &mockEngine{}
 	bl := &mockBlocklist{blocked: make(map[string]bool)}
 	cfg := testConfig()
+	cfg.Engine = engine
 	cfg.Blocklist = bl
 
 	s := NewServer(cfg)

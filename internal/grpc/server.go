@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net"
+	"time"
 
 	corev3 "github.com/envoyproxy/go-control-plane/envoy/config/core/v3"
 	authv3 "github.com/envoyproxy/go-control-plane/envoy/service/auth/v3"
@@ -14,17 +15,17 @@ import (
 	"google.golang.org/grpc/codes"
 
 	"github.com/gchiesa/drl/internal/metrics"
-	"github.com/gchiesa/drl/internal/model"
 )
 
-// AccountingEngine provides async request accounting.
+// AccountingEngine provides async request accounting and entity key building.
 type AccountingEngine interface {
 	Process(sourceIP, path string, headers map[string]string)
+	BuildEntityKey(sourceIP, path string, headers map[string]string) string
 }
 
 // BlocklistChecker checks whether an entity key is blocked.
 type BlocklistChecker interface {
-	IsBlocked(key string) bool
+	IsBlockedWithExpiration(key string) (time.Time, bool)
 }
 
 // ServerConfig holds configuration for the gRPC ext_authz server.
@@ -99,16 +100,12 @@ func (s *Server) Check(_ context.Context, req *authv3.CheckRequest) (*authv3.Che
 		"headers", headers,
 	)
 
-	// Check blocklist before accounting
-	if s.blocklist != nil {
-		entity := model.Entity{
-			IP:      sourceIP,
-			Path:    path,
-			Headers: headers,
-		}
-		key := entity.Key()
-
-		if s.blocklist.IsBlocked(key) {
+	// Check blocklist before accounting — use the engine to build the key
+	// with the same rule-based header filtering that Process uses.
+	if s.blocklist != nil && s.engine != nil {
+		key := s.engine.BuildEntityKey(sourceIP, path, headers)
+		expiresAt, blocked := s.blocklist.IsBlockedWithExpiration(key)
+		if key != "" && blocked {
 			s.logger.Debug("entity blocked",
 				"key", key,
 				"source_ip", sourceIP,
@@ -131,7 +128,7 @@ func (s *Server) Check(_ context.Context, req *authv3.CheckRequest) (*authv3.Che
 							{
 								Header: &corev3.HeaderValue{
 									Key:   "Retry-After",
-									Value: fmt.Sprintf("%d", 60),
+									Value: fmt.Sprintf("%d", retryAfterSeconds(expiresAt, time.Now())),
 								},
 							},
 						},
@@ -199,4 +196,9 @@ func (s *Server) Stop(ctx context.Context) {
 		s.grpcServer.Stop()
 		s.logger.Warn("gRPC server stopped forcefully")
 	}
+}
+
+// retryAfterSeconds calculates the duration in seconds between two time.Time values: expiresAt and fromTime.
+func retryAfterSeconds(expiresAt, fromTime time.Time) time.Duration {
+	return time.Duration(expiresAt.Sub(fromTime)) / time.Second
 }

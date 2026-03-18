@@ -90,30 +90,29 @@ func NewBlocklistCache(cfg BlocklistConfig) (*BlocklistCache, error) {
 	return bc, nil
 }
 
-// IsBlocked checks if a key is in the blocklist
-func (b *BlocklistCache) IsBlocked(key string) bool {
-	expiresAt, found := b.cache.Get(key)
+// IsBlockedWithExpiration return the expiration time when an key is in the blocklist
+func (b *BlocklistCache) IsBlockedWithExpiration(key string) (expiresAt time.Time, found bool) {
+	// Get will not return expired items.
+	expiresAt, found = b.cache.Get(key)
 	if !found {
 		if b.onMiss != nil {
 			b.onMiss()
 		}
-		return false
-	}
-
-	// Check if expired
-	if time.Now().After(expiresAt) {
-		b.cache.Del(key)
+		// if not found, we need to remove the key from our meta-entities
 		b.entries.Delete(key)
-		if b.onMiss != nil {
-			b.onMiss()
-		}
-		return false
+		return expiresAt, found
 	}
-
+	// if found, we update the metrics
 	if b.onHit != nil {
 		b.onHit()
 	}
-	return true
+	return expiresAt, found
+}
+
+// IsBlocked checks if a specified key exists in the blocklist without returning its expiration time.
+func (b *BlocklistCache) IsBlocked(key string) bool {
+	_, found := b.IsBlockedWithExpiration(key)
+	return found
 }
 
 // Block adds a key to the blocklist with a TTL.
