@@ -94,6 +94,23 @@ func (e *Engine) GetFlusher() *Flusher {
 	return e.flusher
 }
 
+// BuildEntityKey matches the path against accounting rules, filters headers
+// per the matched rule, and returns the entity key. Returns "" if no rule
+// matches. This is used by the gRPC server for fast blocklist lookups with
+// the same key that Process/blocking uses.
+func (e *Engine) BuildEntityKey(sourceIP, path string, headers map[string]string) string {
+	rule := e.matchRuleV2(path)
+	if rule == nil {
+		return ""
+	}
+	entity := model.Entity{
+		IP:      sourceIP,
+		Path:    path,
+		Headers: filterHeaders(headers, rule.Headers),
+	}
+	return entity.Key()
+}
+
 // Process evaluates the incoming request against accounting rules. If a rule
 // matches, the entity is hashed and either counted locally (if this node is
 // the owner) or enqueued for remote flushing. When a local increment causes
