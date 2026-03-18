@@ -12,7 +12,7 @@ import (
 )
 
 // newCluster initializes and starts a cluster, sets configuration, state delegate, and handles node membership updates.
-func newCluster(cfg *config.Config, cacheManager *cache.Manager, metricsManager *metrics.Metrics, log *slog.Logger) *membership.Cluster {
+func newCluster(cfg *config.Config, localIP string, cacheManager *cache.Manager, metricsManager *metrics.Metrics, log *slog.Logger) *membership.Cluster {
 	// clusterRef is captured by the NumNodesFunc closure below.
 	// It is assigned immediately after NewCluster returns, before any broadcast
 	// can be triggered, so no additional synchronization is required.
@@ -33,7 +33,7 @@ func newCluster(cfg *config.Config, cacheManager *cache.Manager, metricsManager 
 	})
 
 	// Initialize cluster membership
-	cluster := membership.NewCluster(cfg, metricsManager, log)
+	cluster := membership.NewCluster(cfg, localIP, cacheManager, metricsManager, log)
 	clusterRef = cluster
 
 	// Set state delegate before starting the cluster
@@ -46,14 +46,11 @@ func newCluster(cfg *config.Config, cacheManager *cache.Manager, metricsManager 
 		os.Exit(1)
 	}
 
-	// Join the cluster in background
+	// Join the cluster in the background
 	go func() {
 		if err := cluster.JoinCluster(); err != nil {
 			log.Error("failed to join cluster", "error", err)
 		}
-
-		// Update accounting cache with cluster member addresses
-		cacheManager.UpdateNodes(cluster.MemberAddrs())
 	}()
 	return cluster
 }

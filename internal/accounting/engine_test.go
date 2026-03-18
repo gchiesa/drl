@@ -228,7 +228,7 @@ func (m *mockBlocklist) IsBlocked(key string) bool {
 	return ok
 }
 
-func (m *mockBlocklist) Block(key string, ttl time.Duration) {
+func (m *mockBlocklist) Block(key string, entity *model.Entity, ttl time.Duration) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.blocked[key] = ttl

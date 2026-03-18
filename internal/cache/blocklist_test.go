@@ -34,7 +34,7 @@ func TestBlocklistCache_BlockAndCheck(t *testing.T) {
 	assert.False(t, bc.IsBlocked(ip))
 
 	// Block the IP
-	bc.Block(ip, ttl)
+	bc.Block(ip, nil, ttl)
 
 	// Now should be blocked
 	assert.True(t, bc.IsBlocked(ip))
@@ -51,7 +51,7 @@ func TestBlocklistCache_Unblock(t *testing.T) {
 	ttl := 5 * time.Second
 
 	// Block and verify
-	bc.Block(ip, ttl)
+	bc.Block(ip, nil, ttl)
 	assert.True(t, bc.IsBlocked(ip))
 
 	// Unblock and verify
@@ -70,7 +70,7 @@ func TestBlocklistCache_TTLExpiration(t *testing.T) {
 	ttl := 100 * time.Millisecond
 
 	// Block with short TTL
-	bc.Block(ip, ttl)
+	bc.Block(ip, nil, ttl)
 	assert.True(t, bc.IsBlocked(ip))
 
 	// Wait for expiration
@@ -96,7 +96,7 @@ func TestBlocklistCache_MultipleIPs(t *testing.T) {
 
 	// Block all IPs
 	for _, ip := range ips {
-		bc.Block(ip, 5*time.Second)
+		bc.Block(ip, nil, 5*time.Second)
 	}
 
 	// All should be blocked
@@ -116,8 +116,8 @@ func TestBlocklistCache_GetState(t *testing.T) {
 	defer bc.Close()
 
 	// Block some IPs
-	bc.Block("192.168.1.1", 5*time.Second)
-	bc.Block("192.168.1.2", 5*time.Second)
+	bc.Block("192.168.1.1", nil, 5*time.Second)
+	bc.Block("192.168.1.2", nil, 5*time.Second)
 
 	// Get state
 	state, err := bc.GetState()
@@ -141,8 +141,8 @@ func TestBlocklistCache_MergeState(t *testing.T) {
 	defer dest.Close()
 
 	// Block IPs in source
-	source.Block("192.168.1.1", 5*time.Second)
-	source.Block("192.168.1.2", 5*time.Second)
+	source.Block("192.168.1.1", nil, 5*time.Second)
+	source.Block("192.168.1.2", nil, 5*time.Second)
 
 	// Get state from source
 	state, err := source.GetState()
@@ -188,7 +188,7 @@ func TestBlocklistCache_MergeState_ExpiredEntries(t *testing.T) {
 	defer dest.Close()
 
 	// Block IP with very short TTL in source
-	source.Block("192.168.1.1", 50*time.Millisecond)
+	source.Block("192.168.1.1", nil, 50*time.Millisecond)
 
 	// Wait for expiration
 	time.Sleep(100 * time.Millisecond)
@@ -214,8 +214,8 @@ func TestBlocklistCache_Clear(t *testing.T) {
 	defer bc.Close()
 
 	// Block some IPs
-	bc.Block("192.168.1.1", 5*time.Second)
-	bc.Block("192.168.1.2", 5*time.Second)
+	bc.Block("192.168.1.1", nil, 5*time.Second)
+	bc.Block("192.168.1.2", nil, 5*time.Second)
 
 	assert.Equal(t, 2, bc.Count())
 
@@ -236,8 +236,8 @@ func TestBlocklistCache_Entries(t *testing.T) {
 	defer bc.Close()
 
 	// Block some IPs
-	bc.Block("192.168.1.1", 5*time.Second)
-	bc.Block("192.168.1.2", 5*time.Second)
+	bc.Block("192.168.1.1", nil, 5*time.Second)
+	bc.Block("192.168.1.2", nil, 5*time.Second)
 
 	entries := bc.Entries()
 	assert.Len(t, entries, 2)
@@ -283,7 +283,7 @@ func TestBlocklistCache_MetricsCallbacks(t *testing.T) {
 	mu.Unlock()
 
 	// Block and hit
-	bc.Block("192.168.1.1", 5*time.Second)
+	bc.Block("192.168.1.1", nil, 5*time.Second)
 	bc.IsBlocked("192.168.1.1")
 	mu.Lock()
 	assert.Equal(t, 1, hits)
@@ -306,7 +306,7 @@ func TestBlocklistCache_ConcurrentAccess(t *testing.T) {
 		go func(i int) {
 			defer wg.Done()
 			ip := "192.168.1." + string(rune('0'+i%10))
-			bc.Block(ip, 5*time.Second)
+			bc.Block(ip, nil, 5*time.Second)
 		}(i)
 	}
 
@@ -385,7 +385,7 @@ func TestBlocklistCache_ListEntries_WithoutMetadata(t *testing.T) {
 	defer bc.Close()
 
 	// Block without metadata (automatic rate-limiter block)
-	bc.Block("somekey", 5*time.Second)
+	bc.Block("somekey", nil, 5*time.Second)
 
 	entries := bc.ListEntries()
 	require.Len(t, entries, 1)
@@ -400,8 +400,8 @@ func TestBlocklistCache_ListEntries_FiltersExpired(t *testing.T) {
 	require.NoError(t, err)
 	defer bc.Close()
 
-	bc.Block("expired", 50*time.Millisecond)
-	bc.Block("valid", 5*time.Second)
+	bc.Block("expired", nil, 50*time.Millisecond)
+	bc.Block("valid", nil, 5*time.Second)
 
 	time.Sleep(100 * time.Millisecond)
 
@@ -433,7 +433,7 @@ func TestBlocklistCache_MergeState_PreservesLocalMetadata(t *testing.T) {
 	nodeA.BlockWithMeta(key, 5*time.Second, entity)
 
 	// Node B has the same entry without metadata (broadcast block)
-	nodeB.Block(key, 5*time.Second)
+	nodeB.Block(key, nil, 5*time.Second)
 
 	// Serialize B's state (no metadata)
 	stateB, err := nodeB.GetState()

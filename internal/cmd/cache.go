@@ -11,12 +11,11 @@ import (
 )
 
 // newCache initializes and returns a cache manager instance based on the given config, metrics, and logger.
-func newCache(cfg *config.Config, metric *metrics.Metrics, log *slog.Logger) *cache.Manager {
-	// Initialize cache manager
+func newCache(cfg *config.Config, localIP string, metric *metrics.Metrics, log *slog.Logger) *cache.Manager {
 	cacheManager, err := cache.NewManager(cache.ManagerConfig{
 		BlocklistSizeMB:  cfg.Cache.BlocklistSizeMB,
 		AccountingSizeMB: cfg.Cache.AccountingSizeMB,
-		LocalNode:        cfg.NodeName,
+		LocalNode:        localIP,
 		WindowSize:       time.Minute, // Rate limiting window
 		Logger:           log,
 		// Connect metrics callbacks

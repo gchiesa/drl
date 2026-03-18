@@ -138,7 +138,7 @@ func TestStateDelegate_QueueUnblockEvent_AppliedViaNotifyMsg(t *testing.T) {
 	defer bc.Close()
 
 	const key = "testEntityKey002"
-	bc.Block(key, time.Hour)
+	bc.Block(key, nil, time.Hour)
 	require.True(t, bc.IsBlocked(key))
 
 	delegate := NewStateDelegate(DelegateConfig{

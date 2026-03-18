@@ -9,13 +9,34 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/gchiesa/drl/internal/cache"
 	"github.com/gchiesa/drl/internal/config"
 	"github.com/gchiesa/drl/internal/metrics"
+	"github.com/gchiesa/drl/internal/utils"
 )
 
+func testLocalIP(t *testing.T) string {
+	t.Helper()
+	ip, err := utils.GetInstanceIP()
+	require.NoError(t, err)
+	return ip
+}
+
+func testCacheManager(t *testing.T, localIP string) *cache.Manager {
+	t.Helper()
+	cm, err := cache.NewManager(cache.ManagerConfig{
+		BlocklistSizeMB:  1,
+		AccountingSizeMB: 1,
+		LocalNode:        localIP,
+		WindowSize:       time.Minute,
+	})
+	require.NoError(t, err)
+	return cm
+}
+
 func TestNewCluster(t *testing.T) {
+	localIP := testLocalIP(t)
 	cfg := &config.Config{
-		NodeName: "test-node",
 		Listen: config.ListenConfig{
 			GRPC:    ":8081",
 			Metrics: ":9091",
@@ -32,19 +53,22 @@ func TestNewCluster(t *testing.T) {
 		},
 	}
 	m := metrics.NewMetrics()
+	cm := testCacheManager(t, localIP)
+	defer cm.Close()
 	logger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelError}))
 
-	cluster := NewCluster(cfg, m, logger)
+	cluster := NewCluster(cfg, localIP, cm, m, logger)
 	require.NotNil(t, cluster, "expected non-nil cluster")
 
 	assert.Equal(t, cfg, cluster.config, "config not set correctly")
+	assert.Equal(t, localIP, cluster.localIP, "localIP not set correctly")
 	assert.Equal(t, m, cluster.metrics, "metrics not set correctly")
 	assert.Equal(t, logger, cluster.logger, "logger not set correctly")
 }
 
 func TestClusterStart(t *testing.T) {
+	localIP := testLocalIP(t)
 	cfg := &config.Config{
-		NodeName: "test-node-start",
 		Listen: config.ListenConfig{
 			GRPC:    ":8081",
 			Metrics: ":9091",
@@ -61,9 +85,11 @@ func TestClusterStart(t *testing.T) {
 		},
 	}
 	m := metrics.NewMetrics()
+	cm := testCacheManager(t, localIP)
+	defer cm.Close()
 	logger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelError}))
 
-	cluster := NewCluster(cfg, m, logger)
+	cluster := NewCluster(cfg, localIP, cm, m, logger)
 
 	err := cluster.Start()
 	if err != nil {
@@ -85,8 +111,8 @@ func TestClusterStart(t *testing.T) {
 }
 
 func TestClusterIsReady(t *testing.T) {
+	localIP := testLocalIP(t)
 	cfg := &config.Config{
-		NodeName: "test-node-ready",
 		Listen: config.ListenConfig{
 			GRPC:    ":8081",
 			Metrics: ":9091",
@@ -103,9 +129,11 @@ func TestClusterIsReady(t *testing.T) {
 		},
 	}
 	m := metrics.NewMetrics()
+	cm := testCacheManager(t, localIP)
+	defer cm.Close()
 	logger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelError}))
 
-	cluster := NewCluster(cfg, m, logger)
+	cluster := NewCluster(cfg, localIP, cm, m, logger)
 
 	// Initially not ready
 	if cluster.IsReady() {
@@ -133,8 +161,8 @@ func TestClusterIsReady(t *testing.T) {
 }
 
 func TestClusterMembers(t *testing.T) {
+	localIP := testLocalIP(t)
 	cfg := &config.Config{
-		NodeName: "test-node-members",
 		Listen: config.ListenConfig{
 			GRPC:    ":8081",
 			Metrics: ":9091",
@@ -151,9 +179,11 @@ func TestClusterMembers(t *testing.T) {
 		},
 	}
 	m := metrics.NewMetrics()
+	cm := testCacheManager(t, localIP)
+	defer cm.Close()
 	logger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelError}))
 
-	cluster := NewCluster(cfg, m, logger)
+	cluster := NewCluster(cfg, localIP, cm, m, logger)
 
 	err := cluster.Start()
 	if err != nil {
@@ -168,14 +198,15 @@ func TestClusterMembers(t *testing.T) {
 		t.Errorf("expected 1 member (self), got %d", len(members))
 	}
 
-	if members[0].Name != "test-node-members" {
-		t.Errorf("expected node name test-node-members, got %s", members[0].Name)
+	// Node name is now the IP address
+	if members[0].Name != localIP {
+		t.Errorf("expected node name %s, got %s", localIP, members[0].Name)
 	}
 }
 
 func TestClusterLeave(t *testing.T) {
+	localIP := testLocalIP(t)
 	cfg := &config.Config{
-		NodeName: "test-node-leave",
 		Listen: config.ListenConfig{
 			GRPC:    ":8081",
 			Metrics: ":9091",
@@ -192,9 +223,11 @@ func TestClusterLeave(t *testing.T) {
 		},
 	}
 	m := metrics.NewMetrics()
+	cm := testCacheManager(t, localIP)
+	defer cm.Close()
 	logger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelError}))
 
-	cluster := NewCluster(cfg, m, logger)
+	cluster := NewCluster(cfg, localIP, cm, m, logger)
 
 	err := cluster.Start()
 	if err != nil {
@@ -208,8 +241,8 @@ func TestClusterLeave(t *testing.T) {
 }
 
 func TestClusterLeaveWithoutStart(t *testing.T) {
+	localIP := testLocalIP(t)
 	cfg := &config.Config{
-		NodeName: "test-node-leave-no-start",
 		Listen: config.ListenConfig{
 			GRPC:    ":8081",
 			Metrics: ":9091",
@@ -226,9 +259,11 @@ func TestClusterLeaveWithoutStart(t *testing.T) {
 		},
 	}
 	m := metrics.NewMetrics()
+	cm := testCacheManager(t, localIP)
+	defer cm.Close()
 	logger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelError}))
 
-	cluster := NewCluster(cfg, m, logger)
+	cluster := NewCluster(cfg, localIP, cm, m, logger)
 
 	// Should not panic or error
 	err := cluster.Leave(time.Second)

@@ -4,10 +4,10 @@ import (
 	"fmt"
 	"log/slog"
 	"net"
-	"os"
 	"sync"
 	"time"
 
+	"github.com/gchiesa/drl/internal/cache"
 	"github.com/hashicorp/memberlist"
 
 	"github.com/gchiesa/drl/internal/config"
@@ -17,6 +17,8 @@ import (
 // Cluster manages the memberlist cluster membership
 type Cluster struct {
 	config        *config.Config
+	localIP       string
+	cacheManager  *cache.Manager
 	memberlist    *memberlist.Memberlist
 	metrics       *metrics.Metrics
 	logger        *slog.Logger
@@ -26,11 +28,13 @@ type Cluster struct {
 }
 
 // NewCluster creates a new Cluster instance
-func NewCluster(cfg *config.Config, m *metrics.Metrics, logger *slog.Logger) *Cluster {
+func NewCluster(cfg *config.Config, localIP string, cacheManager *cache.Manager, m *metrics.Metrics, logger *slog.Logger) *Cluster {
 	return &Cluster{
-		config:  cfg,
-		metrics: m,
-		logger:  logger,
+		config:       cfg,
+		localIP:      localIP,
+		cacheManager: cacheManager,
+		metrics:      m,
+		logger:       logger,
 	}
 }
 
@@ -50,24 +54,18 @@ func (c *Cluster) GetStateDelegate() *StateDelegate {
 
 // Start initializes and starts the memberlist cluster
 func (c *Cluster) Start() error {
-	// Get the actual instance IP
-	var advertiseIP string
-	var err error
-	if advertiseIP, err = getInstanceIP(); err != nil {
-		return err
-	}
-
 	mlConfig := memberlist.DefaultLANConfig()
-	mlConfig.Name = c.config.NodeName
+	mlConfig.Name = c.localIP
 	mlConfig.BindAddr = c.config.Membership.BindAddr
 	mlConfig.BindPort = c.config.Membership.Port
-	mlConfig.AdvertiseAddr = advertiseIP
+	mlConfig.AdvertiseAddr = c.localIP
 	mlConfig.AdvertisePort = c.config.Membership.Port
 
 	// Set up event delegate for membership events
 	mlConfig.Events = &eventDelegate{
-		cluster: c,
-		logger:  c.logger,
+		cluster:      c,
+		cacheManager: c.cacheManager,
+		logger:       c.logger,
 	}
 
 	// Set up state delegate for Push/Pull state sync if available
@@ -90,7 +88,7 @@ func (c *Cluster) Start() error {
 	c.mu.Unlock()
 
 	c.logger.Info("memberlist started",
-		"local_node_name", c.config.NodeName,
+		"local_node_ip", c.localIP,
 		"bind_addr", c.config.Membership.BindAddr,
 		"bind_port", c.config.Membership.Port,
 	)
@@ -158,6 +156,7 @@ func (c *Cluster) JoinCluster() error {
 	)
 
 	c.updateClusterSize()
+	c.cacheManager.UpdateNodes(c.MemberAddrs())
 
 	// Wait for state sync if delegate is configured
 	c.mu.RLock()
@@ -274,7 +273,7 @@ func (c *Cluster) Leave(timeout time.Duration) error {
 	}
 
 	if c.memberlist.NumMembers() == 1 {
-		if c.memberlist.Members()[0].Name == c.config.NodeName {
+		if c.memberlist.Members()[0].Addr.String() == c.localIP {
 			c.logger.Info("only member, not leaving anything")
 			return c.memberlist.Shutdown()
 		}
@@ -284,21 +283,4 @@ func (c *Cluster) Leave(timeout time.Duration) error {
 		return fmt.Errorf("failed to leave cluster: %w", err)
 	}
 	return c.memberlist.Shutdown()
-}
-
-func getInstanceIP() (string, error) {
-	var instanceIP string
-	// Get the actual instance IP
-	hostname, _ := os.Hostname()
-	ips, err := net.LookupIP(hostname)
-	if err != nil {
-		return instanceIP, err
-	}
-	for _, ip := range ips {
-		if ipv4 := ip.To4(); ipv4 != nil {
-			instanceIP = ipv4.String()
-			break
-		}
-	}
-	return instanceIP, nil
 }

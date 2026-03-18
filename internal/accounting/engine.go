@@ -18,7 +18,7 @@ import (
 // the cache package's concrete type (avoiding circular dependencies in tests).
 type BlocklistEnforcer interface {
 	IsBlocked(key string) bool
-	Block(key string, ttl time.Duration)
+	Block(key string, entity *model.Entity, ttl time.Duration)
 }
 
 // BlockBroadcaster queues block events for cluster-wide propagation.
@@ -144,7 +144,7 @@ func (e *Engine) Process(sourceIP, path string, headers map[string]string) {
 				"limit", rule.Limit,
 			)
 			if e.blocklist != nil {
-				e.blocklist.Block(key, decision.RetryAfter)
+				e.blocklist.Block(key, &entity, decision.RetryAfter)
 			}
 			if e.broadcaster != nil {
 				_ = e.broadcaster.QueueBlockEvent(key, decision.RetryAfter, &entity)
