@@ -39,6 +39,7 @@ type Broadcaster interface {
 type AccountingStatsProvider interface {
 	PendingUpdates() int64
 	TrackedEntities() int64
+	EstimatedEntities() int64
 }
 
 // Server represents the internal API server

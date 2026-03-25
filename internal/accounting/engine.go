@@ -139,7 +139,7 @@ func (e *Engine) Process(sourceIP, path string, headers map[string]string) {
 	ownerAddr := e.accounting.GetOwner(key)
 	if e.accounting.IsOwner(key) {
 		// Local increment and threshold check
-		newCount := e.accounting.Increment(key)
+		newCount := e.accounting.Increment(key, 1)
 		if e.metrics != nil {
 			e.metrics.IncAccountingLocal()
 		}
@@ -198,6 +198,11 @@ func (e *Engine) PendingUpdates() int64 {
 // TrackedEntities returns the total number of entity increments processed.
 func (e *Engine) TrackedEntities() int64 {
 	return e.tracked.Load()
+}
+
+// EstimatedEntities returns the entities in the cache
+func (e *Engine) EstimatedEntities() int64 {
+	return e.accounting.GetEstimatedEntities()
 }
 
 // matchRuleV2 attempts to find the longest prefix match for the given path in the rules and returns the corresponding rule.

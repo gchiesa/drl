@@ -23,7 +23,7 @@ const (
 
 // nodeBuffer accumulates counter increments destined for a single owner node.
 type nodeBuffer struct {
-	entries map[uint64]uint32 // entityHash -> accumulated hits
+	entries map[uint64]uint64 // entityHash -> accumulated hits
 }
 
 // Flusher batches accounting increments and sends them to owner nodes via UDP.
@@ -143,11 +143,18 @@ func (f *Flusher) Stop() {
 // Enqueue adds a counter increment for the given entity to the buffer for the
 // specified owner node. If the buffer exceeds maxBatchSize, an immediate flush
 // is triggered for that node.
-func (f *Flusher) Enqueue(ownerAddr string, entityHash uint64, hits uint32) {
+func (f *Flusher) Enqueue(ownerAddr string, entityHash uint64, hits uint64) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 
-	// TODO: gchiesa -> implement recalculation of ownership
+	buf, ok := f.buffers[ownerAddr]
+	if !ok {
+		buf = &nodeBuffer{entries: make(map[uint64]uint64)}
+		f.buffers[ownerAddr] = buf
+	}
+
+	buf.entries[entityHash] += hits
+
 	// when a Enqueue for a ownerAddr is requested there is the possibility the
 	// ownerAddr has been added later to the cluster when this instance already had
 	// ownership of entities, which after the new node joined will be owner by the
@@ -163,14 +170,13 @@ func (f *Flusher) Enqueue(ownerAddr string, entityHash uint64, hits uint32) {
 	// the new entry, but at the same time we recalculate what is now owned by
 	// ownerAddr and we enqueue also those entries in buf.entries and we assume they
 	// will be successfully transmitted, so that they can be remove from local accounting.
-
-	buf, ok := f.buffers[ownerAddr]
-	if !ok {
-		buf = &nodeBuffer{entries: make(map[uint64]uint32)}
-		f.buffers[ownerAddr] = buf
+	if f.accounting != nil {
+		if entities, exist := f.accounting.ConsumeTransferable(ownerAddr); exist {
+			for k, v := range entities {
+				buf.entries[k] += v
+			}
+		}
 	}
-
-	buf.entries[entityHash] += hits
 
 	if len(buf.entries) >= f.maxBatchSize {
 		f.flushNode(ownerAddr, buf)
@@ -259,7 +265,7 @@ func (f *Flusher) flushNode(addr string, buf *nodeBuffer) {
 			"max", MaxUDPPacketSize,
 			"addr", addr,
 		)
-		buf.entries = make(map[uint64]uint32)
+		buf.entries = make(map[uint64]uint64)
 		return
 	}
 
@@ -267,7 +273,7 @@ func (f *Flusher) flushNode(addr string, buf *nodeBuffer) {
 	udpAddr, err := net.ResolveUDPAddr("udp", target)
 	if err != nil {
 		f.logger.Error("failed to resolve UDP address", "error", err, "target", target)
-		buf.entries = make(map[uint64]uint32)
+		buf.entries = make(map[uint64]uint64)
 		return
 	}
 
@@ -283,7 +289,7 @@ func (f *Flusher) flushNode(addr string, buf *nodeBuffer) {
 		)
 	}
 
-	buf.entries = make(map[uint64]uint32)
+	buf.entries = make(map[uint64]uint64)
 }
 
 func (f *Flusher) receiveLoop() {
@@ -321,9 +327,7 @@ func (f *Flusher) receiveLoop() {
 
 		for _, entry := range batch.Entries {
 			key := fmt.Sprintf("%016x", entry.EntityHash)
-			for range entry.Hits {
-				f.accounting.Increment(key) // TODO: (gchiesa) improve for cumulative increment when the batch.Entries has entity with Hits > 1
-			}
+			f.accounting.Increment(key, int64(entry.Hits))
 		}
 
 		f.logger.Debug("received counter batch",

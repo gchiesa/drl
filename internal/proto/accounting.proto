@@ -4,7 +4,7 @@ option go_package = "github.com/gchiesa/drl/internal/proto";
 
 message CounterEntry {
   fixed64 entity_hash = 1;
-  uint32 hits = 2;
+  uint64 hits = 2;
 }
 
 message CounterBatch {

@@ -7,6 +7,7 @@ package model
 import (
 	"fmt"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -48,6 +49,12 @@ func (e Entity) Key() string {
 
 	hash := xxhash.Sum64String(sb.String())
 	return fmt.Sprintf("%016x", hash)
+}
+
+// EntityKeyToHash converts a hexadecimal string to a uint64 value. Returns an error if the string is not valid hex.
+func EntityKeyToHash(s string) (uint64, error) {
+	i, err := strconv.ParseUint(s, 16, 64)
+	return i, err
 }
 
 // BlockedEntityInfo is returned by the blocklist cache when listing entries.

@@ -36,8 +36,8 @@ accounting {
         }
         "anything" {
             path-prefix "/anything"
-            limit 10
-            per "minute"
+            limit 1000
+            per "second"
         }
     }
 }
