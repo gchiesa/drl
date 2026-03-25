@@ -7,12 +7,12 @@ require (
 	github.com/buraksezer/consistent v0.10.0
 	github.com/caarlos0/env/v11 v11.3.1
 	github.com/cespare/xxhash/v2 v2.3.0
-	github.com/dgraph-io/ristretto/v2 v2.4.0
 	github.com/envoyproxy/go-control-plane/envoy v1.37.0
 	github.com/gofiber/fiber/v2 v2.52.11
 	github.com/hashicorp/go-immutable-radix/v2 v2.1.0
 	github.com/hashicorp/memberlist v0.5.4
 	github.com/huandu/xstrings v1.5.0
+	github.com/maypok86/otter/v2 v2.3.0
 	github.com/phsym/zeroslog v0.2.0
 	github.com/prometheus/client_golang v1.23.2
 	github.com/rs/zerolog v1.34.0
@@ -32,7 +32,6 @@ require (
 	github.com/beorn7/perks v1.0.1 // indirect
 	github.com/cncf/xds/go v0.0.0-20251210132809-ee656c7534f5 // indirect
 	github.com/davecgh/go-spew v1.1.1 // indirect
-	github.com/dustin/go-humanize v1.0.1 // indirect
 	github.com/envoyproxy/protoc-gen-validate v1.3.0 // indirect
 	github.com/google/btree v1.1.3 // indirect
 	github.com/google/uuid v1.6.0 // indirect

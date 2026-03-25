@@ -8,7 +8,7 @@ import (
 
 	"github.com/buraksezer/consistent"
 	"github.com/cespare/xxhash/v2"
-	"github.com/dgraph-io/ristretto/v2"
+	"github.com/maypok86/otter/v2"
 )
 
 // AccountingEntry represents a request counter for an IP
@@ -34,7 +34,7 @@ func (h hasher) Sum64(data []byte) uint64 {
 // AccountingCache is a partitioned in-memory cache for request counters
 // using consistent hashing to determine ownership
 type AccountingCache struct {
-	cache      *ristretto.Cache[string, *atomic.Int64]
+	cache      *otter.Cache[string, *atomic.Int64]
 	ring       *consistent.Consistent
 	localNode  string
 	logger     *slog.Logger
@@ -82,18 +82,17 @@ func NewAccountingCache(cfg AccountingConfig) (*AccountingCache, error) {
 		onSetCost:  cfg.OnSetCost,
 	}
 
-	cache, err := ristretto.NewCache(&ristretto.Config[string, *atomic.Int64]{
-		NumCounters: 10 * maxCost / 100,
-		MaxCost:     maxCost,
-		BufferItems: 64,
-		OnEvict: func(item *ristretto.Item[*atomic.Int64]) {
-			if cfg.OnEvict != nil {
-				cfg.OnEvict()
-			}
-		},
-		Cost: func(value *atomic.Int64) int64 {
+	cache, err := otter.New[string, *atomic.Int64](&otter.Options[string, *atomic.Int64]{
+		MaximumWeight: uint64(maxCost),
+		Weigher: func(_ string, _ *atomic.Int64) uint32 {
 			// Each entry: IP string (~40 bytes) + atomic.Int64 (8 bytes) + overhead
 			return 100
+		},
+		ExpiryCalculator: otter.ExpiryCreating[string, *atomic.Int64](windowSize),
+		OnDeletion: func(e otter.DeletionEvent[string, *atomic.Int64]) {
+			if e.WasEvicted() && cfg.OnEvict != nil {
+				cfg.OnEvict()
+			}
 		},
 	})
 	if err != nil {
@@ -156,7 +155,7 @@ func (a *AccountingCache) GetOwner(ip string) string {
 // Increment increments the counter for an IP and returns the new count
 // This should only be called for IPs that this node owns
 func (a *AccountingCache) Increment(ip string) int64 {
-	counter, found := a.cache.Get(ip)
+	counter, found := a.cache.GetIfPresent(ip)
 	if found {
 		if a.onHit != nil {
 			a.onHit()
@@ -171,15 +170,14 @@ func (a *AccountingCache) Increment(ip string) int64 {
 	// Create new counter
 	newCounter := &atomic.Int64{}
 	newCounter.Store(1)
-	a.cache.SetWithTTL(ip, newCounter, 100, a.windowSize)
-	a.cache.Wait()
+	a.cache.Set(ip, newCounter)
 
 	return 1
 }
 
 // Get returns the current count for an IP
 func (a *AccountingCache) Get(ip string) int64 {
-	counter, found := a.cache.Get(ip)
+	counter, found := a.cache.GetIfPresent(ip)
 	if !found {
 		if a.onMiss != nil {
 			a.onMiss()
@@ -195,7 +193,7 @@ func (a *AccountingCache) Get(ip string) int64 {
 
 // Reset resets the counter for an IP
 func (a *AccountingCache) Reset(ip string) {
-	a.cache.Del(ip)
+	a.cache.Invalidate(ip)
 }
 
 // AddNode adds a node to the consistent hash ring
@@ -281,12 +279,7 @@ func (a *AccountingCache) GetNodes() []string {
 
 // Close closes the cache
 func (a *AccountingCache) Close() {
-	a.cache.Close()
-}
-
-// Metrics returns current cache metrics
-func (a *AccountingCache) Metrics() *ristretto.Metrics {
-	return a.cache.Metrics
+	a.cache.StopAllGoroutines()
 }
 
 // LocalNode returns the local node identifier
