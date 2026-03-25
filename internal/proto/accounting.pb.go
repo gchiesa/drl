@@ -24,7 +24,7 @@ const (
 type CounterEntry struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	EntityHash    uint64                 `protobuf:"fixed64,1,opt,name=entity_hash,json=entityHash,proto3" json:"entity_hash,omitempty"`
-	Hits          uint32                 `protobuf:"varint,2,opt,name=hits,proto3" json:"hits,omitempty"`
+	Hits          uint64                 `protobuf:"varint,2,opt,name=hits,proto3" json:"hits,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -66,7 +66,7 @@ func (x *CounterEntry) GetEntityHash() uint64 {
 	return 0
 }
 
-func (x *CounterEntry) GetHits() uint32 {
+func (x *CounterEntry) GetHits() uint64 {
 	if x != nil {
 		return x.Hits
 	}
@@ -141,7 +141,7 @@ const file_internal_proto_accounting_proto_rawDesc = "" +
 	"\fCounterEntry\x12\x1f\n" +
 	"\ventity_hash\x18\x01 \x01(\x06R\n" +
 	"entityHash\x12\x12\n" +
-	"\x04hits\x18\x02 \x01(\rR\x04hits\"y\n" +
+	"\x04hits\x18\x02 \x01(\x04R\x04hits\"y\n" +
 	"\fCounterBatch\x12\x1b\n" +
 	"\tsender_id\x18\x01 \x01(\x04R\bsenderId\x12\x1c\n" +
 	"\ttimestamp\x18\x02 \x01(\x04R\ttimestamp\x12.\n" +

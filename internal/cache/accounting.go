@@ -1,6 +1,7 @@
 package cache
 
 import (
+	"fmt"
 	"log/slog"
 	"sync"
 	"sync/atomic"
@@ -8,7 +9,9 @@ import (
 
 	"github.com/buraksezer/consistent"
 	"github.com/cespare/xxhash/v2"
+	"github.com/gchiesa/drl/internal/model"
 	"github.com/maypok86/otter/v2"
+	"github.com/samber/lo"
 )
 
 // AccountingEntry represents a request counter for an IP
@@ -31,16 +34,21 @@ func (h hasher) Sum64(data []byte) uint64 {
 	return xxhash.Sum64(data)
 }
 
+// Transferable is the type for entities which can be moved to new owners
+type Transferable map[uint64]uint64
+
 // AccountingCache is a partitioned in-memory cache for request counters
 // using consistent hashing to determine ownership
 type AccountingCache struct {
-	cache      *otter.Cache[string, *atomic.Int64]
-	ring       *consistent.Consistent
-	localNode  string
-	logger     *slog.Logger
-	maxCost    int64
-	mu         sync.RWMutex
-	windowSize time.Duration
+	cache        *otter.Cache[string, *atomic.Int64]
+	ring         *consistent.Consistent
+	localNode    string
+	logger       *slog.Logger
+	maxCost      int64
+	mu           sync.RWMutex
+	windowSize   time.Duration
+	transferable map[string]Transferable
+	tmu          sync.RWMutex
 
 	// Callbacks for metrics
 	onHit     func()
@@ -72,14 +80,15 @@ func NewAccountingCache(cfg AccountingConfig) (*AccountingCache, error) {
 	}
 
 	ac := &AccountingCache{
-		localNode:  cfg.LocalNode,
-		logger:     cfg.Logger,
-		maxCost:    maxCost,
-		windowSize: windowSize,
-		onHit:      cfg.OnHit,
-		onMiss:     cfg.OnMiss,
-		onEvict:    cfg.OnEvict,
-		onSetCost:  cfg.OnSetCost,
+		localNode:    cfg.LocalNode,
+		logger:       cfg.Logger,
+		maxCost:      maxCost,
+		windowSize:   windowSize,
+		transferable: make(map[string]Transferable),
+		onHit:        cfg.OnHit,
+		onMiss:       cfg.OnMiss,
+		onEvict:      cfg.OnEvict,
+		onSetCost:    cfg.OnSetCost,
 	}
 
 	cache, err := otter.New[string, *atomic.Int64](&otter.Options[string, *atomic.Int64]{
@@ -118,33 +127,14 @@ func NewAccountingCache(cfg AccountingConfig) (*AccountingCache, error) {
 	return ac, nil
 }
 
-// IsOwner checks if the local node owns the given IP according to consistent hashing
-func (a *AccountingCache) IsOwner(ip string) bool {
-	a.mu.RLock()
-	defer a.mu.RUnlock()
-
-	if a.ring.GetMembers() == nil || len(a.ring.GetMembers()) == 0 {
-		return true // If no members, assume ownership
-	}
-
-	owner := a.ring.LocateKey([]byte(ip))
-	if owner == nil {
-		return true // If no owner found, assume ownership
-	}
-
-	return owner.String() == a.localNode
-}
-
-// GetOwner returns the node that owns the given IP
-func (a *AccountingCache) GetOwner(ip string) string {
-	a.mu.RLock()
-	defer a.mu.RUnlock()
-
+// getOwnerLockedForKey determines and returns the owning node for the given key
+// using consistent hashing. It requires to be protected by a lock
+func (a *AccountingCache) getOwnerLockedForKey(key string) string {
 	if a.ring.GetMembers() == nil || len(a.ring.GetMembers()) == 0 {
 		return a.localNode
 	}
 
-	owner := a.ring.LocateKey([]byte(ip))
+	owner := a.ring.LocateKey([]byte(key))
 	if owner == nil {
 		return a.localNode
 	}
@@ -152,15 +142,29 @@ func (a *AccountingCache) GetOwner(ip string) string {
 	return owner.String()
 }
 
-// Increment increments the counter for an IP and returns the new count
-// This should only be called for IPs that this node owns
-func (a *AccountingCache) Increment(ip string) int64 {
-	counter, found := a.cache.GetIfPresent(ip)
+// IsOwner checks if the local node owns the given key according to consistent hashing
+func (a *AccountingCache) IsOwner(key string) bool {
+	a.mu.RLock()
+	defer a.mu.RUnlock()
+	return a.getOwnerLockedForKey(key) == a.localNode
+}
+
+// GetOwner returns the node that owns the given key
+func (a *AccountingCache) GetOwner(key string) string {
+	a.mu.RLock()
+	defer a.mu.RUnlock()
+	return a.getOwnerLockedForKey(key)
+}
+
+// Increment increments the counter for a key and returns the new count
+// This should only be called for keys that this node owns
+func (a *AccountingCache) Increment(key string, delta int64) int64 {
+	counter, found := a.cache.GetIfPresent(key)
 	if found {
 		if a.onHit != nil {
 			a.onHit()
 		}
-		return counter.Add(1)
+		return counter.Add(delta)
 	}
 
 	if a.onMiss != nil {
@@ -169,15 +173,15 @@ func (a *AccountingCache) Increment(ip string) int64 {
 
 	// Create new counter
 	newCounter := &atomic.Int64{}
-	newCounter.Store(1)
-	a.cache.Set(ip, newCounter)
+	newCounter.Store(delta)
+	a.cache.Set(key, newCounter)
 
-	return 1
+	return delta
 }
 
-// Get returns the current count for an IP
-func (a *AccountingCache) Get(ip string) int64 {
-	counter, found := a.cache.GetIfPresent(ip)
+// Get returns the current count for a key
+func (a *AccountingCache) Get(key string) int64 {
+	counter, found := a.cache.GetIfPresent(key)
 	if !found {
 		if a.onMiss != nil {
 			a.onMiss()
@@ -191,9 +195,9 @@ func (a *AccountingCache) Get(ip string) int64 {
 	return counter.Load()
 }
 
-// Reset resets the counter for an IP
-func (a *AccountingCache) Reset(ip string) {
-	a.cache.Invalidate(ip)
+// Reset resets the counter for an key
+func (a *AccountingCache) Reset(key string) {
+	a.cache.Invalidate(key)
 }
 
 // AddNode adds a node to the consistent hash ring
@@ -202,6 +206,21 @@ func (a *AccountingCache) AddNode(node string) {
 	defer a.mu.Unlock()
 
 	a.ring.Add(Member(node))
+
+	// get all the other members
+	var otherNodes []string
+	for _, n := range a.ring.GetMembers() {
+		if n.String() == a.localNode {
+			continue
+		}
+		otherNodes = append(otherNodes, n.String())
+	}
+	tMetrics := a.updateTransferableLocked(otherNodes)
+	if a.logger != nil {
+		a.logger.Debug("updated transferable entities", "total_entities_to_transfer", fmt.Sprintf("%v", lo.MapValues(tMetrics, func(m int64, k string) string {
+			return fmt.Sprintf("[%d]", m)
+		})))
+	}
 
 	if a.logger != nil {
 		a.logger.Debug("node added to hash ring",
@@ -217,6 +236,21 @@ func (a *AccountingCache) RemoveNode(node string) {
 	defer a.mu.Unlock()
 
 	a.ring.Remove(node)
+
+	// get all the other members
+	var otherNodes []string
+	for _, n := range a.ring.GetMembers() {
+		if n.String() == a.localNode {
+			continue
+		}
+		otherNodes = append(otherNodes, n.String())
+	}
+	tMetrics := a.updateTransferableLocked(otherNodes)
+	if a.logger != nil {
+		a.logger.Debug("updated transferable entities", "total_entities_to_transfer", fmt.Sprintf("%v", lo.MapValues(tMetrics, func(m int64, k string) string {
+			return fmt.Sprintf("[%d]", m)
+		})))
+	}
 
 	if a.logger != nil {
 		a.logger.Debug("node removed from hash ring",
@@ -257,11 +291,70 @@ func (a *AccountingCache) UpdateNodes(nodes []string) {
 		}
 	}
 
+	// get all the other members
+	var otherNodes []string
+	for _, n := range a.ring.GetMembers() {
+		if n.String() == a.localNode {
+			continue
+		}
+		otherNodes = append(otherNodes, n.String())
+	}
+	tMetrics := a.updateTransferableLocked(otherNodes)
 	if a.logger != nil {
+		a.logger.Debug("updated transferable entities", "total_entities_to_transfer", fmt.Sprintf("%v", lo.MapValues(tMetrics, func(m int64, k string) string {
+			return fmt.Sprintf("[%d]", m)
+		})))
 		a.logger.Debug("hash ring updated",
 			"total_members", len(a.ring.GetMembers()),
 		)
 	}
+}
+
+// updateTransferableLocked updates the transferable entities for the given
+// members and returns their metrics. It requires to be called from a function
+// with lock
+func (a *AccountingCache) updateTransferableLocked(members []string) (tMetrics map[string]int64) {
+	tMetrics = make(map[string]int64)
+	for _, m := range members {
+		a.transferable[m] = a.getTransferableLocked(m)
+		tMetrics[m] = int64(len(a.transferable[m]))
+	}
+	return tMetrics
+}
+
+func (a *AccountingCache) ConsumeTransferable(ownerAddr string) (t Transferable, ok bool) {
+	a.tmu.Lock()
+	defer a.tmu.Unlock()
+	t, ok = a.transferable[ownerAddr]
+	delete(a.transferable, ownerAddr)
+	return t, ok
+}
+
+// getTransferableLocked collects and invalidates cache entries owned by the
+// given node and returns them as a map of hashes and counts. It requires to be
+// called from a function with lock
+func (a *AccountingCache) getTransferableLocked(ownerAddr string) map[uint64]uint64 {
+	var err error
+
+	toTransfer := make([]string, 0, a.cache.EstimatedSize())
+	// collect the keys first
+	for k := range a.cache.Keys() {
+		if a.getOwnerLockedForKey(k) == ownerAddr {
+			toTransfer = append(toTransfer, k)
+		}
+	}
+
+	transfer := make(map[uint64]uint64, a.cache.EstimatedSize())
+	for _, k := range toTransfer {
+		var hash uint64
+		if hash, err = model.EntityKeyToHash(k); err != nil {
+			continue
+		}
+		if v, ok := a.cache.Invalidate(k); ok {
+			transfer[hash] = uint64(v.Load())
+		}
+	}
+	return transfer
 }
 
 // GetNodes returns the current list of nodes in the hash ring
@@ -303,4 +396,8 @@ func (a *AccountingCache) SetLocalNode(node string) {
 	if node != "" {
 		a.ring.Add(Member(node))
 	}
+}
+
+func (a *AccountingCache) GetEstimatedEntities() int64 {
+	return int64(a.cache.EstimatedSize())
 }

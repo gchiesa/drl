@@ -98,8 +98,8 @@ func TestManager_MetricsCallbacks(t *testing.T) {
 	assert.Equal(t, 1, blocklistMisses)
 
 	// Test accounting callbacks
-	m.Accounting.Increment("10.0.0.1") // miss (create)
-	m.Accounting.Increment("10.0.0.1") // hit
+	m.Accounting.Increment("10.0.0.1", 1) // miss (create)
+	m.Accounting.Increment("10.0.0.1", 1) // hit
 
 	assert.Equal(t, 1, accountingHits)
 	assert.Equal(t, 1, accountingMisses)
@@ -124,7 +124,7 @@ func TestManager_Integration(t *testing.T) {
 
 	// Increment request count
 	for i := int64(0); i < rateLimit; i++ {
-		count := m.Accounting.Increment(ip)
+		count := m.Accounting.Increment(ip, 1)
 		assert.Equal(t, i+1, count)
 	}
 
@@ -133,7 +133,7 @@ func TestManager_Integration(t *testing.T) {
 	assert.Equal(t, rateLimit, count)
 
 	// One more request exceeds limit - block the IP
-	count = m.Accounting.Increment(ip)
+	count = m.Accounting.Increment(ip, 1)
 	if count > rateLimit {
 		m.Blocklist.Block(ip, nil, time.Minute)
 	}

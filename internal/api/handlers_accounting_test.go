@@ -13,12 +13,14 @@ import (
 
 // mockAccountingStats implements AccountingStatsProvider for testing.
 type mockAccountingStats struct {
-	pending int64
-	tracked int64
+	pending   int64
+	tracked   int64
+	estimated int64
 }
 
-func (m *mockAccountingStats) PendingUpdates() int64  { return m.pending }
-func (m *mockAccountingStats) TrackedEntities() int64 { return m.tracked }
+func (m *mockAccountingStats) PendingUpdates() int64    { return m.pending }
+func (m *mockAccountingStats) TrackedEntities() int64   { return m.tracked }
+func (m *mockAccountingStats) EstimatedEntities() int64 { return m.estimated }
 
 func TestAccountingStats_Unauthorized(t *testing.T) {
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
@@ -44,7 +46,7 @@ func TestAccountingStats_WithProvider(t *testing.T) {
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
 	apiKey := "thisIsAVerySecureAPIKey123"
 
-	stats := &mockAccountingStats{pending: 42, tracked: 1000}
+	stats := &mockAccountingStats{pending: 42, tracked: 1000, estimated: 200}
 
 	server, err := NewServer(ServerConfig{
 		Address:         ":8082",
@@ -80,6 +82,7 @@ func TestAccountingStats_WithProvider(t *testing.T) {
 	assert.Equal(t, "node-1", result.LocalNodeID)
 	assert.Equal(t, int64(1000), result.MonitoredEntitiesCount)
 	assert.Equal(t, int64(42), result.BatchedUpdatesPending)
+	assert.Equal(t, int64(200), result.EstimatedEntitiesCount)
 }
 
 func TestAccountingStats_NilProvider(t *testing.T) {
@@ -120,4 +123,5 @@ func TestAccountingStats_NilProvider(t *testing.T) {
 	assert.Equal(t, "node-1", result.LocalNodeID)
 	assert.Equal(t, int64(0), result.MonitoredEntitiesCount)
 	assert.Equal(t, int64(0), result.BatchedUpdatesPending)
+	assert.Equal(t, int64(0), result.EstimatedEntitiesCount)
 }

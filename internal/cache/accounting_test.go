@@ -32,15 +32,15 @@ func TestAccountingCache_Increment(t *testing.T) {
 	ip := "192.168.1.1"
 
 	// First increment
-	count := ac.Increment(ip)
+	count := ac.Increment(ip, 1)
 	assert.Equal(t, int64(1), count)
 
 	// Second increment
-	count = ac.Increment(ip)
+	count = ac.Increment(ip, 1)
 	assert.Equal(t, int64(2), count)
 
 	// Third increment
-	count = ac.Increment(ip)
+	count = ac.Increment(ip, 1)
 	assert.Equal(t, int64(3), count)
 }
 
@@ -59,8 +59,8 @@ func TestAccountingCache_Get(t *testing.T) {
 	assert.Equal(t, int64(0), ac.Get(ip))
 
 	// After increments
-	ac.Increment(ip)
-	ac.Increment(ip)
+	ac.Increment(ip, 1)
+	ac.Increment(ip, 1)
 	assert.Equal(t, int64(2), ac.Get(ip))
 }
 
@@ -76,8 +76,8 @@ func TestAccountingCache_Reset(t *testing.T) {
 	ip := "192.168.1.1"
 
 	// Increment some
-	ac.Increment(ip)
-	ac.Increment(ip)
+	ac.Increment(ip, 1)
+	ac.Increment(ip, 1)
 	assert.Equal(t, int64(2), ac.Get(ip))
 
 	// Reset
@@ -97,7 +97,7 @@ func TestAccountingCache_WindowExpiration(t *testing.T) {
 	ip := "192.168.1.1"
 
 	// Increment
-	ac.Increment(ip)
+	ac.Increment(ip, 1)
 	assert.Equal(t, int64(1), ac.Get(ip))
 
 	// Wait for window to expire
@@ -267,13 +267,13 @@ func TestAccountingCache_MetricsCallbacks(t *testing.T) {
 	ip := "192.168.1.1"
 
 	// First increment should be a miss (create new counter)
-	ac.Increment(ip)
+	ac.Increment(ip, 1)
 	mu.Lock()
 	assert.Equal(t, 1, misses)
 	mu.Unlock()
 
 	// Second increment should be a hit
-	ac.Increment(ip)
+	ac.Increment(ip, 1)
 	mu.Lock()
 	assert.Equal(t, 1, hits)
 	mu.Unlock()
@@ -290,7 +290,7 @@ func TestAccountingCache_ConcurrentIncrement(t *testing.T) {
 
 	// Initialize the counter first to avoid race conditions during creation
 	ip := "192.168.1.1"
-	ac.Increment(ip)
+	ac.Increment(ip, 1)
 	initialCount := ac.Get(ip)
 
 	numGoroutines := 100
@@ -300,7 +300,7 @@ func TestAccountingCache_ConcurrentIncrement(t *testing.T) {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			ac.Increment(ip)
+			ac.Increment(ip, 1)
 		}()
 	}
 	wg.Wait()
