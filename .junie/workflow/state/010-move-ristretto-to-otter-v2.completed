@@ -1,0 +1,37 @@
+# Milestone 010: Move Ristretto to Otter v2 - Completed
+
+## Summary
+Replaced `github.com/dgraph-io/ristretto/v2` with `github.com/maypok86/otter/v2` (v2.3.0) throughout the cache layer.
+
+## Changes Made
+
+### internal/cache/blocklist.go
+- Replaced ristretto.Cache[string, time.Time] + sync.Map with otter.Cache[string, *blocklistEntryData]
+- Eliminated secondary sync.Map index — otter's native `cache.All()` iteration replaces it
+- Used `ExpiryCreatingFunc` for variable per-entry TTLs (reads expiresAt from the stored value)
+- Used `OnDeletion` with `WasEvicted()` for eviction metrics
+- Replaced: Get→GetIfPresent, SetWithTTL→Set, Del→Invalidate, Wait→(removed, writes are sync), Close→StopAllGoroutines
+- Count() now uses EstimatedSize(), Clear() uses InvalidateAll()
+- Removed Metrics() method that returned *ristretto.Metrics (was unused externally)
+
+### internal/cache/accounting.go
+- Replaced ristretto.Cache[string, *atomic.Int64] with otter.Cache[string, *atomic.Int64]
+- Used `ExpiryCreating` for uniform window TTL across all entries
+- Same API replacements as blocklist (GetIfPresent, Set, Invalidate, StopAllGoroutines)
+- Removed Metrics() method that returned *ristretto.Metrics (was unused externally)
+
+### go.mod
+- Added: github.com/maypok86/otter/v2 v2.3.0
+- Removed: github.com/dgraph-io/ristretto/v2 v2.4.0
+
+## Test Results
+- All 40 cache tests pass with -race flag
+- All other packages (accounting, api, config, grpc, metrics, model, ratelimit) pass
+- Zero lint issues
+- Pre-existing membership test race (unrelated to this change) remains
+
+## Key Design Decisions
+- S3-FIFO eviction policy (otter default) replaces TinyLFU (ristretto)
+- Weight-based eviction via MaximumWeight + Weigher (100 bytes per entry) preserves existing cost model
+- ExpiryCreatingFunc allows variable TTLs without needing Set + SetExpiresAfter two-step
+- No secondary index needed — otter.All() provides thread-safe iteration natively

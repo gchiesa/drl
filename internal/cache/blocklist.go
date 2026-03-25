@@ -2,10 +2,9 @@ package cache
 
 import (
 	"log/slog"
-	"sync"
 	"time"
 
-	"github.com/dgraph-io/ristretto/v2"
+	"github.com/maypok86/otter/v2"
 	"github.com/samber/lo"
 	"github.com/vmihailenco/msgpack/v5"
 
@@ -23,16 +22,17 @@ type BlocklistEntry struct {
 	EntityHdrs map[string]string `msgpack:"entity_hdrs,omitempty"` // original headers
 }
 
-// blocklistEntryData is the value stored in the entries sync.Map.
+// blocklistEntryData is the value stored in the otter cache.
 type blocklistEntryData struct {
 	expiresAt time.Time
 	entity    *model.Entity // nil for automatic (rate-limiter) blocks
 }
 
-// BlocklistCache is a fully replicated in-memory cache for banned IPs
+// BlocklistCache is a fully replicated in-memory cache for banned IPs.
+// Otter's native iteration (cache.All()) replaces the previous sync.Map
+// secondary index that was needed with Ristretto.
 type BlocklistCache struct {
-	cache   *ristretto.Cache[string, time.Time]
-	entries sync.Map // map[string]*blocklistEntryData
+	cache   *otter.Cache[string, *blocklistEntryData]
 	logger  *slog.Logger
 	maxCost int64
 
@@ -66,20 +66,23 @@ func NewBlocklistCache(cfg BlocklistConfig) (*BlocklistCache, error) {
 		onSetCost: cfg.OnSetCost,
 	}
 
-	cache, err := ristretto.NewCache(&ristretto.Config[string, time.Time]{
-		NumCounters: 10 * maxCost / 100, // ~10x expected max items
-		MaxCost:     maxCost,
-		BufferItems: 64,
-		OnEvict: func(item *ristretto.Item[time.Time]) {
-			// Remove from tracking map
-			bc.entries.Delete(item.Key)
-			if cfg.OnEvict != nil {
-				cfg.OnEvict()
-			}
-		},
-		Cost: func(value time.Time) int64 {
+	cache, err := otter.New[string, *blocklistEntryData](&otter.Options[string, *blocklistEntryData]{
+		MaximumWeight: uint64(maxCost),
+		Weigher: func(_ string, _ *blocklistEntryData) uint32 {
 			// Each entry is approximately: key string (~40 bytes) + time.Time (24 bytes) + overhead
 			return 100
+		},
+		ExpiryCalculator: otter.ExpiryCreatingFunc[string, *blocklistEntryData](func(e otter.Entry[string, *blocklistEntryData]) time.Duration {
+			ttl := time.Until(e.Value.expiresAt)
+			if ttl <= 0 {
+				return time.Millisecond
+			}
+			return ttl
+		}),
+		OnDeletion: func(e otter.DeletionEvent[string, *blocklistEntryData]) {
+			if e.WasEvicted() && cfg.OnEvict != nil {
+				cfg.OnEvict()
+			}
 		},
 	})
 	if err != nil {
@@ -90,23 +93,19 @@ func NewBlocklistCache(cfg BlocklistConfig) (*BlocklistCache, error) {
 	return bc, nil
 }
 
-// IsBlockedWithExpiration return the expiration time when an key is in the blocklist
+// IsBlockedWithExpiration return the expiration time when a key is in the blocklist
 func (b *BlocklistCache) IsBlockedWithExpiration(key string) (expiresAt time.Time, found bool) {
-	// Get will not return expired items.
-	expiresAt, found = b.cache.Get(key)
+	data, found := b.cache.GetIfPresent(key)
 	if !found {
 		if b.onMiss != nil {
 			b.onMiss()
 		}
-		// if not found, we need to remove the key from our meta-entities
-		b.entries.Delete(key)
-		return expiresAt, found
+		return expiresAt, false
 	}
-	// if found, we update the metrics
 	if b.onHit != nil {
 		b.onHit()
 	}
-	return expiresAt, found
+	return data.expiresAt, true
 }
 
 // IsBlocked checks if a specified key exists in the blocklist without returning its expiration time.
@@ -116,12 +115,9 @@ func (b *BlocklistCache) IsBlocked(key string) bool {
 }
 
 // Block adds a key to the blocklist with a TTL.
-// No entity metadata is stored — use BlockWithMeta for admin-API blocks.
 func (b *BlocklistCache) Block(key string, entity *model.Entity, ttl time.Duration) {
 	expiresAt := time.Now().Add(ttl)
-	b.cache.SetWithTTL(key, expiresAt, 100, ttl)
-	b.entries.Store(key, &blocklistEntryData{expiresAt: expiresAt, entity: entity})
-	b.cache.Wait()
+	b.cache.Set(key, &blocklistEntryData{expiresAt: expiresAt, entity: entity})
 
 	if b.logger != nil {
 		b.logger.Debug("entity blocked",
@@ -133,13 +129,11 @@ func (b *BlocklistCache) Block(key string, entity *model.Entity, ttl time.Durati
 }
 
 // BlockWithMeta adds a key to the blocklist with a TTL and entity metadata.
-// The metadata is preserved in the secondary index so that ListEntries can
-// reconstruct the original entity for the admin GET endpoint.
+// The metadata is preserved so that ListEntries can reconstruct the original
+// entity for the admin GET endpoint.
 func (b *BlocklistCache) BlockWithMeta(key string, ttl time.Duration, entity *model.Entity) {
 	expiresAt := time.Now().Add(ttl)
-	b.cache.SetWithTTL(key, expiresAt, 100, ttl)
-	b.entries.Store(key, &blocklistEntryData{expiresAt: expiresAt, entity: entity})
-	b.cache.Wait()
+	b.cache.Set(key, &blocklistEntryData{expiresAt: expiresAt, entity: entity})
 
 	if b.logger != nil {
 		b.logger.Debug("entity blocked with metadata",
@@ -152,8 +146,7 @@ func (b *BlocklistCache) BlockWithMeta(key string, ttl time.Duration, entity *mo
 
 // Unblock removes a key from the blocklist
 func (b *BlocklistCache) Unblock(key string) {
-	b.cache.Del(key)
-	b.entries.Delete(key)
+	b.cache.Invalidate(key)
 	if b.logger != nil {
 		b.logger.Debug("entity unblocked", "key", key)
 	}
@@ -165,9 +158,7 @@ func (b *BlocklistCache) ListEntries() []model.BlockedEntityInfo {
 	now := time.Now()
 	var result []model.BlockedEntityInfo
 
-	b.entries.Range(func(k, v any) bool {
-		key := k.(string)
-		data := v.(*blocklistEntryData)
+	for key, data := range b.cache.All() {
 		if data.expiresAt.After(now) {
 			result = append(result, model.BlockedEntityInfo{
 				Key:       key,
@@ -175,8 +166,7 @@ func (b *BlocklistCache) ListEntries() []model.BlockedEntityInfo {
 				Entity:    data.entity,
 			})
 		}
-		return true
-	})
+	}
 
 	return result
 }
@@ -186,10 +176,7 @@ func (b *BlocklistCache) GetState() ([]byte, error) {
 	now := time.Now()
 	entries := make([]BlocklistEntry, 0)
 
-	b.entries.Range(func(k, v any) bool {
-		key := k.(string)
-		data := v.(*blocklistEntryData)
-
+	for key, data := range b.cache.All() {
 		if data.expiresAt.After(now) {
 			entry := BlocklistEntry{
 				IP:        key,
@@ -202,8 +189,7 @@ func (b *BlocklistCache) GetState() ([]byte, error) {
 			}
 			entries = append(entries, entry)
 		}
-		return true
-	})
+	}
 
 	if b.logger != nil {
 		b.logger.Debug("serializing blocklist state",
@@ -235,8 +221,6 @@ func (b *BlocklistCache) MergeState(data []byte) error {
 
 	for _, entry := range entries {
 		if entry.ExpiresAt.After(now) {
-			ttl := entry.ExpiresAt.Sub(now)
-
 			ed := &blocklistEntryData{expiresAt: entry.ExpiresAt}
 			if entry.EntityIP != "" || entry.EntityPath != "" {
 				ed.entity = &model.Entity{
@@ -250,21 +234,17 @@ func (b *BlocklistCache) MergeState(data []byte) error {
 			// This prevents Push/Pull sync from erasing metadata that was
 			// set by the admin API on this node.
 			if ed.entity == nil {
-				if existing, ok := b.entries.Load(entry.IP); ok {
-					local := existing.(*blocklistEntryData)
-					if local.entity != nil {
-						ed.entity = local.entity
+				if existing, ok := b.cache.GetIfPresent(entry.IP); ok {
+					if existing.entity != nil {
+						ed.entity = existing.entity
 					}
 				}
 			}
 
-			b.cache.SetWithTTL(entry.IP, entry.ExpiresAt, 100, ttl)
-			b.entries.Store(entry.IP, ed)
+			b.cache.Set(entry.IP, ed)
 			merged++
 		}
 	}
-
-	b.cache.Wait()
 
 	if b.logger != nil {
 		b.logger.Info("state sync complete",
@@ -278,12 +258,7 @@ func (b *BlocklistCache) MergeState(data []byte) error {
 
 // Count returns the approximate number of entries in the blocklist
 func (b *BlocklistCache) Count() int {
-	count := 0
-	b.entries.Range(func(_, _ any) bool {
-		count++
-		return true
-	})
-	return count
+	return b.cache.EstimatedSize()
 }
 
 // Entries returns all current blocklist entries (for testing/debugging)
@@ -291,10 +266,7 @@ func (b *BlocklistCache) Entries() []BlocklistEntry {
 	now := time.Now()
 	entries := make([]BlocklistEntry, 0)
 
-	b.entries.Range(func(k, v any) bool {
-		key := k.(string)
-		data := v.(*blocklistEntryData)
-
+	for key, data := range b.cache.All() {
 		if data.expiresAt.After(now) {
 			entry := BlocklistEntry{
 				IP:        key,
@@ -307,31 +279,19 @@ func (b *BlocklistCache) Entries() []BlocklistEntry {
 			}
 			entries = append(entries, entry)
 		}
-		return true
-	})
+	}
 
 	return entries
 }
 
 // Clear removes all entries from the blocklist
 func (b *BlocklistCache) Clear() {
-	b.entries.Range(func(key, _ any) bool {
-		k := key.(string)
-		b.cache.Del(k)
-		b.entries.Delete(k)
-		return true
-	})
-	b.cache.Wait()
+	b.cache.InvalidateAll()
 }
 
 // Close closes the cache
 func (b *BlocklistCache) Close() {
-	b.cache.Close()
-}
-
-// Metrics returns current cache metrics
-func (b *BlocklistCache) Metrics() *ristretto.Metrics {
-	return b.cache.Metrics
+	b.cache.StopAllGoroutines()
 }
 
 // CostEstimate returns the estimated memory usage in bytes
