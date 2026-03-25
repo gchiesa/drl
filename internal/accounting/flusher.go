@@ -147,6 +147,23 @@ func (f *Flusher) Enqueue(ownerAddr string, entityHash uint64, hits uint32) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 
+	// TODO: gchiesa -> implement recalculation of ownership
+	// when a Enqueue for a ownerAddr is requested there is the possibility the
+	// ownerAddr has been added later to the cluster when this instance already had
+	// ownership of entities, which after the new node joined will be owner by the
+	// new node because ring hash changed. in this case, there will be the state
+	// where:
+	//
+	// * nodeA owned entityA before nodeB joined
+	// * nodeA started keeping accounting for entityA
+	// * nodeB joined, now owner of entityA
+	//
+	// entityA has now some accounting in nodeA and some in nodeB to solve this
+	// scenario, we can implement that upon Enqueue trigger, we use buf below to host
+	// the new entry, but at the same time we recalculate what is now owned by
+	// ownerAddr and we enqueue also those entries in buf.entries and we assume they
+	// will be successfully transmitted, so that they can be remove from local accounting.
+
 	buf, ok := f.buffers[ownerAddr]
 	if !ok {
 		buf = &nodeBuffer{entries: make(map[uint64]uint32)}
@@ -305,7 +322,7 @@ func (f *Flusher) receiveLoop() {
 		for _, entry := range batch.Entries {
 			key := fmt.Sprintf("%016x", entry.EntityHash)
 			for range entry.Hits {
-				f.accounting.Increment(key)
+				f.accounting.Increment(key) // TODO: (gchiesa) improve for cumulative increment when the batch.Entries has entity with Hits > 1
 			}
 		}
 
