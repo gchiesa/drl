@@ -101,6 +101,12 @@ type MembershipConfig struct {
 	GossipInterval time.Duration `kdl:"gossip-interval" env:"GOSSIP_INTERVAL"`
 	// GossipNodes is the number of nodes to gossip to per round
 	GossipNodes int `kdl:"gossip-nodes" env:"GOSSIP_NODES"`
+	// SecretKeys is a list of AES encryption keys for memberlist.
+	// The first key is the primary (used for encryption); additional keys
+	// are secondary (decryption only, for key rotation). All keys must be
+	// valid AES lengths (16, 24, or 32 bytes).
+	// Override via env: DRL_MEMBERSHIP_PRIMARY_KEY + DRL_MEMBERSHIP_SECONDARY_KEYS
+	SecretKeys []string `kdl:"secret-keys"`
 }
 
 // LoggingConfig holds logging configuration
@@ -167,6 +173,10 @@ func Load(configPath string) (*Config, error) {
 		return nil, err
 	}
 
+	// Apply encryption key environment variable overrides
+	// (DRL_MEMBERSHIP_PRIMARY_KEY + DRL_MEMBERSHIP_SECONDARY_KEYS)
+	cfg.applyEncryptionKeyEnvOverrides()
+
 	// Validate the final configuration
 	if err = cfg.Validate(); err != nil {
 		return nil, fmt.Errorf("configuration validation failed: %w", err)
@@ -191,6 +201,25 @@ func (c *Config) loadFromEnvironment() error {
 	return nil
 }
 
+// applyEncryptionKeyEnvOverrides checks DRL_MEMBERSHIP_PRIMARY_KEY and
+// DRL_MEMBERSHIP_SECONDARY_KEYS environment variables. If the primary key
+// env var is set, it overrides SecretKeys entirely (env > KDL precedence).
+func (c *Config) applyEncryptionKeyEnvOverrides() {
+	primaryKey := os.Getenv("DRL_MEMBERSHIP_PRIMARY_KEY")
+	if primaryKey == "" {
+		return
+	}
+	keys := []string{primaryKey}
+	if secondary := os.Getenv("DRL_MEMBERSHIP_SECONDARY_KEYS"); secondary != "" {
+		for _, k := range strings.Split(secondary, ",") {
+			if trimmed := strings.TrimSpace(k); trimmed != "" {
+				keys = append(keys, trimmed)
+			}
+		}
+	}
+	c.Membership.SecretKeys = keys
+}
+
 // GetConfigFilePath returns the path to the configuration file.
 // If an external path is specified, it is returned; otherwise, the default path is used.
 func (c *Config) GetConfigFilePath() string {
@@ -213,6 +242,29 @@ func (c *Config) Validate() error {
 	}
 	if c.Membership.BindAddr == "" {
 		errs = append(errs, "membership.bind-addr cannot be empty")
+	}
+
+	// Validate secret keys for encryption
+	if len(c.Membership.SecretKeys) > 0 {
+		for i, key := range c.Membership.SecretKeys {
+			keyLen := len(key)
+			if keyLen != 16 && keyLen != 24 && keyLen != 32 {
+				errs = append(errs, fmt.Sprintf(
+					"membership.secret-keys[%d] must be 16, 24, or 32 bytes (valid AES key length), got %d bytes",
+					i, keyLen))
+			}
+		}
+		// All keys must be the same length (memberlist requirement)
+		if len(c.Membership.SecretKeys) > 1 {
+			firstLen := len(c.Membership.SecretKeys[0])
+			for i := 1; i < len(c.Membership.SecretKeys); i++ {
+				if len(c.Membership.SecretKeys[i]) != firstLen {
+					errs = append(errs, fmt.Sprintf(
+						"membership.secret-keys: all keys must have the same length; key[0] is %d bytes but key[%d] is %d bytes",
+						firstLen, i, len(c.Membership.SecretKeys[i])))
+				}
+			}
+		}
 	}
 
 	// Validate listen
