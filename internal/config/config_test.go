@@ -984,6 +984,111 @@ func TestAccountingConfig_ValidationErrors(t *testing.T) {
 	}
 }
 
+func TestSecretKeys_KDLParsing(t *testing.T) {
+	clearEnvVars(t)
+
+	tmpDir := t.TempDir()
+	configPath := filepath.Join(tmpDir, "encryption.kdl")
+	kdlContent := `
+membership {
+    secret-keys "12345678901234561234567890123456" "abcdefghijklmnopabcdefghijklmnop"
+}
+`
+	require.NoError(t, os.WriteFile(configPath, []byte(kdlContent), 0644))
+
+	cfg, err := Load(configPath)
+	require.NoError(t, err)
+	require.Len(t, cfg.Membership.SecretKeys, 2)
+	assert.Equal(t, "12345678901234561234567890123456", cfg.Membership.SecretKeys[0])
+	assert.Equal(t, "abcdefghijklmnopabcdefghijklmnop", cfg.Membership.SecretKeys[1])
+}
+
+func TestSecretKeys_EnvOverride(t *testing.T) {
+	clearEnvVars(t)
+
+	t.Setenv("DRL_MEMBERSHIP_PRIMARY_KEY", "PrimaryKey_32Bytes______________")
+	t.Setenv("DRL_MEMBERSHIP_SECONDARY_KEYS", "SecondaryKey32Bytes_____________")
+
+	cfg, err := Load("")
+	require.NoError(t, err)
+	require.Len(t, cfg.Membership.SecretKeys, 2)
+	assert.Equal(t, "PrimaryKey_32Bytes______________", cfg.Membership.SecretKeys[0])
+	assert.Equal(t, "SecondaryKey32Bytes_____________", cfg.Membership.SecretKeys[1])
+}
+
+func TestSecretKeys_EnvOverridesKDL(t *testing.T) {
+	clearEnvVars(t)
+
+	tmpDir := t.TempDir()
+	configPath := filepath.Join(tmpDir, "encryption.kdl")
+	kdlContent := `
+membership {
+    secret-keys "KDLKey_32Bytes__________________"
+}
+`
+	require.NoError(t, os.WriteFile(configPath, []byte(kdlContent), 0644))
+
+	// Env should override KDL
+	t.Setenv("DRL_MEMBERSHIP_PRIMARY_KEY", "EnvKey_32Bytes__________________")
+
+	cfg, err := Load(configPath)
+	require.NoError(t, err)
+	require.Len(t, cfg.Membership.SecretKeys, 1)
+	assert.Equal(t, "EnvKey_32Bytes__________________", cfg.Membership.SecretKeys[0])
+}
+
+func TestSecretKeys_Validation_InvalidLength(t *testing.T) {
+	clearEnvVars(t)
+
+	t.Setenv("DRL_MEMBERSHIP_PRIMARY_KEY", "too-short-15byt")
+
+	_, err := Load("")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "valid AES key length")
+}
+
+func TestSecretKeys_Validation_MismatchedLengths(t *testing.T) {
+	clearEnvVars(t)
+
+	// 16-byte primary, 32-byte secondary
+	t.Setenv("DRL_MEMBERSHIP_PRIMARY_KEY", "1234567890123456")
+	t.Setenv("DRL_MEMBERSHIP_SECONDARY_KEYS", "12345678901234561234567890123456")
+
+	_, err := Load("")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "same length")
+}
+
+func TestSecretKeys_Validation_ValidLengths(t *testing.T) {
+	tests := []struct {
+		name string
+		key  string
+	}{
+		{"AES-128 (16 bytes)", "1234567890123456"},
+		{"AES-192 (24 bytes)", "123456789012345678901234"},
+		{"AES-256 (32 bytes)", "12345678901234561234567890123456"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			clearEnvVars(t)
+			t.Setenv("DRL_MEMBERSHIP_PRIMARY_KEY", tt.key)
+
+			cfg, err := Load("")
+			require.NoError(t, err)
+			require.Len(t, cfg.Membership.SecretKeys, 1)
+			assert.Equal(t, tt.key, cfg.Membership.SecretKeys[0])
+		})
+	}
+}
+
+func TestSecretKeys_EmptyList(t *testing.T) {
+	clearEnvVars(t)
+
+	cfg, err := Load("")
+	require.NoError(t, err)
+	assert.Empty(t, cfg.Membership.SecretKeys)
+}
+
 // clearEnvVars clears all DRL_ environment variables to ensure test isolation
 func clearEnvVars(t *testing.T) {
 	t.Helper()
@@ -1003,6 +1108,8 @@ func clearEnvVars(t *testing.T) {
 		"DRL_CACHE_ACCOUNTING_SIZE_MB",
 		"DRL_CACHE_SYNC_TIMEOUT_SECONDS",
 		"DRL_CACHE_BLOCKLIST_DEFAULT_TTL_SECONDS",
+		"DRL_MEMBERSHIP_PRIMARY_KEY",
+		"DRL_MEMBERSHIP_SECONDARY_KEYS",
 	}
 
 	for _, env := range envVars {

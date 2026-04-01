@@ -69,6 +69,21 @@ func (c *Cluster) Start() error {
 		mlConfig.GossipNodes = c.config.Membership.GossipNodes
 	}
 
+	// Configure encryption keyring
+	keyring, err := BuildKeyring(c.config.Membership.SecretKeys)
+	if err != nil {
+		return fmt.Errorf("failed to build encryption keyring: %w", err)
+	}
+	if keyring != nil {
+		mlConfig.Keyring = keyring
+		c.logger.Info("memberlist encryption enabled",
+			"num_keys", len(c.config.Membership.SecretKeys),
+		)
+	} else {
+		c.logger.Warn("memberlist encryption disabled: no secret keys configured. " +
+			"If encryption was previously enabled this represents degraded security")
+	}
+
 	// Set up event delegate for membership events
 	mlConfig.Events = &eventDelegate{
 		cluster:      c,
@@ -101,6 +116,7 @@ func (c *Cluster) Start() error {
 		"bind_port", c.config.Membership.Port,
 		"gossip_interval", c.config.Membership.GossipInterval,
 		"gossip_nodes", c.config.Membership.GossipNodes,
+		"encryption_enabled", keyring != nil,
 	)
 
 	// Update initial cluster size
