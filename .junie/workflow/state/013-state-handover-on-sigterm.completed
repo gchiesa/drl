@@ -1,0 +1,103 @@
+# Milestone 013: Graceful State Handover on SIGTERM - Completed
+
+## Original Plan
+
+### Goal
+Implement graceful state evacuation when a DRL node receives SIGTERM. The leaving node
+snapshots its local accounting counters, compresses them with Zstd, and sends them to
+a healthy peer (the Adopter) via memberlist SendReliable before exiting.
+
+### Design Decisions
+- **Protobuf `HandoverPayload`**: Added as `handover = 4` in `DrlMessage.oneof`, containing
+  zstd-compressed protobuf `CounterBatch` bytes, sender ID, timestamp, and entity count.
+- **Zstd compression**: `github.com/klauspost/compress/zstd` with `sync.Pool` for encoder/decoder
+  reuse to maintain zero-GC goal during shutdown.
+- **Adopter selection**: Iterates member addresses, picks first non-self node. If send fails,
+  retries with next node. Hard timeout of 10 seconds.
+- **Settling period**: 2-second wait after receiving handover before redistributing entries,
+  allowing hash ring to converge after the sender's departure.
+- **Safety**: Handover increments only — no threshold checks, no BlockEvents triggered from
+  received entries to prevent double-blocking or gossip storms.
+- **Shutdown order**: Stop API/gRPC → flush pending batches → evacuate state → leave cluster →
+  close caches → stop metrics.
+
+## Changes Made
+
+### internal/proto/accounting.proto + accounting.pb.go
+- Added `HandoverPayload` message with sender_id, timestamp, compressed_entries (bytes), entity_count
+- Extended `DrlMessage.oneof content` with `HandoverPayload handover = 4`
+- Regenerated Go code
+
+### internal/metrics/metrics.go
+- Added 4 new metrics:
+  - `drl_accounting_handover_out_entities` (Counter) — entities sent by leaving node
+  - `drl_accounting_handover_in_entities` (Counter) — entities received by adopter
+  - `drl_accounting_handover_duration_ms` (Histogram) — handover duration
+  - `drl_accounting_handover_failed_total` (Counter) — failed handover attempts
+- Added helper methods: `AddHandoverOut`, `AddHandoverIn`, `ObserveHandoverDuration`, `IncHandoverFailed`
+
+### internal/cache/accounting.go
+- Added `SnapshotAll() map[string]int64` — read-only snapshot of all cache entries via `Keys()` iteration
+
+### internal/membership/handover.go (new file)
+- `Handover` struct with cluster, accounting, flusher, metrics, logger, shutdownCh, settling/timeout config
+- `FlusherEnqueuer` interface to avoid importing accounting package
+- `NewHandover(cfg)` — creates instance with sync.Pool for zstd encoder/decoder
+- `Evacuate() error` — snapshots cache, builds CounterBatch, compresses with zstd, wraps in
+  HandoverPayload/DrlMessage, sends to first available peer via SendReliableMsg. Retries on failure.
+  Hard timeout via context.WithTimeout.
+- `HandleIncoming(payload)` — rejects if shutting down, decompresses, unmarshals, spawns goroutine
+  that waits settling period then redistributes entries (local → Increment, remote → Flusher.Enqueue)
+- `IsShuttingDown()` — checks shutdownCh
+- `compressZstd`, `decompressZstd` — pooled zstd operations
+
+### internal/membership/delegate.go
+- Added `handover *Handover` field to `StateDelegate`
+- Added `SetHandover(h *Handover)` method
+- Added `DrlMessage_Handover` case in NotifyMsg type-switch → `handleHandoverPayload()`
+- `handleHandoverPayload()` delegates to `d.handover.HandleIncoming()`
+
+### internal/cmd/root.go
+- Added `membership` import
+- After accounting engine creation, creates `Handover` instance and sets on delegate
+- Updated shutdown sequence: Flusher.Stop() → Handover.Evacuate() → Cluster.Leave()
+
+### internal/cmd/cluster.go
+- No changes needed (wiring done in root.go)
+
+### internal/membership/handover_test.go (new file)
+- `TestHandover_ZstdRoundTrip` — verify compression/decompression
+- `TestHandover_HandleIncoming_MergesState` — verify entries merged into accounting cache after settling
+- `TestHandover_HandleIncoming_RejectsWhenShuttingDown` — verify rejection when shutdownCh closed
+- `TestHandover_HandleIncoming_RedistributesToCorrectOwners` — multi-node ring, local vs remote routing
+- `TestHandover_IsShuttingDown` — verify shutdownCh state tracking
+- `TestHandover_Evacuate_NoEntries` — empty cache returns nil
+
+### internal/cache/accounting_test.go
+- Added `TestAccountingCache_SnapshotAll` — empty cache, populated cache, incremented entries
+
+### README.md
+- Added "Lifecycle & Resilience" section with:
+  - Graceful State Handover workflow (sender + adopter sequences)
+  - Settling Period explanation
+  - Updated DrlMessage table with HandoverPayload
+
+### go.mod / go.sum
+- Upgraded `github.com/klauspost/compress` from indirect v1.18.0 to direct v1.18.5
+
+## Test Results
+- All tests pass across all packages
+- Zero lint issues
+- Handover unit tests verify: zstd round-trip, state merge, rejection, redistribution, empty cache
+
+## Verification Checklist
+- [x] `ci/scripts/proto-gen.sh` regenerates proto successfully
+- [x] `go build ./...` compiles
+- [x] `mise run lint` — 0 issues
+- [x] `go test ./... -count=1` — all packages pass
+- [x] HandoverPayload handled correctly in delegate NotifyMsg
+- [x] Shutdown sequence: flush → evacuate → leave
+- [x] Zstd compression/decompression works correctly
+- [x] Adopter rejects handover when also shutting down
+- [x] Redistribution routes entries to correct owners after settling period
+- [x] No BlockEvents triggered from handover merges

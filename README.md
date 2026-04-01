@@ -347,11 +347,46 @@ blocklist immediately, so the next request from any Envoy is rejected at the loc
 
 All inter-node messages use a unified **Protobuf `DrlMessage` envelope** with a `oneof` discriminator:
 
-| Message Type   | Delivery         | Use Case                  |
-|---------------|------------------|---------------------------|
-| `CounterBatch` | `SendBestEffort` | Shadow accounting batches |
-| `BlockEvent`   | `SendReliable`   | Blocklist propagation     |
-| `UnblockEvent` | `SendReliable`   | Blocklist removal         |
+| Message Type       | Delivery         | Use Case                      |
+|-------------------|------------------|-------------------------------|
+| `CounterBatch`     | `SendBestEffort` | Shadow accounting batches     |
+| `BlockEvent`       | `SendReliable`   | Blocklist propagation         |
+| `UnblockEvent`     | `SendReliable`   | Blocklist removal             |
+| `HandoverPayload`  | `SendReliable`   | Graceful state evacuation     |
+
+## Lifecycle & Resilience
+
+### Graceful State Handover
+
+During rolling updates or scale-down events, a departing DRL node evacuates its local accounting state to a
+healthy peer (the **Adopter**) to prevent rate-limit counter loss.
+
+**Sender (Leaving Node) Sequence:**
+
+1. SIGTERM received → stop accepting requests (API + gRPC stopped)
+2. Flush pending accounting batches to their owners
+3. Snapshot all local accounting counters
+4. Compress snapshot with **Zstd** (fast, low-CPU compression)
+5. Send compressed `HandoverPayload` via `memberlist.SendReliable` to the first available peer
+6. If the adopter rejects (also shutting down), retry with the next peer
+7. Hard timeout of **10 seconds** — if handover fails, log error and proceed to avoid blocking the orchestrator
+
+**Adopter (Receiving Node) Sequence:**
+
+1. Receive `HandoverPayload` via `NotifyMsg`
+2. If this node is also shutting down → reject immediately
+3. Decompress Zstd payload → unmarshal `CounterBatch`
+4. Wait a **Settling Period** (2 seconds) for the hash ring to converge after the sender's departure
+5. Redistribute each entry to its new owner:
+   - If this node owns the key → merge into local `AccountingCache`
+   - If another node owns the key → enqueue to the `Flusher` for the next batch cycle
+6. No `BlockEvents` are triggered from handover merges to prevent double-blocking
+
+### Why the Settling Period?
+
+When a node leaves the cluster, the consistent hash ring must update across all remaining nodes. The 2-second
+settling period ensures the ring has converged before the adopter re-calculates ownership, preventing entries
+from being routed to the departed node.
 
 ## Architecture
 

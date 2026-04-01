@@ -342,3 +342,27 @@ func TestAccountingCache_ConsistentHashingDistribution(t *testing.T) {
 		assert.Less(t, count, 350, "Node %s has too many IPs: %d", node, count)
 	}
 }
+
+func TestAccountingCache_SnapshotAll(t *testing.T) {
+	ac, err := NewAccountingCache(AccountingConfig{
+		MaxSizeMB:  1,
+		LocalNode:  "node1",
+		WindowSize: time.Minute,
+	})
+	require.NoError(t, err)
+	defer ac.Close()
+
+	// Empty cache
+	snapshot := ac.SnapshotAll()
+	assert.Empty(t, snapshot)
+
+	// Add some entries
+	ac.Increment("aabbccdd00000000", 10)
+	ac.Increment("1122334400000000", 5)
+	ac.Increment("aabbccdd00000000", 3) // increment existing
+
+	snapshot = ac.SnapshotAll()
+	assert.Len(t, snapshot, 2)
+	assert.Equal(t, int64(13), snapshot["aabbccdd00000000"])
+	assert.Equal(t, int64(5), snapshot["1122334400000000"])
+}

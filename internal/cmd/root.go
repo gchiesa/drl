@@ -11,6 +11,7 @@ import (
 
 	"github.com/alexflint/go-arg"
 	"github.com/gchiesa/drl/internal/config"
+	"github.com/gchiesa/drl/internal/membership"
 	"github.com/gchiesa/drl/internal/utils"
 )
 
@@ -82,6 +83,20 @@ func Execute(version string) {
 	// Initialize Accounting Engine
 	accountingEngine := newAccountingEngine(cfg, localIP, cacheManager, metricsManager, cacheManager.Blocklist, clusterManager.GetStateDelegate(), clusterManager, log)
 
+	// Initialize Handover for graceful state evacuation on shutdown
+	var handover *membership.Handover
+	if accountingEngine != nil && accountingEngine.GetFlusher() != nil {
+		handover = membership.NewHandover(membership.HandoverConfig{
+			Cluster:    clusterManager,
+			Accounting: cacheManager.Accounting,
+			Flusher:    accountingEngine.GetFlusher(),
+			Metrics:    metricsManager,
+			Logger:     log,
+		})
+		clusterManager.GetStateDelegate().SetHandover(handover)
+		log.Info("handover manager initialized")
+	}
+
 	// Initialize internal API if enabled
 	apiServer := newApiServer(cfg, localIP, cacheManager, clusterManager, accountingEngine, log)
 
@@ -111,12 +126,19 @@ func Execute(version string) {
 	// Stop GRPS Server
 	grpcServer.Stop(shutdownCtx)
 
-	// Stop Accounting Engine Flusher
-	if accountingEngine.GetFlusher() != nil {
+	// Stop Accounting Engine Flusher (final flush of pending batches)
+	if accountingEngine != nil && accountingEngine.GetFlusher() != nil {
 		accountingEngine.GetFlusher().Stop()
 	}
 
-	// Leave the cluster
+	// Evacuate accounting state to an adopter node before leaving
+	if handover != nil {
+		if err := handover.Evacuate(); err != nil {
+			log.Error("handover failed", "error", err)
+		}
+	}
+
+	// Leave the cluster (after handover completes or times out)
 	if err := clusterManager.Leave(5 * time.Second); err != nil {
 		log.Error("failed to leave cluster gracefully", "error", err)
 	}
