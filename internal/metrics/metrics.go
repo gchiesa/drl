@@ -34,6 +34,12 @@ type Metrics struct {
 	MembershipReliableMsgsTotal   prometheus.Counter
 	MembershipBestEffortMsgsTotal prometheus.Counter
 
+	// Handover metrics
+	HandoverOutEntities prometheus.Counter
+	HandoverInEntities  prometheus.Counter
+	HandoverDurationMs  prometheus.Histogram
+	HandoverFailedTotal prometheus.Counter
+
 	// Rate limiting metrics
 	RateLimitBlocksTotal          *prometheus.CounterVec
 	RateLimitPropagationLatencyMs prometheus.Histogram
@@ -113,6 +119,25 @@ func NewMetrics() *Metrics {
 			Help: "Total number of best-effort messages sent via memberlist",
 		}),
 
+		// Handover metrics
+		HandoverOutEntities: prometheus.NewCounter(prometheus.CounterOpts{
+			Name: "drl_accounting_handover_out_entities",
+			Help: "Total number of entities sent by leaving node during handover",
+		}),
+		HandoverInEntities: prometheus.NewCounter(prometheus.CounterOpts{
+			Name: "drl_accounting_handover_in_entities",
+			Help: "Total number of entities received and processed by adopter during handover",
+		}),
+		HandoverDurationMs: prometheus.NewHistogram(prometheus.HistogramOpts{
+			Name:    "drl_accounting_handover_duration_ms",
+			Help:    "Total time taken for the handover in milliseconds",
+			Buckets: prometheus.ExponentialBuckets(10, 2, 12), // 10ms to ~20s
+		}),
+		HandoverFailedTotal: prometheus.NewCounter(prometheus.CounterOpts{
+			Name: "drl_accounting_handover_failed_total",
+			Help: "Total number of failed handover attempts",
+		}),
+
 		// Rate limiting metrics
 		RateLimitBlocksTotal: prometheus.NewCounterVec(prometheus.CounterOpts{
 			Name: "drl_ratelimit_blocks_total",
@@ -145,6 +170,10 @@ func NewMetrics() *Metrics {
 	registry.MustRegister(m.AccountingMsgRecvTotal)
 	registry.MustRegister(m.MembershipReliableMsgsTotal)
 	registry.MustRegister(m.MembershipBestEffortMsgsTotal)
+	registry.MustRegister(m.HandoverOutEntities)
+	registry.MustRegister(m.HandoverInEntities)
+	registry.MustRegister(m.HandoverDurationMs)
+	registry.MustRegister(m.HandoverFailedTotal)
 	registry.MustRegister(m.RateLimitBlocksTotal)
 	registry.MustRegister(m.RateLimitPropagationLatencyMs)
 	registry.MustRegister(m.GRPCResponseCodeTotal)
@@ -220,6 +249,26 @@ func (m *Metrics) IncMembershipReliable() {
 // IncMembershipBestEffort increments the best-effort message counter
 func (m *Metrics) IncMembershipBestEffort() {
 	m.MembershipBestEffortMsgsTotal.Inc()
+}
+
+// AddHandoverOut adds to the handover out entities counter
+func (m *Metrics) AddHandoverOut(n float64) {
+	m.HandoverOutEntities.Add(n)
+}
+
+// AddHandoverIn adds to the handover in entities counter
+func (m *Metrics) AddHandoverIn(n float64) {
+	m.HandoverInEntities.Add(n)
+}
+
+// ObserveHandoverDuration records the handover duration in milliseconds
+func (m *Metrics) ObserveHandoverDuration(ms float64) {
+	m.HandoverDurationMs.Observe(ms)
+}
+
+// IncHandoverFailed increments the failed handover counter
+func (m *Metrics) IncHandoverFailed() {
+	m.HandoverFailedTotal.Inc()
 }
 
 // IncRateLimitBlock increments the rate limit block counter for the given rule and reason

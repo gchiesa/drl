@@ -25,10 +25,18 @@ message UnblockEvent {
   string key = 1;
 }
 
+message HandoverPayload {
+  uint64 sender_id = 1;
+  uint64 timestamp = 2;
+  bytes compressed_entries = 3;  // zstd-compressed protobuf CounterBatch
+  uint64 entity_count = 4;
+}
+
 message DrlMessage {
   oneof content {
     CounterBatch counters = 1;
     BlockEvent block = 2;
     UnblockEvent unblock = 3;
+    HandoverPayload handover = 4;
   }
 }

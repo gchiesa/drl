@@ -370,6 +370,18 @@ func (a *AccountingCache) GetNodes() []string {
 	return nodes
 }
 
+// SnapshotAll returns a read-only snapshot of all current key→count entries.
+// Keys are hex-encoded entity hashes, values are the current counter values.
+func (a *AccountingCache) SnapshotAll() map[string]int64 {
+	snapshot := make(map[string]int64, a.cache.EstimatedSize())
+	for k := range a.cache.Keys() {
+		if counter, found := a.cache.GetIfPresent(k); found {
+			snapshot[k] = counter.Load()
+		}
+	}
+	return snapshot
+}
+
 // Close closes the cache
 func (a *AccountingCache) Close() {
 	a.cache.StopAllGoroutines()

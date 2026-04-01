@@ -253,6 +253,74 @@ func (x *UnblockEvent) GetKey() string {
 	return ""
 }
 
+type HandoverPayload struct {
+	state             protoimpl.MessageState `protogen:"open.v1"`
+	SenderId          uint64                 `protobuf:"varint,1,opt,name=sender_id,json=senderId,proto3" json:"sender_id,omitempty"`
+	Timestamp         uint64                 `protobuf:"varint,2,opt,name=timestamp,proto3" json:"timestamp,omitempty"`
+	CompressedEntries []byte                 `protobuf:"bytes,3,opt,name=compressed_entries,json=compressedEntries,proto3" json:"compressed_entries,omitempty"` // zstd-compressed protobuf CounterBatch
+	EntityCount       uint64                 `protobuf:"varint,4,opt,name=entity_count,json=entityCount,proto3" json:"entity_count,omitempty"`
+	unknownFields     protoimpl.UnknownFields
+	sizeCache         protoimpl.SizeCache
+}
+
+func (x *HandoverPayload) Reset() {
+	*x = HandoverPayload{}
+	mi := &file_internal_proto_accounting_proto_msgTypes[4]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *HandoverPayload) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*HandoverPayload) ProtoMessage() {}
+
+func (x *HandoverPayload) ProtoReflect() protoreflect.Message {
+	mi := &file_internal_proto_accounting_proto_msgTypes[4]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use HandoverPayload.ProtoReflect.Descriptor instead.
+func (*HandoverPayload) Descriptor() ([]byte, []int) {
+	return file_internal_proto_accounting_proto_rawDescGZIP(), []int{4}
+}
+
+func (x *HandoverPayload) GetSenderId() uint64 {
+	if x != nil {
+		return x.SenderId
+	}
+	return 0
+}
+
+func (x *HandoverPayload) GetTimestamp() uint64 {
+	if x != nil {
+		return x.Timestamp
+	}
+	return 0
+}
+
+func (x *HandoverPayload) GetCompressedEntries() []byte {
+	if x != nil {
+		return x.CompressedEntries
+	}
+	return nil
+}
+
+func (x *HandoverPayload) GetEntityCount() uint64 {
+	if x != nil {
+		return x.EntityCount
+	}
+	return 0
+}
+
 type DrlMessage struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// Types that are valid to be assigned to Content:
@@ -260,6 +328,7 @@ type DrlMessage struct {
 	//	*DrlMessage_Counters
 	//	*DrlMessage_Block
 	//	*DrlMessage_Unblock
+	//	*DrlMessage_Handover
 	Content       isDrlMessage_Content `protobuf_oneof:"content"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -267,7 +336,7 @@ type DrlMessage struct {
 
 func (x *DrlMessage) Reset() {
 	*x = DrlMessage{}
-	mi := &file_internal_proto_accounting_proto_msgTypes[4]
+	mi := &file_internal_proto_accounting_proto_msgTypes[5]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -279,7 +348,7 @@ func (x *DrlMessage) String() string {
 func (*DrlMessage) ProtoMessage() {}
 
 func (x *DrlMessage) ProtoReflect() protoreflect.Message {
-	mi := &file_internal_proto_accounting_proto_msgTypes[4]
+	mi := &file_internal_proto_accounting_proto_msgTypes[5]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -292,7 +361,7 @@ func (x *DrlMessage) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DrlMessage.ProtoReflect.Descriptor instead.
 func (*DrlMessage) Descriptor() ([]byte, []int) {
-	return file_internal_proto_accounting_proto_rawDescGZIP(), []int{4}
+	return file_internal_proto_accounting_proto_rawDescGZIP(), []int{5}
 }
 
 func (x *DrlMessage) GetContent() isDrlMessage_Content {
@@ -329,6 +398,15 @@ func (x *DrlMessage) GetUnblock() *UnblockEvent {
 	return nil
 }
 
+func (x *DrlMessage) GetHandover() *HandoverPayload {
+	if x != nil {
+		if x, ok := x.Content.(*DrlMessage_Handover); ok {
+			return x.Handover
+		}
+	}
+	return nil
+}
+
 type isDrlMessage_Content interface {
 	isDrlMessage_Content()
 }
@@ -345,11 +423,17 @@ type DrlMessage_Unblock struct {
 	Unblock *UnblockEvent `protobuf:"bytes,3,opt,name=unblock,proto3,oneof"`
 }
 
+type DrlMessage_Handover struct {
+	Handover *HandoverPayload `protobuf:"bytes,4,opt,name=handover,proto3,oneof"`
+}
+
 func (*DrlMessage_Counters) isDrlMessage_Content() {}
 
 func (*DrlMessage_Block) isDrlMessage_Content() {}
 
 func (*DrlMessage_Unblock) isDrlMessage_Content() {}
+
+func (*DrlMessage_Handover) isDrlMessage_Content() {}
 
 var File_internal_proto_accounting_proto protoreflect.FileDescriptor
 
@@ -377,12 +461,18 @@ const file_internal_proto_accounting_proto_rawDesc = "" +
 	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
 	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01\" \n" +
 	"\fUnblockEvent\x12\x10\n" +
-	"\x03key\x18\x01 \x01(\tR\x03key\"\xa9\x01\n" +
+	"\x03key\x18\x01 \x01(\tR\x03key\"\x9e\x01\n" +
+	"\x0fHandoverPayload\x12\x1b\n" +
+	"\tsender_id\x18\x01 \x01(\x04R\bsenderId\x12\x1c\n" +
+	"\ttimestamp\x18\x02 \x01(\x04R\ttimestamp\x12-\n" +
+	"\x12compressed_entries\x18\x03 \x01(\fR\x11compressedEntries\x12!\n" +
+	"\fentity_count\x18\x04 \x01(\x04R\ventityCount\"\xe0\x01\n" +
 	"\n" +
 	"DrlMessage\x122\n" +
 	"\bcounters\x18\x01 \x01(\v2\x14.drl.v1.CounterBatchH\x00R\bcounters\x12*\n" +
 	"\x05block\x18\x02 \x01(\v2\x12.drl.v1.BlockEventH\x00R\x05block\x120\n" +
-	"\aunblock\x18\x03 \x01(\v2\x14.drl.v1.UnblockEventH\x00R\aunblockB\t\n" +
+	"\aunblock\x18\x03 \x01(\v2\x14.drl.v1.UnblockEventH\x00R\aunblock\x125\n" +
+	"\bhandover\x18\x04 \x01(\v2\x17.drl.v1.HandoverPayloadH\x00R\bhandoverB\t\n" +
 	"\acontentB'Z%github.com/gchiesa/drl/internal/protob\x06proto3"
 
 var (
@@ -397,26 +487,28 @@ func file_internal_proto_accounting_proto_rawDescGZIP() []byte {
 	return file_internal_proto_accounting_proto_rawDescData
 }
 
-var file_internal_proto_accounting_proto_msgTypes = make([]protoimpl.MessageInfo, 6)
+var file_internal_proto_accounting_proto_msgTypes = make([]protoimpl.MessageInfo, 7)
 var file_internal_proto_accounting_proto_goTypes = []any{
-	(*CounterEntry)(nil), // 0: drl.v1.CounterEntry
-	(*CounterBatch)(nil), // 1: drl.v1.CounterBatch
-	(*BlockEvent)(nil),   // 2: drl.v1.BlockEvent
-	(*UnblockEvent)(nil), // 3: drl.v1.UnblockEvent
-	(*DrlMessage)(nil),   // 4: drl.v1.DrlMessage
-	nil,                  // 5: drl.v1.BlockEvent.EntityHdrsEntry
+	(*CounterEntry)(nil),    // 0: drl.v1.CounterEntry
+	(*CounterBatch)(nil),    // 1: drl.v1.CounterBatch
+	(*BlockEvent)(nil),      // 2: drl.v1.BlockEvent
+	(*UnblockEvent)(nil),    // 3: drl.v1.UnblockEvent
+	(*HandoverPayload)(nil), // 4: drl.v1.HandoverPayload
+	(*DrlMessage)(nil),      // 5: drl.v1.DrlMessage
+	nil,                     // 6: drl.v1.BlockEvent.EntityHdrsEntry
 }
 var file_internal_proto_accounting_proto_depIdxs = []int32{
 	0, // 0: drl.v1.CounterBatch.entries:type_name -> drl.v1.CounterEntry
-	5, // 1: drl.v1.BlockEvent.entity_hdrs:type_name -> drl.v1.BlockEvent.EntityHdrsEntry
+	6, // 1: drl.v1.BlockEvent.entity_hdrs:type_name -> drl.v1.BlockEvent.EntityHdrsEntry
 	1, // 2: drl.v1.DrlMessage.counters:type_name -> drl.v1.CounterBatch
 	2, // 3: drl.v1.DrlMessage.block:type_name -> drl.v1.BlockEvent
 	3, // 4: drl.v1.DrlMessage.unblock:type_name -> drl.v1.UnblockEvent
-	5, // [5:5] is the sub-list for method output_type
-	5, // [5:5] is the sub-list for method input_type
-	5, // [5:5] is the sub-list for extension type_name
-	5, // [5:5] is the sub-list for extension extendee
-	0, // [0:5] is the sub-list for field type_name
+	4, // 5: drl.v1.DrlMessage.handover:type_name -> drl.v1.HandoverPayload
+	6, // [6:6] is the sub-list for method output_type
+	6, // [6:6] is the sub-list for method input_type
+	6, // [6:6] is the sub-list for extension type_name
+	6, // [6:6] is the sub-list for extension extendee
+	0, // [0:6] is the sub-list for field type_name
 }
 
 func init() { file_internal_proto_accounting_proto_init() }
@@ -424,10 +516,11 @@ func file_internal_proto_accounting_proto_init() {
 	if File_internal_proto_accounting_proto != nil {
 		return
 	}
-	file_internal_proto_accounting_proto_msgTypes[4].OneofWrappers = []any{
+	file_internal_proto_accounting_proto_msgTypes[5].OneofWrappers = []any{
 		(*DrlMessage_Counters)(nil),
 		(*DrlMessage_Block)(nil),
 		(*DrlMessage_Unblock)(nil),
+		(*DrlMessage_Handover)(nil),
 	}
 	type x struct{}
 	out := protoimpl.TypeBuilder{
@@ -435,7 +528,7 @@ func file_internal_proto_accounting_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_internal_proto_accounting_proto_rawDesc), len(file_internal_proto_accounting_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   6,
+			NumMessages:   7,
 			NumExtensions: 0,
 			NumServices:   0,
 		},

@@ -37,6 +37,9 @@ type StateDelegate struct {
 
 	// bufPool reuses bytes.Buffer allocations for broadcast serialisation
 	bufPool sync.Pool
+
+	// handover handles graceful state evacuation on shutdown
+	handover *Handover
 }
 
 // DelegateConfig holds configuration for the state delegate
@@ -106,6 +109,8 @@ func (d *StateDelegate) NotifyMsg(buf []byte) {
 		d.handleBlockEvent(content.Block)
 	case *drlproto.DrlMessage_Unblock:
 		d.handleUnblockEvent(content.Unblock)
+	case *drlproto.DrlMessage_Handover:
+		d.handleHandoverPayload(content.Handover)
 	default:
 		if d.logger != nil {
 			d.logger.Warn("received DrlMessage with unknown content type")
@@ -330,6 +335,22 @@ func (d *StateDelegate) sendToAllPeers(data []byte) error {
 		}
 	}
 	return lastErr
+}
+
+// SetHandover sets the handover handler for graceful state evacuation.
+func (d *StateDelegate) SetHandover(h *Handover) {
+	d.handover = h
+}
+
+// handleHandoverPayload delegates incoming handover payloads to the Handover handler.
+func (d *StateDelegate) handleHandoverPayload(payload *drlproto.HandoverPayload) {
+	if d.handover == nil {
+		if d.logger != nil {
+			d.logger.Warn("received handover payload but no handover handler configured")
+		}
+		return
+	}
+	d.handover.HandleIncoming(payload)
 }
 
 // markSyncComplete marks the state sync as complete and signals readiness
