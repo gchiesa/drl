@@ -61,6 +61,14 @@ func (c *Cluster) Start() error {
 	mlConfig.AdvertiseAddr = c.localIP
 	mlConfig.AdvertisePort = c.config.Membership.Port
 
+	// Apply gossip tuning
+	if c.config.Membership.GossipInterval > 0 {
+		mlConfig.GossipInterval = c.config.Membership.GossipInterval
+	}
+	if c.config.Membership.GossipNodes > 0 {
+		mlConfig.GossipNodes = c.config.Membership.GossipNodes
+	}
+
 	// Set up event delegate for membership events
 	mlConfig.Events = &eventDelegate{
 		cluster:      c,
@@ -91,6 +99,8 @@ func (c *Cluster) Start() error {
 		"local_node_ip", c.localIP,
 		"bind_addr", c.config.Membership.BindAddr,
 		"bind_port", c.config.Membership.Port,
+		"gossip_interval", c.config.Membership.GossipInterval,
+		"gossip_nodes", c.config.Membership.GossipNodes,
 	)
 
 	// Update initial cluster size
@@ -238,17 +248,29 @@ func (c *Cluster) IsReady() bool {
 
 // Members returns the list of current cluster members
 func (c *Cluster) Members() []*memberlist.Node {
-	return c.memberlist.Members()
+	c.mu.RLock()
+	ml := c.memberlist
+	c.mu.RUnlock()
+	if ml == nil {
+		return nil
+	}
+	return ml.Members()
 }
 
 // NumMembers returns the number of members in the cluster
 func (c *Cluster) NumMembers() int {
-	return c.memberlist.NumMembers()
+	c.mu.RLock()
+	ml := c.memberlist
+	c.mu.RUnlock()
+	if ml == nil {
+		return 0
+	}
+	return ml.NumMembers()
 }
 
 // MemberNames returns the names of all cluster members
 func (c *Cluster) MemberNames() []string {
-	members := c.memberlist.Members()
+	members := c.Members()
 	names := make([]string, len(members))
 	for i, m := range members {
 		names[i] = m.Name
@@ -258,12 +280,60 @@ func (c *Cluster) MemberNames() []string {
 
 // MemberAddrs returns the addresses of all cluster members
 func (c *Cluster) MemberAddrs() []string {
-	members := c.memberlist.Members()
+	members := c.Members()
 	addrs := make([]string, len(members))
 	for i, m := range members {
 		addrs[i] = m.Addr.String()
 	}
 	return addrs
+}
+
+// LocalAddr returns the local node's IP address.
+func (c *Cluster) LocalAddr() string {
+	return c.localIP
+}
+
+// SendAccountingMsg sends an accounting message to the given peer via
+// memberlist's SendBestEffort (UDP, unreliable). The data must be a
+// pre-marshalled DrlMessage.
+func (c *Cluster) SendAccountingMsg(addr string, data []byte) error {
+	c.mu.RLock()
+	ml := c.memberlist
+	c.mu.RUnlock()
+	if ml == nil {
+		return fmt.Errorf("memberlist not initialized")
+	}
+	node := c.findNodeByAddr(addr)
+	if node == nil {
+		return fmt.Errorf("node not found for addr: %s", addr)
+	}
+	return ml.SendBestEffort(node, data)
+}
+
+// SendReliableMsg sends a message to the given peer via memberlist's
+// SendReliable (TCP, guaranteed delivery).
+func (c *Cluster) SendReliableMsg(addr string, data []byte) error {
+	c.mu.RLock()
+	ml := c.memberlist
+	c.mu.RUnlock()
+	if ml == nil {
+		return fmt.Errorf("memberlist not initialized")
+	}
+	node := c.findNodeByAddr(addr)
+	if node == nil {
+		return fmt.Errorf("node not found for addr: %s", addr)
+	}
+	return ml.SendReliable(node, data)
+}
+
+// findNodeByAddr returns the memberlist Node for the given address, or nil.
+func (c *Cluster) findNodeByAddr(addr string) *memberlist.Node {
+	for _, m := range c.memberlist.Members() {
+		if m.Addr.String() == addr {
+			return m
+		}
+	}
+	return nil
 }
 
 // Leave gracefully leaves the cluster

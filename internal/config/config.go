@@ -57,6 +57,10 @@ type AccountingSettings struct {
 	Algorithm string `kdl:"algorithm"`
 	// RetryAfterType determines the Retry-After header format: "delay-seconds" or "http-date"
 	RetryAfterType string `kdl:"retry-after-type"`
+	// FlushInterval is the interval between flusher batch sends
+	FlushInterval time.Duration `kdl:"flush-interval"`
+	// MaxBatchSize is the maximum number of entries per batch before auto-flush
+	MaxBatchSize int `kdl:"max-batch-size"`
 }
 
 // AccountingRule defines a rate-limiting rule for a path prefix
@@ -93,6 +97,10 @@ type MembershipConfig struct {
 	BindAddr string `kdl:"bind-addr" env:"BIND_ADDR"`
 	// StartupDelay is the delay before attempting to join the cluster
 	StartupDelay time.Duration `kdl:"startup-delay" env:"STARTUP_DELAY"`
+	// GossipInterval is the interval between gossip rounds
+	GossipInterval time.Duration `kdl:"gossip-interval" env:"GOSSIP_INTERVAL"`
+	// GossipNodes is the number of nodes to gossip to per round
+	GossipNodes int `kdl:"gossip-nodes" env:"GOSSIP_NODES"`
 }
 
 // LoggingConfig holds logging configuration
@@ -239,12 +247,26 @@ func (c *Config) Validate() error {
 		errs = append(errs, fmt.Sprintf("cache.blocklist-default-ttl-seconds must be at least 1, got %d", c.Cache.BlocklistDefaultTTLSeconds))
 	}
 
+	// Apply membership defaults
+	if c.Membership.GossipInterval == 0 {
+		c.Membership.GossipInterval = 50 * time.Millisecond
+	}
+	if c.Membership.GossipNodes == 0 {
+		c.Membership.GossipNodes = 5
+	}
+
 	// Apply accounting settings defaults
 	if c.Accounting.Settings.Algorithm == "" {
 		c.Accounting.Settings.Algorithm = "sliding-window"
 	}
 	if c.Accounting.Settings.RetryAfterType == "" {
 		c.Accounting.Settings.RetryAfterType = "delay-seconds"
+	}
+	if c.Accounting.Settings.FlushInterval == 0 {
+		c.Accounting.Settings.FlushInterval = 10 * time.Second
+	}
+	if c.Accounting.Settings.MaxBatchSize == 0 {
+		c.Accounting.Settings.MaxBatchSize = 1000
 	}
 
 	// Validate accounting settings

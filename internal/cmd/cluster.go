@@ -13,31 +13,23 @@ import (
 
 // newCluster initializes and starts a cluster, sets configuration, state delegate, and handles node membership updates.
 func newCluster(cfg *config.Config, localIP string, cacheManager *cache.Manager, metricsManager *metrics.Metrics, log *slog.Logger) *membership.Cluster {
-	// clusterRef is captured by the NumNodesFunc closure below.
-	// It is assigned immediately after NewCluster returns, before any broadcast
-	// can be triggered, so no additional synchronization is required.
-	var clusterRef *membership.Cluster
-
-	// Create state delegate for blocklist sync
+	// Create state delegate for blocklist sync and accounting message handling
 	stateDelegate := membership.NewStateDelegate(membership.DelegateConfig{
 		Blocklist:   cacheManager.Blocklist,
+		Accounting:  cacheManager.Accounting,
 		Metrics:     metricsManager,
 		Logger:      log,
 		SyncTimeout: time.Duration(cfg.Cache.SyncTimeoutSeconds) * time.Second,
-		NumNodesFunc: func() int {
-			if clusterRef == nil {
-				return 1
-			}
-			return clusterRef.NumMembers()
-		},
 	})
 
 	// Initialize cluster membership
 	cluster := membership.NewCluster(cfg, localIP, cacheManager, metricsManager, log)
-	clusterRef = cluster
 
 	// Set state delegate before starting the cluster
 	cluster.SetStateDelegate(stateDelegate)
+
+	// Set cluster reference on delegate for SendReliable operations
+	stateDelegate.SetCluster(cluster)
 
 	// Start the cluster
 	if err := cluster.Start(); err != nil {

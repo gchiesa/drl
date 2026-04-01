@@ -55,8 +55,16 @@ func TestNewMetrics(t *testing.T) {
 		t.Error("AccountingFlushTotal counter should not be nil")
 	}
 
-	if m.AccountingUDPRecvTotal == nil {
-		t.Error("AccountingUDPRecvTotal counter should not be nil")
+	if m.AccountingMsgRecvTotal == nil {
+		t.Error("AccountingMsgRecvTotal counter should not be nil")
+	}
+
+	if m.MembershipReliableMsgsTotal == nil {
+		t.Error("MembershipReliableMsgsTotal counter should not be nil")
+	}
+
+	if m.MembershipBestEffortMsgsTotal == nil {
+		t.Error("MembershipBestEffortMsgsTotal counter should not be nil")
 	}
 
 	if m.RateLimitBlocksTotal == nil {
@@ -123,7 +131,9 @@ func TestCacheMetrics(t *testing.T) {
 	m.IncAccountingLocal()
 	m.IncAccountingRemote()
 	m.IncAccountingFlush()
-	m.IncAccountingUDPRecv()
+	m.IncAccountingMsgRecv()
+	m.IncMembershipReliable()
+	m.IncMembershipBestEffort()
 
 	// Test rate limiting metrics
 	m.IncRateLimitBlock("api-limit", "threshold_exceeded")
@@ -243,8 +253,16 @@ func TestStartServer(t *testing.T) {
 		t.Error("expected drl_accounting_flush_total metric in output")
 	}
 
-	if !strings.Contains(metricsStr, "drl_accounting_udp_recv_total") {
-		t.Error("expected drl_accounting_udp_recv_total metric in output")
+	if !strings.Contains(metricsStr, "drl_accounting_msg_recv_total") {
+		t.Error("expected drl_accounting_msg_recv_total metric in output")
+	}
+
+	if !strings.Contains(metricsStr, "drl_membership_reliable_msgs_total") {
+		t.Error("expected drl_membership_reliable_msgs_total metric in output")
+	}
+
+	if !strings.Contains(metricsStr, "drl_membership_best_effort_msgs_total") {
+		t.Error("expected drl_membership_best_effort_msgs_total metric in output")
 	}
 
 	if !strings.Contains(metricsStr, "drl_ratelimit_blocks_total") {

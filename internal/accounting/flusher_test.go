@@ -1,10 +1,9 @@
 package accounting
 
 import (
-	"fmt"
 	"io"
 	"log/slog"
-	"net"
+	"sync"
 	"testing"
 	"time"
 
@@ -16,6 +15,35 @@ import (
 	"github.com/gchiesa/drl/internal/metrics"
 	drlproto "github.com/gchiesa/drl/internal/proto"
 )
+
+// mockSender records messages sent via SendAccountingMsg.
+type mockSender struct {
+	mu   sync.Mutex
+	sent map[string][][]byte // addr -> list of payloads
+}
+
+func newMockSender() *mockSender {
+	return &mockSender{sent: make(map[string][][]byte)}
+}
+
+func (m *mockSender) SendAccountingMsg(addr string, data []byte) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	cp := make([]byte, len(data))
+	copy(cp, data)
+	m.sent[addr] = append(m.sent[addr], cp)
+	return nil
+}
+
+func (m *mockSender) totalSent() int {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	var n int
+	for _, msgs := range m.sent {
+		n += len(msgs)
+	}
+	return n
+}
 
 func testLogger() *slog.Logger {
 	return slog.New(slog.NewTextHandler(io.Discard, nil))
@@ -33,7 +61,7 @@ func testAccountingCache(t *testing.T) *cache.AccountingCache {
 	return ac
 }
 
-func testFlusherConfig(t *testing.T, ac *cache.AccountingCache, port int) FlusherConfig {
+func testFlusherConfig(t *testing.T, ac *cache.AccountingCache, sender NodeSender) FlusherConfig {
 	t.Helper()
 	return FlusherConfig{
 		SenderID:      12345,
@@ -42,7 +70,7 @@ func testFlusherConfig(t *testing.T, ac *cache.AccountingCache, port int) Flushe
 		Metrics:       metrics.NewMetrics(),
 		FlushInterval: 100 * time.Millisecond,
 		MaxBatchSize:  10,
-		SyncPort:      port,
+		Sender:        sender,
 	}
 }
 
@@ -50,7 +78,7 @@ func TestFlusher_Enqueue(t *testing.T) {
 	ac := testAccountingCache(t)
 	defer ac.Close()
 
-	f := NewFlusher(testFlusherConfig(t, ac, 0))
+	f := NewFlusher(testFlusherConfig(t, ac, nil))
 
 	f.Enqueue("10.0.0.1", 0xdeadbeef, 1)
 	f.Enqueue("10.0.0.1", 0xcafebabe, 3)
@@ -63,8 +91,8 @@ func TestFlusher_Flush(t *testing.T) {
 	ac := testAccountingCache(t)
 	defer ac.Close()
 
-	// We need a flusher that can actually send, so start it
-	cfg := testFlusherConfig(t, ac, 0)
+	sender := newMockSender()
+	cfg := testFlusherConfig(t, ac, sender)
 	f := NewFlusher(cfg)
 	require.NoError(t, f.Start())
 	defer f.Stop()
@@ -77,52 +105,43 @@ func TestFlusher_Flush(t *testing.T) {
 	f.flush()
 
 	assert.Equal(t, int64(0), f.PendingCount())
+	assert.Equal(t, 1, sender.totalSent(), "one batch should have been sent")
 }
 
-func TestFlusher_ReceiveAndApply(t *testing.T) {
+func TestFlusher_DrlMessageFormat(t *testing.T) {
 	ac := testAccountingCache(t)
 	defer ac.Close()
 
-	cfg := testFlusherConfig(t, ac, 0)
+	sender := newMockSender()
+	cfg := testFlusherConfig(t, ac, sender)
 	f := NewFlusher(cfg)
 	require.NoError(t, f.Start())
 	defer f.Stop()
 
-	// Get the actual listen address
-	listenAddr := f.ListenerAddr().(*net.UDPAddr)
+	f.Enqueue("127.0.0.1", 0xaabbccdd, 5)
+	f.flush()
 
-	// Send a batch directly to the flusher's listener
-	batch := &drlproto.CounterBatch{
-		SenderId:  99999,
-		Timestamp: uint64(time.Now().UnixMilli()),
-		Entries: []*drlproto.CounterEntry{
-			{EntityHash: 0xaabbccdd, Hits: 5},
-		},
-	}
+	require.Equal(t, 1, sender.totalSent())
+	data := sender.sent["127.0.0.1"][0]
 
-	data, err := proto.Marshal(batch)
-	require.NoError(t, err)
+	// Verify it's a valid DrlMessage with CounterBatch
+	msg := &drlproto.DrlMessage{}
+	require.NoError(t, proto.Unmarshal(data, msg))
 
-	conn, err := net.DialUDP("udp", nil, listenAddr)
-	require.NoError(t, err)
-	defer func() { _ = conn.Close() }()
-
-	_, err = conn.Write(data)
-	require.NoError(t, err)
-
-	// Wait for the receive loop to process it
-	time.Sleep(100 * time.Millisecond)
-
-	key := fmt.Sprintf("%016x", uint64(0xaabbccdd))
-	count := ac.Get(key)
-	assert.Equal(t, int64(5), count)
+	counters := msg.GetCounters()
+	require.NotNil(t, counters, "message must contain CounterBatch")
+	assert.Equal(t, uint64(12345), counters.SenderId)
+	require.Len(t, counters.Entries, 1)
+	assert.Equal(t, uint64(0xaabbccdd), counters.Entries[0].EntityHash)
+	assert.Equal(t, uint64(5), counters.Entries[0].Hits)
 }
 
 func TestFlusher_BatchSizeLimit(t *testing.T) {
 	ac := testAccountingCache(t)
 	defer ac.Close()
 
-	cfg := testFlusherConfig(t, ac, 0)
+	sender := newMockSender()
+	cfg := testFlusherConfig(t, ac, sender)
 	cfg.MaxBatchSize = 3
 	f := NewFlusher(cfg)
 	require.NoError(t, f.Start())
@@ -137,18 +156,18 @@ func TestFlusher_BatchSizeLimit(t *testing.T) {
 
 	// After auto-flush, the buffer for 127.0.0.1 should be cleared
 	assert.Equal(t, int64(0), f.PendingCount())
+	assert.Equal(t, 1, sender.totalSent(), "auto-flush should have sent one batch")
 }
 
 func TestFlusher_StartStop(t *testing.T) {
 	ac := testAccountingCache(t)
 	defer ac.Close()
 
-	cfg := testFlusherConfig(t, ac, 0)
+	cfg := testFlusherConfig(t, ac, newMockSender())
 	f := NewFlusher(cfg)
 
 	err := f.Start()
 	require.NoError(t, err)
-	assert.NotNil(t, f.ListenerAddr())
 
 	f.Stop()
 	// Should not panic or deadlock
@@ -178,4 +197,19 @@ func TestFlusher_ProtobufRoundTrip(t *testing.T) {
 	assert.Equal(t, original.Entries[0].Hits, decoded.Entries[0].Hits)
 	assert.Equal(t, original.Entries[1].EntityHash, decoded.Entries[1].EntityHash)
 	assert.Equal(t, original.Entries[1].Hits, decoded.Entries[1].Hits)
+}
+
+func TestFlusher_NilSender(t *testing.T) {
+	ac := testAccountingCache(t)
+	defer ac.Close()
+
+	cfg := testFlusherConfig(t, ac, nil)
+	f := NewFlusher(cfg)
+	require.NoError(t, f.Start())
+	defer f.Stop()
+
+	// Enqueue and flush with nil sender should not panic
+	f.Enqueue("127.0.0.1", 0xdeadbeef, 1)
+	f.flush()
+	assert.Equal(t, int64(0), f.PendingCount())
 }

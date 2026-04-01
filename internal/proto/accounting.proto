@@ -12,3 +12,23 @@ message CounterBatch {
   uint64 timestamp = 2;
   repeated CounterEntry entries = 3;
 }
+
+message BlockEvent {
+  string key = 1;
+  int64 ttl_nanos = 2;
+  string entity_ip = 3;
+  string entity_path = 4;
+  map<string, string> entity_hdrs = 5;
+}
+
+message UnblockEvent {
+  string key = 1;
+}
+
+message DrlMessage {
+  oneof content {
+    CounterBatch counters = 1;
+    BlockEvent block = 2;
+    UnblockEvent unblock = 3;
+  }
+}
