@@ -133,6 +133,224 @@ func (x *CounterBatch) GetEntries() []*CounterEntry {
 	return nil
 }
 
+type BlockEvent struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Key           string                 `protobuf:"bytes,1,opt,name=key,proto3" json:"key,omitempty"`
+	TtlNanos      int64                  `protobuf:"varint,2,opt,name=ttl_nanos,json=ttlNanos,proto3" json:"ttl_nanos,omitempty"`
+	EntityIp      string                 `protobuf:"bytes,3,opt,name=entity_ip,json=entityIp,proto3" json:"entity_ip,omitempty"`
+	EntityPath    string                 `protobuf:"bytes,4,opt,name=entity_path,json=entityPath,proto3" json:"entity_path,omitempty"`
+	EntityHdrs    map[string]string      `protobuf:"bytes,5,rep,name=entity_hdrs,json=entityHdrs,proto3" json:"entity_hdrs,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"bytes,2,opt,name=value"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *BlockEvent) Reset() {
+	*x = BlockEvent{}
+	mi := &file_internal_proto_accounting_proto_msgTypes[2]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *BlockEvent) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*BlockEvent) ProtoMessage() {}
+
+func (x *BlockEvent) ProtoReflect() protoreflect.Message {
+	mi := &file_internal_proto_accounting_proto_msgTypes[2]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use BlockEvent.ProtoReflect.Descriptor instead.
+func (*BlockEvent) Descriptor() ([]byte, []int) {
+	return file_internal_proto_accounting_proto_rawDescGZIP(), []int{2}
+}
+
+func (x *BlockEvent) GetKey() string {
+	if x != nil {
+		return x.Key
+	}
+	return ""
+}
+
+func (x *BlockEvent) GetTtlNanos() int64 {
+	if x != nil {
+		return x.TtlNanos
+	}
+	return 0
+}
+
+func (x *BlockEvent) GetEntityIp() string {
+	if x != nil {
+		return x.EntityIp
+	}
+	return ""
+}
+
+func (x *BlockEvent) GetEntityPath() string {
+	if x != nil {
+		return x.EntityPath
+	}
+	return ""
+}
+
+func (x *BlockEvent) GetEntityHdrs() map[string]string {
+	if x != nil {
+		return x.EntityHdrs
+	}
+	return nil
+}
+
+type UnblockEvent struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Key           string                 `protobuf:"bytes,1,opt,name=key,proto3" json:"key,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *UnblockEvent) Reset() {
+	*x = UnblockEvent{}
+	mi := &file_internal_proto_accounting_proto_msgTypes[3]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *UnblockEvent) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*UnblockEvent) ProtoMessage() {}
+
+func (x *UnblockEvent) ProtoReflect() protoreflect.Message {
+	mi := &file_internal_proto_accounting_proto_msgTypes[3]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use UnblockEvent.ProtoReflect.Descriptor instead.
+func (*UnblockEvent) Descriptor() ([]byte, []int) {
+	return file_internal_proto_accounting_proto_rawDescGZIP(), []int{3}
+}
+
+func (x *UnblockEvent) GetKey() string {
+	if x != nil {
+		return x.Key
+	}
+	return ""
+}
+
+type DrlMessage struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// Types that are valid to be assigned to Content:
+	//
+	//	*DrlMessage_Counters
+	//	*DrlMessage_Block
+	//	*DrlMessage_Unblock
+	Content       isDrlMessage_Content `protobuf_oneof:"content"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *DrlMessage) Reset() {
+	*x = DrlMessage{}
+	mi := &file_internal_proto_accounting_proto_msgTypes[4]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *DrlMessage) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*DrlMessage) ProtoMessage() {}
+
+func (x *DrlMessage) ProtoReflect() protoreflect.Message {
+	mi := &file_internal_proto_accounting_proto_msgTypes[4]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use DrlMessage.ProtoReflect.Descriptor instead.
+func (*DrlMessage) Descriptor() ([]byte, []int) {
+	return file_internal_proto_accounting_proto_rawDescGZIP(), []int{4}
+}
+
+func (x *DrlMessage) GetContent() isDrlMessage_Content {
+	if x != nil {
+		return x.Content
+	}
+	return nil
+}
+
+func (x *DrlMessage) GetCounters() *CounterBatch {
+	if x != nil {
+		if x, ok := x.Content.(*DrlMessage_Counters); ok {
+			return x.Counters
+		}
+	}
+	return nil
+}
+
+func (x *DrlMessage) GetBlock() *BlockEvent {
+	if x != nil {
+		if x, ok := x.Content.(*DrlMessage_Block); ok {
+			return x.Block
+		}
+	}
+	return nil
+}
+
+func (x *DrlMessage) GetUnblock() *UnblockEvent {
+	if x != nil {
+		if x, ok := x.Content.(*DrlMessage_Unblock); ok {
+			return x.Unblock
+		}
+	}
+	return nil
+}
+
+type isDrlMessage_Content interface {
+	isDrlMessage_Content()
+}
+
+type DrlMessage_Counters struct {
+	Counters *CounterBatch `protobuf:"bytes,1,opt,name=counters,proto3,oneof"`
+}
+
+type DrlMessage_Block struct {
+	Block *BlockEvent `protobuf:"bytes,2,opt,name=block,proto3,oneof"`
+}
+
+type DrlMessage_Unblock struct {
+	Unblock *UnblockEvent `protobuf:"bytes,3,opt,name=unblock,proto3,oneof"`
+}
+
+func (*DrlMessage_Counters) isDrlMessage_Content() {}
+
+func (*DrlMessage_Block) isDrlMessage_Content() {}
+
+func (*DrlMessage_Unblock) isDrlMessage_Content() {}
+
 var File_internal_proto_accounting_proto protoreflect.FileDescriptor
 
 const file_internal_proto_accounting_proto_rawDesc = "" +
@@ -145,7 +363,27 @@ const file_internal_proto_accounting_proto_rawDesc = "" +
 	"\fCounterBatch\x12\x1b\n" +
 	"\tsender_id\x18\x01 \x01(\x04R\bsenderId\x12\x1c\n" +
 	"\ttimestamp\x18\x02 \x01(\x04R\ttimestamp\x12.\n" +
-	"\aentries\x18\x03 \x03(\v2\x14.drl.v1.CounterEntryR\aentriesB'Z%github.com/gchiesa/drl/internal/protob\x06proto3"
+	"\aentries\x18\x03 \x03(\v2\x14.drl.v1.CounterEntryR\aentries\"\xfd\x01\n" +
+	"\n" +
+	"BlockEvent\x12\x10\n" +
+	"\x03key\x18\x01 \x01(\tR\x03key\x12\x1b\n" +
+	"\tttl_nanos\x18\x02 \x01(\x03R\bttlNanos\x12\x1b\n" +
+	"\tentity_ip\x18\x03 \x01(\tR\bentityIp\x12\x1f\n" +
+	"\ventity_path\x18\x04 \x01(\tR\n" +
+	"entityPath\x12C\n" +
+	"\ventity_hdrs\x18\x05 \x03(\v2\".drl.v1.BlockEvent.EntityHdrsEntryR\n" +
+	"entityHdrs\x1a=\n" +
+	"\x0fEntityHdrsEntry\x12\x10\n" +
+	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
+	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01\" \n" +
+	"\fUnblockEvent\x12\x10\n" +
+	"\x03key\x18\x01 \x01(\tR\x03key\"\xa9\x01\n" +
+	"\n" +
+	"DrlMessage\x122\n" +
+	"\bcounters\x18\x01 \x01(\v2\x14.drl.v1.CounterBatchH\x00R\bcounters\x12*\n" +
+	"\x05block\x18\x02 \x01(\v2\x12.drl.v1.BlockEventH\x00R\x05block\x120\n" +
+	"\aunblock\x18\x03 \x01(\v2\x14.drl.v1.UnblockEventH\x00R\aunblockB\t\n" +
+	"\acontentB'Z%github.com/gchiesa/drl/internal/protob\x06proto3"
 
 var (
 	file_internal_proto_accounting_proto_rawDescOnce sync.Once
@@ -159,18 +397,26 @@ func file_internal_proto_accounting_proto_rawDescGZIP() []byte {
 	return file_internal_proto_accounting_proto_rawDescData
 }
 
-var file_internal_proto_accounting_proto_msgTypes = make([]protoimpl.MessageInfo, 2)
+var file_internal_proto_accounting_proto_msgTypes = make([]protoimpl.MessageInfo, 6)
 var file_internal_proto_accounting_proto_goTypes = []any{
 	(*CounterEntry)(nil), // 0: drl.v1.CounterEntry
 	(*CounterBatch)(nil), // 1: drl.v1.CounterBatch
+	(*BlockEvent)(nil),   // 2: drl.v1.BlockEvent
+	(*UnblockEvent)(nil), // 3: drl.v1.UnblockEvent
+	(*DrlMessage)(nil),   // 4: drl.v1.DrlMessage
+	nil,                  // 5: drl.v1.BlockEvent.EntityHdrsEntry
 }
 var file_internal_proto_accounting_proto_depIdxs = []int32{
 	0, // 0: drl.v1.CounterBatch.entries:type_name -> drl.v1.CounterEntry
-	1, // [1:1] is the sub-list for method output_type
-	1, // [1:1] is the sub-list for method input_type
-	1, // [1:1] is the sub-list for extension type_name
-	1, // [1:1] is the sub-list for extension extendee
-	0, // [0:1] is the sub-list for field type_name
+	5, // 1: drl.v1.BlockEvent.entity_hdrs:type_name -> drl.v1.BlockEvent.EntityHdrsEntry
+	1, // 2: drl.v1.DrlMessage.counters:type_name -> drl.v1.CounterBatch
+	2, // 3: drl.v1.DrlMessage.block:type_name -> drl.v1.BlockEvent
+	3, // 4: drl.v1.DrlMessage.unblock:type_name -> drl.v1.UnblockEvent
+	5, // [5:5] is the sub-list for method output_type
+	5, // [5:5] is the sub-list for method input_type
+	5, // [5:5] is the sub-list for extension type_name
+	5, // [5:5] is the sub-list for extension extendee
+	0, // [0:5] is the sub-list for field type_name
 }
 
 func init() { file_internal_proto_accounting_proto_init() }
@@ -178,13 +424,18 @@ func file_internal_proto_accounting_proto_init() {
 	if File_internal_proto_accounting_proto != nil {
 		return
 	}
+	file_internal_proto_accounting_proto_msgTypes[4].OneofWrappers = []any{
+		(*DrlMessage_Counters)(nil),
+		(*DrlMessage_Block)(nil),
+		(*DrlMessage_Unblock)(nil),
+	}
 	type x struct{}
 	out := protoimpl.TypeBuilder{
 		File: protoimpl.DescBuilder{
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_internal_proto_accounting_proto_rawDesc), len(file_internal_proto_accounting_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   2,
+			NumMessages:   6,
 			NumExtensions: 0,
 			NumServices:   0,
 		},

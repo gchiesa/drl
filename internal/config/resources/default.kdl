@@ -11,6 +11,8 @@ membership {
     port 7946
     bind-addr "0.0.0.0"
     startup-delay "3s"
+    gossip-interval "50ms"
+    gossip-nodes 5
 }
 
 logging {
@@ -34,5 +36,7 @@ accounting {
     settings {
         algorithm "sliding-window"
         retry-after-type "delay-seconds"
+        flush-interval "10s"
+        max-batch-size 1000
     }
 }

@@ -28,7 +28,11 @@ type Metrics struct {
 	AccountingLocalIncTotal  prometheus.Counter
 	AccountingRemoteIncTotal prometheus.Counter
 	AccountingFlushTotal     prometheus.Counter
-	AccountingUDPRecvTotal   prometheus.Counter
+	AccountingMsgRecvTotal   prometheus.Counter
+
+	// Membership messaging metrics
+	MembershipReliableMsgsTotal   prometheus.Counter
+	MembershipBestEffortMsgsTotal prometheus.Counter
 
 	// Rate limiting metrics
 	RateLimitBlocksTotal          *prometheus.CounterVec
@@ -96,9 +100,17 @@ func NewMetrics() *Metrics {
 			Name: "drl_accounting_flush_total",
 			Help: "Total number of UDP batch flushes sent",
 		}),
-		AccountingUDPRecvTotal: prometheus.NewCounter(prometheus.CounterOpts{
-			Name: "drl_accounting_udp_recv_total",
-			Help: "Total number of UDP batch messages received",
+		AccountingMsgRecvTotal: prometheus.NewCounter(prometheus.CounterOpts{
+			Name: "drl_accounting_msg_recv_total",
+			Help: "Total number of accounting batch messages received",
+		}),
+		MembershipReliableMsgsTotal: prometheus.NewCounter(prometheus.CounterOpts{
+			Name: "drl_membership_reliable_msgs_total",
+			Help: "Total number of reliable messages sent via memberlist",
+		}),
+		MembershipBestEffortMsgsTotal: prometheus.NewCounter(prometheus.CounterOpts{
+			Name: "drl_membership_best_effort_msgs_total",
+			Help: "Total number of best-effort messages sent via memberlist",
 		}),
 
 		// Rate limiting metrics
@@ -130,7 +142,9 @@ func NewMetrics() *Metrics {
 	registry.MustRegister(m.AccountingLocalIncTotal)
 	registry.MustRegister(m.AccountingRemoteIncTotal)
 	registry.MustRegister(m.AccountingFlushTotal)
-	registry.MustRegister(m.AccountingUDPRecvTotal)
+	registry.MustRegister(m.AccountingMsgRecvTotal)
+	registry.MustRegister(m.MembershipReliableMsgsTotal)
+	registry.MustRegister(m.MembershipBestEffortMsgsTotal)
 	registry.MustRegister(m.RateLimitBlocksTotal)
 	registry.MustRegister(m.RateLimitPropagationLatencyMs)
 	registry.MustRegister(m.GRPCResponseCodeTotal)
@@ -193,9 +207,19 @@ func (m *Metrics) IncAccountingFlush() {
 	m.AccountingFlushTotal.Inc()
 }
 
-// IncAccountingUDPRecv increments the UDP receive counter
-func (m *Metrics) IncAccountingUDPRecv() {
-	m.AccountingUDPRecvTotal.Inc()
+// IncAccountingMsgRecv increments the accounting message receive counter
+func (m *Metrics) IncAccountingMsgRecv() {
+	m.AccountingMsgRecvTotal.Inc()
+}
+
+// IncMembershipReliable increments the reliable message counter
+func (m *Metrics) IncMembershipReliable() {
+	m.MembershipReliableMsgsTotal.Inc()
+}
+
+// IncMembershipBestEffort increments the best-effort message counter
+func (m *Metrics) IncMembershipBestEffort() {
+	m.MembershipBestEffortMsgsTotal.Inc()
 }
 
 // IncRateLimitBlock increments the rate limit block counter for the given rule and reason

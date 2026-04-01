@@ -20,6 +20,7 @@ func newAccountingEngine(
 	metricsManager *metrics.Metrics,
 	blocklist accounting.BlocklistEnforcer,
 	broadcaster accounting.BlockBroadcaster,
+	sender accounting.NodeSender,
 	log *slog.Logger,
 ) *accounting.Engine {
 	var flusher *accounting.Flusher
@@ -29,18 +30,20 @@ func newAccountingEngine(
 		senderID := xxhash.Sum64String(localIP)
 
 		flusher = accounting.NewFlusher(accounting.FlusherConfig{
-			SenderID:   senderID,
-			Accounting: cacheManager.Accounting,
-			Logger:     log,
-			Metrics:    metricsManager,
-			SyncPort:   accounting.DefaultSyncPort,
+			SenderID:      senderID,
+			Accounting:    cacheManager.Accounting,
+			Logger:        log,
+			Metrics:       metricsManager,
+			Sender:        sender,
+			FlushInterval: cfg.Accounting.Settings.FlushInterval,
+			MaxBatchSize:  cfg.Accounting.Settings.MaxBatchSize,
 		})
 		if err := flusher.Start(); err != nil {
 			log.Error("failed to start accounting flusher", "error", err)
 			cacheManager.Close()
 			os.Exit(1)
 		}
-		log.Info("accounting flusher started", "sync_port", accounting.DefaultSyncPort)
+		log.Info("accounting flusher started")
 
 		engine = accounting.NewEngine(accounting.EngineConfig{
 			Rules:       cfg.Accounting.Rules,

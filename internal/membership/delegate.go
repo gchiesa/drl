@@ -2,25 +2,29 @@ package membership
 
 import (
 	"bytes"
+	"fmt"
 	"log/slog"
 	"sync"
 	"sync/atomic"
 	"time"
 
-	"github.com/hashicorp/memberlist"
+	"google.golang.org/protobuf/proto"
 
 	"github.com/gchiesa/drl/internal/cache"
 	"github.com/gchiesa/drl/internal/metrics"
 	"github.com/gchiesa/drl/internal/model"
+	drlproto "github.com/gchiesa/drl/internal/proto"
 )
 
-// StateDelegate implements memberlist.Delegate interface for state synchronization
-// It handles TCP Push/Pull state sync for the blocklist cache and user-level
-// broadcasts for manual block/unblock operations.
+// StateDelegate implements memberlist.Delegate interface for state synchronization.
+// It handles TCP Push/Pull state sync for the blocklist cache and processes
+// incoming DrlMessage envelopes (accounting batches, block/unblock events).
 type StateDelegate struct {
-	blocklist *cache.BlocklistCache
-	metrics   *metrics.Metrics
-	logger    *slog.Logger
+	blocklist  *cache.BlocklistCache
+	accounting *cache.AccountingCache
+	metrics    *metrics.Metrics
+	logger     *slog.Logger
+	cluster    *Cluster
 
 	// Readiness tracking
 	ready        atomic.Bool
@@ -31,8 +35,6 @@ type StateDelegate struct {
 	// Sync start time for metrics
 	syncStartTime time.Time
 
-	// Broadcast queue for user-level cluster events
-	broadcastQueue *memberlist.TransmitLimitedQueue
 	// bufPool reuses bytes.Buffer allocations for broadcast serialisation
 	bufPool sync.Pool
 }
@@ -40,13 +42,10 @@ type StateDelegate struct {
 // DelegateConfig holds configuration for the state delegate
 type DelegateConfig struct {
 	Blocklist   *cache.BlocklistCache
+	Accounting  *cache.AccountingCache
 	Metrics     *metrics.Metrics
 	Logger      *slog.Logger
 	SyncTimeout time.Duration
-	// NumNodesFunc returns the current number of live cluster nodes.
-	// Used by the TransmitLimitedQueue to calculate retransmit counts.
-	// Defaults to a function that returns 1 when not provided.
-	NumNodesFunc func() int
 }
 
 // NewStateDelegate creates a new state delegate
@@ -56,21 +55,13 @@ func NewStateDelegate(cfg DelegateConfig) *StateDelegate {
 		timeout = 120 * time.Second
 	}
 
-	numNodes := cfg.NumNodesFunc
-	if numNodes == nil {
-		numNodes = func() int { return 1 }
-	}
-
 	d := &StateDelegate{
 		blocklist:    cfg.Blocklist,
+		accounting:   cfg.Accounting,
 		metrics:      cfg.Metrics,
 		logger:       cfg.Logger,
 		syncComplete: make(chan struct{}),
 		syncTimeout:  timeout,
-		broadcastQueue: &memberlist.TransmitLimitedQueue{
-			NumNodes:       numNodes,
-			RetransmitMult: 3,
-		},
 	}
 
 	d.bufPool = sync.Pool{
@@ -80,66 +71,129 @@ func NewStateDelegate(cfg DelegateConfig) *StateDelegate {
 	return d
 }
 
+// SetCluster sets the cluster reference for SendReliable operations.
+// Must be called after the cluster is created but before any block events.
+func (d *StateDelegate) SetCluster(cluster *Cluster) {
+	d.cluster = cluster
+}
+
 // NodeMeta returns metadata to be sent to other nodes.
 // This is optional and we don't use it currently.
 func (d *StateDelegate) NodeMeta(limit int) []byte {
 	return nil
 }
 
-// NotifyMsg is called when a user-level broadcast is received from a peer.
-// It decodes the BroadcastEvent and applies the block or unblock operation
-// to the local Ristretto blocklist cache.
+// NotifyMsg is called when a user-level message is received from a peer
+// (via SendBestEffort or SendReliable). It unmarshals the DrlMessage
+// envelope and dispatches to the appropriate handler.
 func (d *StateDelegate) NotifyMsg(buf []byte) {
-	if len(buf) == 0 || d.blocklist == nil {
+	if len(buf) == 0 {
 		return
 	}
 
-	event, err := decodeBroadcastEvent(buf)
-	if err != nil {
+	msg := &drlproto.DrlMessage{}
+	if err := proto.Unmarshal(buf, msg); err != nil {
 		if d.logger != nil {
-			d.logger.Warn("failed to decode broadcast event", "error", err)
+			d.logger.Warn("failed to unmarshal DrlMessage", "error", err)
 		}
 		return
 	}
 
-	switch event.Type {
-	case BroadcastEventBlock:
-		var entity *model.Entity
-		if event.EntityIP != "" || event.EntityPath != "" {
-			entity = &model.Entity{
-				IP:      event.EntityIP,
-				Path:    event.EntityPath,
-				Headers: event.EntityHdrs,
-			}
-		}
-		if entity != nil {
-			d.blocklist.BlockWithMeta(event.Key, event.TTL, entity)
-		} else {
-			d.blocklist.Block(event.Key, nil, event.TTL)
-		}
-		if d.logger != nil {
-			d.logger.Debug("applied remote block event",
-				"key", event.Key,
-				"ttl", event.TTL,
-				"has_entity", entity != nil,
-			)
-		}
-	case BroadcastEventUnblock:
-		d.blocklist.Unblock(event.Key)
-		if d.logger != nil {
-			d.logger.Debug("applied remote unblock event", "key", event.Key)
-		}
+	switch content := msg.Content.(type) {
+	case *drlproto.DrlMessage_Counters:
+		d.handleAccountingMsg(content.Counters)
+	case *drlproto.DrlMessage_Block:
+		d.handleBlockEvent(content.Block)
+	case *drlproto.DrlMessage_Unblock:
+		d.handleUnblockEvent(content.Unblock)
 	default:
 		if d.logger != nil {
-			d.logger.Warn("unknown broadcast event type", "type", event.Type)
+			d.logger.Warn("received DrlMessage with unknown content type")
 		}
 	}
 }
 
+// handleAccountingMsg processes an incoming CounterBatch from a peer,
+// applying increments to the local accounting cache.
+func (d *StateDelegate) handleAccountingMsg(batch *drlproto.CounterBatch) {
+	if d.accounting == nil || batch == nil {
+		return
+	}
+
+	if d.metrics != nil {
+		d.metrics.IncAccountingMsgRecv()
+		d.metrics.IncMembershipBestEffort()
+	}
+
+	for _, entry := range batch.Entries {
+		key := fmt.Sprintf("%016x", entry.EntityHash)
+		d.accounting.Increment(key, int64(entry.Hits))
+	}
+
+	if d.logger != nil {
+		d.logger.Debug("received counter batch",
+			"sender_id", batch.SenderId,
+			"entries", len(batch.Entries),
+		)
+	}
+}
+
+// handleBlockEvent processes an incoming block event from a peer.
+func (d *StateDelegate) handleBlockEvent(evt *drlproto.BlockEvent) {
+	if d.blocklist == nil || evt == nil {
+		return
+	}
+
+	if d.metrics != nil {
+		d.metrics.IncMembershipReliable()
+	}
+
+	ttl := time.Duration(evt.TtlNanos)
+	var entity *model.Entity
+	if evt.EntityIp != "" || evt.EntityPath != "" {
+		entity = &model.Entity{
+			IP:      evt.EntityIp,
+			Path:    evt.EntityPath,
+			Headers: evt.EntityHdrs,
+		}
+	}
+
+	if entity != nil {
+		d.blocklist.BlockWithMeta(evt.Key, ttl, entity)
+	} else {
+		d.blocklist.Block(evt.Key, nil, ttl)
+	}
+
+	if d.logger != nil {
+		d.logger.Debug("applied remote block event",
+			"key", evt.Key,
+			"ttl", ttl,
+			"has_entity", entity != nil,
+		)
+	}
+}
+
+// handleUnblockEvent processes an incoming unblock event from a peer.
+func (d *StateDelegate) handleUnblockEvent(evt *drlproto.UnblockEvent) {
+	if d.blocklist == nil || evt == nil {
+		return
+	}
+
+	if d.metrics != nil {
+		d.metrics.IncMembershipReliable()
+	}
+
+	d.blocklist.Unblock(evt.Key)
+	if d.logger != nil {
+		d.logger.Debug("applied remote unblock event", "key", evt.Key)
+	}
+}
+
 // GetBroadcasts is called by memberlist when it wants messages to broadcast.
-// Returns pending block/unblock events from the transmit queue.
+// We no longer use the gossip broadcast queue; all messaging is via
+// SendBestEffort / SendReliable.
 func (d *StateDelegate) GetBroadcasts(overhead, limit int) [][]byte {
-	return d.broadcastQueue.GetBroadcasts(overhead, limit)
+	return nil
 }
 
 // LocalState returns the local state to be sent to peers during Push/Pull sync.
@@ -214,53 +268,68 @@ func (d *StateDelegate) MergeRemoteState(buf []byte, join bool) {
 	}
 }
 
-// QueueBlockEvent encodes a BroadcastEventBlock and pushes it onto the
-// transmit queue so memberlist will gossip it to all cluster peers.
-// When entity is non-nil, its metadata is included in the broadcast so
-// that receiving nodes can store it alongside the block entry.
+// QueueBlockEvent builds a DrlMessage with a BlockEvent and sends it
+// reliably to all cluster peers via memberlist.SendReliable.
 func (d *StateDelegate) QueueBlockEvent(key string, ttl time.Duration, entity *model.Entity) error {
-	event := BroadcastEvent{Type: BroadcastEventBlock, Key: key, TTL: ttl}
+	evt := &drlproto.BlockEvent{
+		Key:      key,
+		TtlNanos: int64(ttl),
+	}
 	if entity != nil {
-		event.EntityIP = entity.IP
-		event.EntityPath = entity.Path
-		event.EntityHdrs = entity.Headers
+		evt.EntityIp = entity.IP
+		evt.EntityPath = entity.Path
+		evt.EntityHdrs = entity.Headers
 	}
 
-	buf := d.bufPool.Get().(*bytes.Buffer)
-	buf.Reset()
-
-	if err := encodeBroadcastEventInto(event, buf); err != nil {
-		d.bufPool.Put(buf)
-		return err
+	msg := &drlproto.DrlMessage{
+		Content: &drlproto.DrlMessage_Block{Block: evt},
 	}
 
-	data := make([]byte, buf.Len())
-	copy(data, buf.Bytes())
-	d.bufPool.Put(buf)
+	data, err := proto.Marshal(msg)
+	if err != nil {
+		return fmt.Errorf("failed to marshal block DrlMessage: %w", err)
+	}
 
-	d.broadcastQueue.QueueBroadcast(&blocklistBroadcast{data: data})
-	return nil
+	return d.sendToAllPeers(data)
 }
 
-// QueueUnblockEvent encodes a BroadcastEventUnblock and pushes it onto the
-// transmit queue so memberlist will gossip it to all cluster peers.
+// QueueUnblockEvent builds a DrlMessage with an UnblockEvent and sends it
+// reliably to all cluster peers via memberlist.SendReliable.
 func (d *StateDelegate) QueueUnblockEvent(key string) error {
-	event := BroadcastEvent{Type: BroadcastEventUnblock, Key: key}
-
-	buf := d.bufPool.Get().(*bytes.Buffer)
-	buf.Reset()
-
-	if err := encodeBroadcastEventInto(event, buf); err != nil {
-		d.bufPool.Put(buf)
-		return err
+	msg := &drlproto.DrlMessage{
+		Content: &drlproto.DrlMessage_Unblock{Unblock: &drlproto.UnblockEvent{Key: key}},
 	}
 
-	data := make([]byte, buf.Len())
-	copy(data, buf.Bytes())
-	d.bufPool.Put(buf)
+	data, err := proto.Marshal(msg)
+	if err != nil {
+		return fmt.Errorf("failed to marshal unblock DrlMessage: %w", err)
+	}
 
-	d.broadcastQueue.QueueBroadcast(&blocklistBroadcast{data: data})
-	return nil
+	return d.sendToAllPeers(data)
+}
+
+// sendToAllPeers sends data to all cluster peers via SendReliable, skipping self.
+func (d *StateDelegate) sendToAllPeers(data []byte) error {
+	if d.cluster == nil {
+		return fmt.Errorf("cluster not set on delegate")
+	}
+	var lastErr error
+	localAddr := d.cluster.LocalAddr()
+	for _, addr := range d.cluster.MemberAddrs() {
+		if addr == localAddr {
+			continue
+		}
+		if err := d.cluster.SendReliableMsg(addr, data); err != nil {
+			if d.logger != nil {
+				d.logger.Warn("failed to send reliable msg to peer",
+					"addr", addr,
+					"error", err,
+				)
+			}
+			lastErr = err
+		}
+	}
+	return lastErr
 }
 
 // markSyncComplete marks the state sync as complete and signals readiness
@@ -320,15 +389,4 @@ func (d *StateDelegate) SetBlocklist(blocklist *cache.BlocklistCache) {
 // GetBlocklist returns the blocklist cache reference
 func (d *StateDelegate) GetBlocklist() *cache.BlocklistCache {
 	return d.blocklist
-}
-
-// encodeBroadcastEventInto encodes event into buf using msgpack.
-// Reuses the pool-allocated buffer to avoid allocations on the hot path.
-func encodeBroadcastEventInto(event BroadcastEvent, buf *bytes.Buffer) error {
-	data, err := encodeBroadcastEvent(event)
-	if err != nil {
-		return err
-	}
-	buf.Write(data)
-	return nil
 }

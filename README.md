@@ -58,6 +58,8 @@ membership {
     port 7946
     bind-addr "0.0.0.0"
     startup-delay "3s"
+    gossip-interval "50ms"
+    gossip-nodes 5
 }
 
 logging {
@@ -246,10 +248,17 @@ DRL exposes Prometheus metrics on the configured metrics port (default: 9091).
 
 ### Available Metrics
 
-| Metric                        | Type    | Description                                   |
-|-------------------------------|---------|-----------------------------------------------|
-| `drl_membership_cluster_size` | Gauge   | Number of active cluster members              |
-| `drl_membership_events_total` | Counter | Membership events by type (join, leave, fail) |
+| Metric                                  | Type    | Description                                       |
+|-----------------------------------------|---------|---------------------------------------------------|
+| `drl_membership_cluster_size`           | Gauge   | Number of active cluster members                  |
+| `drl_membership_events_total`           | Counter | Membership events by type (join, leave, fail)     |
+| `drl_membership_reliable_msgs_total`    | Counter | Reliable messages sent via memberlist              |
+| `drl_membership_best_effort_msgs_total` | Counter | Best-effort messages sent via memberlist            |
+| `drl_accounting_msg_recv_total`         | Counter | Accounting batch messages received                 |
+| `drl_accounting_flush_total`            | Counter | Accounting batch flushes sent                      |
+| `drl_accounting_local_increments_total` | Counter | Local accounting increments (this node is owner)   |
+| `drl_accounting_remote_increments_total`| Counter | Remote accounting increments (forwarded to owner)  |
+| `drl_ratelimit_blocks_total`            | Counter | Entities blocked by the rate limiter               |
 
 ### Endpoints
 
@@ -275,6 +284,74 @@ mise run lint
 ```bash
 mise run build
 ```
+
+## Internal Accounting
+
+DRL uses a **shadow accounting** model: incoming requests are counted asynchronously in the background without
+adding latency to the Envoy request path.
+
+### Entity Hashing & Ownership
+
+Each rate-limiting entity (IP + path + configured headers) is hashed with xxHash64 to produce a deterministic key.
+A consistent hash ring distributes key ownership across cluster nodes. The **owner node** is the single authority
+for that entity's counter.
+
+### Batched Accounting via Memberlist
+
+When a non-owner node sees a request, it **enqueues** the increment into a per-owner buffer. A background goroutine
+periodically flushes these buffers:
+
+- **Flush Interval** (default `10s`): How often batches are sent.
+- **Max Batch Size** (default `1000`): Triggers an immediate flush when the buffer grows past this threshold.
+
+Both values are configurable via KDL (`accounting.settings.flush-interval`, `accounting.settings.max-batch-size`).
+
+Batches are serialized as **Protobuf** `DrlMessage` envelopes (containing a `CounterBatch`) and sent using
+`memberlist.SendBestEffort` — a UDP-based, fire-and-forget delivery that fits DRL's "Availability > Consistency"
+philosophy. Packet loss is tolerable for shadow accounting.
+
+### Zero-Copy Optimisation
+
+`sync.Pool` is used to reuse `CounterBatch` protobuf objects, avoiding GC pressure on the hot path.
+
+## Internal Membership
+
+DRL uses [Hashicorp Memberlist](https://github.com/hashicorp/memberlist) for cluster formation, failure detection,
+and inter-node messaging.
+
+### P2P Discovery
+
+Nodes discover peers via **DNS resolution** of a configurable service name (e.g. `drl`). On startup, each node
+resolves the name, filters its own IP, and joins the cluster.
+
+### State Sync (Warm Bootstrap)
+
+When a new node joins, memberlist's **TCP Push/Pull** protocol transfers the full blocklist from an existing peer.
+This prevents a "vulnerability window" where a freshly-started node would allow traffic that should be blocked.
+The node reports **Ready** only after the initial sync completes (or a configurable timeout expires).
+
+### Gossip Tuning
+
+For low-latency convergence the gossip protocol is tuned with:
+
+- **GossipInterval** (default `50ms`): Time between gossip rounds.
+- **GossipNodes** (default `5`): Number of peers contacted per round.
+
+Both are configurable via KDL (`membership.gossip-interval`, `membership.gossip-nodes`).
+
+### Reliable Blocklist Propagation
+
+When an entity exceeds its rate limit, the owner node blocks it locally and broadcasts a `BlockEvent` to every
+peer using `memberlist.SendReliable` (TCP, guaranteed delivery). This ensures all nodes update their replicated
+blocklist immediately, so the next request from any Envoy is rejected at the local blocklist check (O(1)).
+
+All inter-node messages use a unified **Protobuf `DrlMessage` envelope** with a `oneof` discriminator:
+
+| Message Type   | Delivery         | Use Case                  |
+|---------------|------------------|---------------------------|
+| `CounterBatch` | `SendBestEffort` | Shadow accounting batches |
+| `BlockEvent`   | `SendReliable`   | Blocklist propagation     |
+| `UnblockEvent` | `SendReliable`   | Blocklist removal         |
 
 ## Architecture
 

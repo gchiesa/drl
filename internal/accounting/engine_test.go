@@ -92,7 +92,7 @@ func TestEngine_Process_RemoteOwner(t *testing.T) {
 	m := metrics.NewMetrics()
 
 	// Create a flusher for enqueuing
-	fCfg := testFlusherConfig(t, ac, 0)
+	fCfg := testFlusherConfig(t, ac, nil)
 	f := NewFlusher(fCfg)
 
 	// Add a remote node so that some keys are not local
@@ -184,7 +184,7 @@ func TestEngine_PendingUpdates(t *testing.T) {
 	assert.Equal(t, int64(0), e.PendingUpdates())
 
 	// Engine with flusher
-	f := NewFlusher(testFlusherConfig(t, ac, 0))
+	f := NewFlusher(testFlusherConfig(t, ac, nil))
 	f.Enqueue("10.0.0.1", 0xdead, 1)
 
 	e2 := NewEngine(EngineConfig{

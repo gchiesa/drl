@@ -1,9 +1,7 @@
 package accounting
 
 import (
-	"fmt"
 	"log/slog"
-	"net"
 	"sync"
 	"time"
 
@@ -17,21 +15,24 @@ import (
 const (
 	DefaultFlushInterval = 10 * time.Second
 	DefaultMaxBatchSize  = 1000
-	MaxUDPPacketSize     = 1400
-	DefaultSyncPort      = 7947
 )
+
+// NodeSender sends accounting messages to peer nodes via memberlist.
+type NodeSender interface {
+	SendAccountingMsg(addr string, data []byte) error
+}
 
 // nodeBuffer accumulates counter increments destined for a single owner node.
 type nodeBuffer struct {
 	entries map[uint64]uint64 // entityHash -> accumulated hits
 }
 
-// Flusher batches accounting increments and sends them to owner nodes via UDP.
-// It also listens for incoming batches from other nodes.
+// Flusher batches accounting increments and sends them to owner nodes via
+// memberlist's SendBestEffort. It relies on the membership delegate's
+// NotifyMsg to handle incoming batches from other nodes.
 type Flusher struct {
 	buffers    map[string]*nodeBuffer // ownerAddr -> buffer
-	conn       net.PacketConn         // UDP socket for sending
-	listener   net.PacketConn         // UDP listener for receiving
+	sender     NodeSender
 	senderID   uint64
 	accounting *cache.AccountingCache
 	logger     *slog.Logger
@@ -42,7 +43,6 @@ type Flusher struct {
 	mu            sync.Mutex
 	flushInterval time.Duration
 	maxBatchSize  int
-	syncPort      int
 	batchPool     sync.Pool
 }
 
@@ -54,7 +54,7 @@ type FlusherConfig struct {
 	Metrics       *metrics.Metrics
 	FlushInterval time.Duration
 	MaxBatchSize  int
-	SyncPort      int
+	Sender        NodeSender
 }
 
 // NewFlusher creates a new Flusher. Call Start() to begin background operations.
@@ -67,10 +67,6 @@ func NewFlusher(cfg FlusherConfig) *Flusher {
 	if maxBatchSize == 0 {
 		maxBatchSize = DefaultMaxBatchSize
 	}
-	syncPort := cfg.SyncPort
-	if syncPort == 0 {
-		syncPort = DefaultSyncPort
-	}
 
 	return &Flusher{
 		buffers:       make(map[string]*nodeBuffer),
@@ -78,10 +74,10 @@ func NewFlusher(cfg FlusherConfig) *Flusher {
 		accounting:    cfg.Accounting,
 		logger:        cfg.Logger,
 		metrics:       cfg.Metrics,
+		sender:        cfg.Sender,
 		stopCh:        make(chan struct{}),
 		flushInterval: flushInterval,
 		maxBatchSize:  maxBatchSize,
-		syncPort:      syncPort,
 		batchPool: sync.Pool{
 			New: func() any {
 				return &drlproto.CounterBatch{}
@@ -90,26 +86,9 @@ func NewFlusher(cfg FlusherConfig) *Flusher {
 	}
 }
 
-// Start opens the UDP listener and launches background goroutines for
-// periodic flushing and receiving.
+// Start launches the background flush goroutine.
 func (f *Flusher) Start() error {
-	var err error
-
-	// Open UDP listener
-	f.listener, err = net.ListenPacket("udp", fmt.Sprintf(":%d", f.syncPort))
-	if err != nil {
-		return fmt.Errorf("failed to listen on UDP port %d: %w", f.syncPort, err)
-	}
-
-	// Open UDP send socket
-	f.conn, err = net.ListenPacket("udp", ":0")
-	if err != nil {
-		_ = f.listener.Close()
-		return fmt.Errorf("failed to open UDP send socket: %w", err)
-	}
-
 	f.logger.Info("accounting flusher started",
-		"sync_port", f.syncPort,
 		"flush_interval", f.flushInterval,
 		"max_batch_size", f.maxBatchSize,
 	)
@@ -118,24 +97,12 @@ func (f *Flusher) Start() error {
 	f.wg.Add(1)
 	go f.flushLoop()
 
-	// Launch receiver
-	f.wg.Add(1)
-	go f.receiveLoop()
-
 	return nil
 }
 
-// Stop signals background goroutines to stop, closes sockets, and waits.
+// Stop signals the background goroutine to stop and waits for completion.
 func (f *Flusher) Stop() {
 	close(f.stopCh)
-
-	if f.listener != nil {
-		_ = f.listener.Close()
-	}
-	if f.conn != nil {
-		_ = f.conn.Close()
-	}
-
 	f.wg.Wait()
 	f.logger.Info("accounting flusher stopped")
 }
@@ -195,14 +162,6 @@ func (f *Flusher) PendingCount() int64 {
 	return count
 }
 
-// ListenerAddr returns the address of the UDP listener, useful in tests.
-func (f *Flusher) ListenerAddr() net.Addr {
-	if f.listener != nil {
-		return f.listener.LocalAddr()
-	}
-	return nil
-}
-
 func (f *Flusher) flushLoop() {
 	defer f.wg.Done()
 
@@ -233,7 +192,8 @@ func (f *Flusher) flush() {
 	}
 }
 
-// flushNode serializes and sends a CounterBatch to the given owner address.
+// flushNode serializes a CounterBatch inside a DrlMessage and sends it to the
+// given owner address via memberlist SendBestEffort.
 // Must be called with f.mu held.
 func (f *Flusher) flushNode(addr string, buf *nodeBuffer) {
 	batch := f.batchPool.Get().(*drlproto.CounterBatch)
@@ -248,91 +208,38 @@ func (f *Flusher) flushNode(addr string, buf *nodeBuffer) {
 		})
 	}
 
-	data, err := proto.Marshal(batch)
+	// Wrap in DrlMessage envelope
+	msg := &drlproto.DrlMessage{
+		Content: &drlproto.DrlMessage_Counters{Counters: batch},
+	}
+
+	data, err := proto.Marshal(msg)
 	if err != nil {
-		f.logger.Error("failed to marshal counter batch", "error", err, "addr", addr)
+		f.logger.Error("failed to marshal DrlMessage", "error", err, "addr", addr)
+		batch.Entries = batch.Entries[:0]
 		f.batchPool.Put(batch)
+		buf.entries = make(map[uint64]uint64)
 		return
 	}
 
-	// Reset and return to pool
+	// Reset and return batch to pool
 	batch.Entries = batch.Entries[:0]
 	f.batchPool.Put(batch)
 
-	if len(data) > MaxUDPPacketSize {
-		f.logger.Warn("counter batch exceeds max UDP packet size, dropping",
-			"size", len(data),
-			"max", MaxUDPPacketSize,
-			"addr", addr,
-		)
-		buf.entries = make(map[uint64]uint64)
-		return
-	}
-
-	target := fmt.Sprintf("%s:%d", addr, f.syncPort)
-	udpAddr, err := net.ResolveUDPAddr("udp", target)
-	if err != nil {
-		f.logger.Error("failed to resolve UDP address", "error", err, "target", target)
-		buf.entries = make(map[uint64]uint64)
-		return
-	}
-
-	if _, err := f.conn.WriteTo(data, udpAddr); err != nil {
-		f.logger.Error("failed to send counter batch", "error", err, "addr", addr)
-	} else {
-		if f.metrics != nil {
-			f.metrics.IncAccountingFlush()
+	if f.sender != nil {
+		if err := f.sender.SendAccountingMsg(addr, data); err != nil {
+			f.logger.Error("failed to send counter batch", "error", err, "addr", addr)
+		} else {
+			if f.metrics != nil {
+				f.metrics.IncAccountingFlush()
+				f.metrics.IncMembershipBestEffort()
+			}
+			f.logger.Debug("flushed counter batch",
+				"addr", addr,
+				"entries", len(buf.entries),
+			)
 		}
-		f.logger.Debug("flushed counter batch",
-			"addr", addr,
-			"entries", len(buf.entries),
-		)
 	}
 
 	buf.entries = make(map[uint64]uint64)
-}
-
-func (f *Flusher) receiveLoop() {
-	defer f.wg.Done()
-
-	readBuf := make([]byte, MaxUDPPacketSize)
-
-	for {
-		select {
-		case <-f.stopCh:
-			return
-		default:
-		}
-
-		n, _, err := f.listener.ReadFrom(readBuf)
-		if err != nil {
-			select {
-			case <-f.stopCh:
-				return
-			default:
-				f.logger.Debug("UDP read error", "error", err)
-				continue
-			}
-		}
-
-		batch := &drlproto.CounterBatch{}
-		if err := proto.Unmarshal(readBuf[:n], batch); err != nil {
-			f.logger.Warn("failed to unmarshal counter batch", "error", err)
-			continue
-		}
-
-		if f.metrics != nil {
-			f.metrics.IncAccountingUDPRecv()
-		}
-
-		for _, entry := range batch.Entries {
-			key := fmt.Sprintf("%016x", entry.EntityHash)
-			f.accounting.Increment(key, int64(entry.Hits))
-		}
-
-		f.logger.Debug("received counter batch",
-			"sender_id", batch.SenderId,
-			"entries", len(batch.Entries),
-		)
-	}
 }

@@ -7,9 +7,11 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"google.golang.org/protobuf/proto"
 
 	"github.com/gchiesa/drl/internal/cache"
 	"github.com/gchiesa/drl/internal/metrics"
+	drlproto "github.com/gchiesa/drl/internal/proto"
 )
 
 func TestNewStateDelegate(t *testing.T) {
@@ -36,13 +38,132 @@ func TestStateDelegate_NodeMeta(t *testing.T) {
 	assert.Nil(t, meta)
 }
 
-func TestStateDelegate_NotifyMsg(t *testing.T) {
+func TestStateDelegate_NotifyMsg_EmptyBuffer(t *testing.T) {
+	delegate := NewStateDelegate(DelegateConfig{SyncTimeout: 30 * time.Second})
+	// Must not panic even with a nil blocklist
+	assert.NotPanics(t, func() { delegate.NotifyMsg(nil) })
+	assert.NotPanics(t, func() { delegate.NotifyMsg([]byte{}) })
+}
+
+func TestStateDelegate_NotifyMsg_InvalidData(t *testing.T) {
+	bc, err := cache.NewBlocklistCache(cache.BlocklistConfig{MaxSizeMB: 1})
+	require.NoError(t, err)
+	defer bc.Close()
+
 	delegate := NewStateDelegate(DelegateConfig{
+		Blocklist:   bc,
 		SyncTimeout: 30 * time.Second,
 	})
 
-	// NotifyMsg should not panic
-	delegate.NotifyMsg([]byte("test"))
+	// Garbage data must not panic and must not alter the blocklist
+	assert.NotPanics(t, func() { delegate.NotifyMsg([]byte("not-protobuf-garbage")) })
+	assert.Equal(t, 0, bc.Count())
+}
+
+func TestStateDelegate_NotifyMsg_AccountingBatch(t *testing.T) {
+	ac, err := cache.NewAccountingCache(cache.AccountingConfig{
+		MaxSizeMB:  1,
+		LocalNode:  "test-node",
+		WindowSize: time.Minute,
+	})
+	require.NoError(t, err)
+	defer ac.Close()
+
+	m := metrics.NewMetrics()
+
+	delegate := NewStateDelegate(DelegateConfig{
+		Accounting:  ac,
+		Metrics:     m,
+		SyncTimeout: 30 * time.Second,
+	})
+
+	// Build a DrlMessage with CounterBatch
+	msg := &drlproto.DrlMessage{
+		Content: &drlproto.DrlMessage_Counters{
+			Counters: &drlproto.CounterBatch{
+				SenderId:  99999,
+				Timestamp: uint64(time.Now().UnixMilli()),
+				Entries: []*drlproto.CounterEntry{
+					{EntityHash: 0xaabbccdd, Hits: 5},
+					{EntityHash: 0x11223344, Hits: 3},
+				},
+			},
+		},
+	}
+	data, err := proto.Marshal(msg)
+	require.NoError(t, err)
+
+	delegate.NotifyMsg(data)
+
+	// Verify increments were applied
+	assert.Equal(t, int64(5), ac.Get("00000000aabbccdd"))
+	assert.Equal(t, int64(3), ac.Get("0000000011223344"))
+}
+
+func TestStateDelegate_NotifyMsg_BlockEvent(t *testing.T) {
+	bc, err := cache.NewBlocklistCache(cache.BlocklistConfig{MaxSizeMB: 1})
+	require.NoError(t, err)
+	defer bc.Close()
+
+	delegate := NewStateDelegate(DelegateConfig{
+		Blocklist:   bc,
+		SyncTimeout: 30 * time.Second,
+	})
+
+	// Build a DrlMessage with BlockEvent
+	msg := &drlproto.DrlMessage{
+		Content: &drlproto.DrlMessage_Block{
+			Block: &drlproto.BlockEvent{
+				Key:        "testkey001",
+				TtlNanos:   int64(10 * time.Minute),
+				EntityIp:   "10.0.0.1",
+				EntityPath: "/api/v1",
+				EntityHdrs: map[string]string{"X-Bot": "true"},
+			},
+		},
+	}
+	data, err := proto.Marshal(msg)
+	require.NoError(t, err)
+
+	delegate.NotifyMsg(data)
+
+	assert.True(t, bc.IsBlocked("testkey001"))
+
+	// Verify entity metadata
+	entries := bc.ListEntries()
+	require.Len(t, entries, 1)
+	require.NotNil(t, entries[0].Entity)
+	assert.Equal(t, "10.0.0.1", entries[0].Entity.IP)
+	assert.Equal(t, "/api/v1", entries[0].Entity.Path)
+	assert.Equal(t, map[string]string{"X-Bot": "true"}, entries[0].Entity.Headers)
+}
+
+func TestStateDelegate_NotifyMsg_UnblockEvent(t *testing.T) {
+	bc, err := cache.NewBlocklistCache(cache.BlocklistConfig{MaxSizeMB: 1})
+	require.NoError(t, err)
+	defer bc.Close()
+
+	const key = "testkey002"
+	bc.Block(key, nil, time.Hour)
+	require.True(t, bc.IsBlocked(key))
+
+	delegate := NewStateDelegate(DelegateConfig{
+		Blocklist:   bc,
+		SyncTimeout: 30 * time.Second,
+	})
+
+	// Build a DrlMessage with UnblockEvent
+	msg := &drlproto.DrlMessage{
+		Content: &drlproto.DrlMessage_Unblock{
+			Unblock: &drlproto.UnblockEvent{Key: key},
+		},
+	}
+	data, err := proto.Marshal(msg)
+	require.NoError(t, err)
+
+	delegate.NotifyMsg(data)
+
+	assert.False(t, bc.IsBlocked(key))
 }
 
 func TestStateDelegate_GetBroadcasts_EmptyQueue(t *testing.T) {
@@ -50,7 +171,7 @@ func TestStateDelegate_GetBroadcasts_EmptyQueue(t *testing.T) {
 		SyncTimeout: 30 * time.Second,
 	})
 
-	// An empty broadcast queue must return nil (no pending events)
+	// Broadcast queue is no longer used; should return nil
 	broadcasts := delegate.GetBroadcasts(10, 100)
 	assert.Nil(t, broadcasts)
 }
