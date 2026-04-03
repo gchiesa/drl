@@ -15,7 +15,7 @@ membership {
 }
 
 logging {
-    level "debug"
+    level "warn"
     format "json"
 }
 
