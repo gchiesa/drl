@@ -1,5 +1,6 @@
-// DRL - Distributed Rate Limiter Configuration
-// Docker deployment configuration
+// DRL - Performance Test Configuration
+// High limits to avoid triggering blocking during performance measurement.
+// Uses X-Forwarded-For header in entity key to simulate multiple consumers.
 
 listen {
     grpc ":8081"
@@ -14,7 +15,7 @@ membership {
 }
 
 logging {
-    level "debug"
+    level "warn"
     format "json"
 }
 
@@ -29,14 +30,10 @@ accounting {
         retry-after-type "delay-seconds"
     }
     rules {
-        "catch-all" {
-            path-prefix "/"
-            limit 100
-            per "minute"
-        }
-        "anything" {
+        "perf-test" {
             path-prefix "/anything"
-            limit 10
+            headers "X-Forwarded-For"
+            limit 10000
             per "minute"
         }
     }

@@ -1,0 +1,60 @@
+services:
+  echo-server:
+    image: mccutchen/go-httpbin:latest
+    deploy:
+      replicas: 3
+    networks:
+      - test-network
+
+  envoy:
+    image: envoyproxy/envoy:v1.30-latest
+    container_name: perf-envoy
+    volumes:
+      - ./envoy/envoy.yaml:/etc/envoy/envoy.yaml:ro
+    command: ["-c", "/etc/envoy/envoy.yaml", "--log-level", "warn"]
+    depends_on:
+      drl:
+        condition: service_healthy
+    networks:
+      - test-network
+
+  drl:
+    build:
+      context: ../../
+      dockerfile: Dockerfile
+    volumes:
+      - ./config/drl.kdl:/etc/drl/config.kdl:ro
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://localhost:9091/health"]
+      interval: 3s
+      timeout: 2s
+      retries: 10
+      start_period: 10s
+    deploy:
+      replicas: 3
+    environment:
+      DRL_CONFIG_PATH: /etc/drl/config.kdl
+      DRL_PRIVATE_API_KEY: "TestPerfKey!"
+      DRL_MEMBERSHIP_PRIMARY_KEY: "abcdef0123456789"
+      DRL_MEMBERSHIP_SECONDARY_KEYS: "0123456789012345"
+    networks:
+      - test-network
+
+  k6:
+    image: grafana/k6:latest
+    container_name: perf-k6
+    volumes:
+      - ./k6:/scripts:ro
+      - ./results:/results
+    environment:
+      TARGET_URL: http://envoy:10000
+      NUM_SIMULATED_IPS: "50"
+    command: ["run", "/scripts/performance-test.js"]
+    depends_on:
+      - envoy
+    networks:
+      - test-network
+
+networks:
+  test-network:
+    driver: bridge

@@ -58,10 +58,12 @@ services:
       retries: 3
       start_period: 10s
     deploy:
-      replicas: 1
+      replicas: 2
     environment:
       DRL_CONFIG_PATH: /etc/drl/config.kdl
       DRL_PRIVATE_API_KEY: "Test5ecretPrivateAPIKey!"
+      DRL_MEMBERSHIP_PRIMARY_KEY: "abcdef0123456789"
+      DRL_MEMBERSHIP_SECONDARY_KEYS: "0123456789012345"
     networks:
       - drl-network
 

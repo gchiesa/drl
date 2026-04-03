@@ -1,0 +1,97 @@
+version: 2.1
+
+executors:
+  docker-executor:
+    machine:
+      image: ubuntu-2404:current
+    resource_class: medium
+
+commands:
+  setup-mise:
+    description: "Install mise and project tools"
+    steps:
+      - run:
+          name: Install mise
+          command: |
+            curl https://mise.run | sh
+            echo 'eval "$(~/.local/bin/mise activate bash)"' >> "$BASH_ENV"
+      - run:
+          name: Install tools via mise
+          command: mise install
+
+jobs:
+  unit-tests:
+    executor: docker-executor
+    steps:
+      - checkout
+      - setup-mise
+      - run:
+          name: Run linter
+          command: mise run lint
+      - run:
+          name: Run unit tests
+          command: mise run test
+
+  functional-test:
+    executor: docker-executor
+    steps:
+      - checkout
+      - setup-mise
+      - run:
+          name: Run functional test suite
+          command: mise run test-functional
+          no_output_timeout: 3m
+      - run:
+          name: Collect logs on failure
+          when: on_fail
+          command: docker compose -f test-suite/functional/docker-compose.yaml logs drl envoy
+      - store_artifacts:
+          path: test-suite/functional/results
+          destination: functional-test-report
+
+  performance-test:
+    executor: docker-executor
+    resource_class: large
+    steps:
+      - checkout
+      - setup-mise
+      - run:
+          name: Run performance test suite
+          command: mise run test-performance
+          no_output_timeout: 10m
+      - run:
+          name: Collect logs on failure
+          when: on_fail
+          command: docker compose -f test-suite/performance/docker-compose.yaml logs drl envoy
+      - store_artifacts:
+          path: test-suite/performance/results
+          destination: performance-test-report
+
+workflows:
+  # Runs on every push / MR
+  merge-request:
+    jobs:
+      - unit-tests
+      - functional-test:
+          requires:
+            - unit-tests
+
+  # Runs only on main branch for performance baseline tracking
+  main-performance:
+    jobs:
+      - unit-tests:
+          filters:
+            branches:
+              only: main
+      - functional-test:
+          requires:
+            - unit-tests
+          filters:
+            branches:
+              only: main
+      - performance-test:
+          requires:
+            - functional-test
+          filters:
+            branches:
+              only: main

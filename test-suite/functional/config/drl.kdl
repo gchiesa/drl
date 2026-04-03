@@ -1,5 +1,5 @@
-// DRL - Distributed Rate Limiter Configuration
-// Docker deployment configuration
+// DRL - Functional Test Configuration
+// Low limits to validate rate limiting within a 1-minute test window
 
 listen {
     grpc ":8081"
@@ -14,7 +14,7 @@ membership {
 }
 
 logging {
-    level "debug"
+    level "info"
     format "json"
 }
 
@@ -29,14 +29,9 @@ accounting {
         retry-after-type "delay-seconds"
     }
     rules {
-        "catch-all" {
-            path-prefix "/"
-            limit 100
-            per "minute"
-        }
-        "anything" {
+        "test-endpoint" {
             path-prefix "/anything"
-            limit 10
+            limit 30
             per "minute"
         }
     }

@@ -18,3 +18,11 @@ run = "./ci/scripts/lint.sh"
 [tasks.proto-gen]
 description = "Generate Go code from protobuf definitions"
 run = "./ci/scripts/proto-gen.sh"
+
+[tasks.test-functional]
+description = "Run functional test suite (docker compose + k6)"
+run = "./ci/scripts/test-functional.sh"
+
+[tasks.test-performance]
+description = "Run performance test suite (docker compose + k6)"
+run = "./ci/scripts/test-performance.sh"
