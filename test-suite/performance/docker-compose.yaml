@@ -34,7 +34,7 @@ services:
       replicas: 3
     environment:
       DRL_CONFIG_PATH: /etc/drl/config.kdl
-      DRL_PRIVATE_API_KEY: "TestPerfKey!"
+      DRL_PRIVATE_API_KEY: "TestPerformanceKey!"
       DRL_MEMBERSHIP_PRIMARY_KEY: "abcdef0123456789"
       DRL_MEMBERSHIP_SECONDARY_KEYS: "0123456789012345"
     networks:
