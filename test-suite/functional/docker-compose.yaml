@@ -43,6 +43,7 @@ services:
   k6:
     image: grafana/k6:latest
     container_name: functional-k6
+    user: root
     volumes:
       - ./k6:/scripts:ro
       - ./results:/results
