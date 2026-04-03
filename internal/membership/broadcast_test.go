@@ -117,6 +117,32 @@ func TestStateDelegate_BlockEvent_AppliedViaNotifyMsg(t *testing.T) {
 	assert.True(t, bc.IsBlocked(key), "entity must appear in the blocklist after NotifyMsg")
 }
 
+func TestBlocklistBroadcast_MessageAndFinished(t *testing.T) {
+	data := []byte("payload")
+	b := &blocklistBroadcast{data: data}
+
+	assert.Equal(t, data, b.Message())
+	assert.False(t, b.Invalidates(&blocklistBroadcast{}))
+	assert.NotPanics(t, func() { b.Finished() })
+}
+
+func TestStateDelegate_QueueBlockEvent_NoCluster(t *testing.T) {
+	bc, err := cache.NewBlocklistCache(cache.BlocklistConfig{MaxSizeMB: 1})
+	require.NoError(t, err)
+	defer bc.Close()
+
+	// Delegate without a cluster — QueueBlockEvent should not panic
+	delegate := NewStateDelegate(DelegateConfig{
+		Blocklist:   bc,
+		SyncTimeout: 30 * time.Second,
+	})
+
+	// Should not panic even without cluster (sends are no-ops)
+	assert.NotPanics(t, func() {
+		_ = delegate.QueueBlockEvent("key1", time.Hour, nil)
+	})
+}
+
 func TestStateDelegate_UnblockEvent_AppliedViaNotifyMsg(t *testing.T) {
 	bc, err := cache.NewBlocklistCache(cache.BlocklistConfig{MaxSizeMB: 1})
 	require.NoError(t, err)

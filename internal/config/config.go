@@ -315,7 +315,7 @@ func (c *Config) Validate() error {
 		c.Accounting.Settings.RetryAfterType = "delay-seconds"
 	}
 	if c.Accounting.Settings.FlushInterval == 0 {
-		c.Accounting.Settings.FlushInterval = 10 * time.Second
+		c.Accounting.Settings.FlushInterval = 200 * time.Millisecond
 	}
 	if c.Accounting.Settings.MaxBatchSize == 0 {
 		c.Accounting.Settings.MaxBatchSize = 1000

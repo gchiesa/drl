@@ -8,6 +8,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/hashicorp/memberlist"
 	"google.golang.org/protobuf/proto"
 
 	"github.com/gchiesa/drl/internal/cache"
@@ -35,6 +36,9 @@ type StateDelegate struct {
 	// Sync start time for metrics
 	syncStartTime time.Time
 
+	// Broadcast queue for gossip-based block/unblock propagation
+	broadcastQueue *memberlist.TransmitLimitedQueue
+
 	// bufPool reuses bytes.Buffer allocations for broadcast serialisation
 	bufPool sync.Pool
 
@@ -49,6 +53,10 @@ type DelegateConfig struct {
 	Metrics     *metrics.Metrics
 	Logger      *slog.Logger
 	SyncTimeout time.Duration
+	// NumNodesFunc returns the current number of live cluster nodes.
+	// Used by the TransmitLimitedQueue to calculate retransmit counts.
+	// Defaults to a function that returns 1 when not provided.
+	NumNodesFunc func() int
 }
 
 // NewStateDelegate creates a new state delegate
@@ -58,6 +66,11 @@ func NewStateDelegate(cfg DelegateConfig) *StateDelegate {
 		timeout = 120 * time.Second
 	}
 
+	numNodes := cfg.NumNodesFunc
+	if numNodes == nil {
+		numNodes = func() int { return 1 }
+	}
+
 	d := &StateDelegate{
 		blocklist:    cfg.Blocklist,
 		accounting:   cfg.Accounting,
@@ -65,6 +78,10 @@ func NewStateDelegate(cfg DelegateConfig) *StateDelegate {
 		logger:       cfg.Logger,
 		syncComplete: make(chan struct{}),
 		syncTimeout:  timeout,
+		broadcastQueue: &memberlist.TransmitLimitedQueue{
+			NumNodes:       numNodes,
+			RetransmitMult: 3,
+		},
 	}
 
 	d.bufPool = sync.Pool{
@@ -195,10 +212,9 @@ func (d *StateDelegate) handleUnblockEvent(evt *drlproto.UnblockEvent) {
 }
 
 // GetBroadcasts is called by memberlist when it wants messages to broadcast.
-// We no longer use the gossip broadcast queue; all messaging is via
-// SendBestEffort / SendReliable.
+// Returns pending block/unblock events from the gossip transmit queue.
 func (d *StateDelegate) GetBroadcasts(overhead, limit int) [][]byte {
-	return nil
+	return d.broadcastQueue.GetBroadcasts(overhead, limit)
 }
 
 // LocalState returns the local state to be sent to peers during Push/Pull sync.
@@ -274,7 +290,8 @@ func (d *StateDelegate) MergeRemoteState(buf []byte, join bool) {
 }
 
 // QueueBlockEvent builds a DrlMessage with a BlockEvent and sends it
-// reliably to all cluster peers via memberlist.SendReliable.
+// immediately to all cluster peers via SendReliable (TCP) for lowest latency.
+// Sends are dispatched concurrently to avoid blocking the caller.
 func (d *StateDelegate) QueueBlockEvent(key string, ttl time.Duration, entity *model.Entity) error {
 	evt := &drlproto.BlockEvent{
 		Key:      key,
@@ -295,11 +312,12 @@ func (d *StateDelegate) QueueBlockEvent(key string, ttl time.Duration, entity *m
 		return fmt.Errorf("failed to marshal block DrlMessage: %w", err)
 	}
 
-	return d.sendToAllPeers(data)
+	d.sendToAllPeersAsync(data)
+	return nil
 }
 
 // QueueUnblockEvent builds a DrlMessage with an UnblockEvent and sends it
-// reliably to all cluster peers via memberlist.SendReliable.
+// immediately to all cluster peers via SendReliable (TCP).
 func (d *StateDelegate) QueueUnblockEvent(key string) error {
 	msg := &drlproto.DrlMessage{
 		Content: &drlproto.DrlMessage_Unblock{Unblock: &drlproto.UnblockEvent{Key: key}},
@@ -310,31 +328,32 @@ func (d *StateDelegate) QueueUnblockEvent(key string) error {
 		return fmt.Errorf("failed to marshal unblock DrlMessage: %w", err)
 	}
 
-	return d.sendToAllPeers(data)
+	d.sendToAllPeersAsync(data)
+	return nil
 }
 
-// sendToAllPeers sends data to all cluster peers via SendReliable, skipping self.
-func (d *StateDelegate) sendToAllPeers(data []byte) error {
+// sendToAllPeersAsync sends data to all cluster peers via SendReliable concurrently.
+// Each peer gets its own goroutine so the caller is not blocked.
+func (d *StateDelegate) sendToAllPeersAsync(data []byte) {
 	if d.cluster == nil {
-		return fmt.Errorf("cluster not set on delegate")
+		return
 	}
-	var lastErr error
 	localAddr := d.cluster.LocalAddr()
 	for _, addr := range d.cluster.MemberAddrs() {
 		if addr == localAddr {
 			continue
 		}
-		if err := d.cluster.SendReliableMsg(addr, data); err != nil {
-			if d.logger != nil {
-				d.logger.Warn("failed to send reliable msg to peer",
-					"addr", addr,
-					"error", err,
-				)
+		go func(target string) {
+			if err := d.cluster.SendReliableMsg(target, data); err != nil {
+				if d.logger != nil {
+					d.logger.Warn("failed to send reliable msg to peer",
+						"addr", target,
+						"error", err,
+					)
+				}
 			}
-			lastErr = err
-		}
+		}(addr)
 	}
-	return lastErr
 }
 
 // SetHandover sets the handover handler for graceful state evacuation.
