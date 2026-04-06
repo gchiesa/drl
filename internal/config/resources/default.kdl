@@ -36,7 +36,7 @@ accounting {
     settings {
         algorithm "sliding-window"
         retry-after-type "delay-seconds"
-        flush-interval "10s"
+        flush-interval "200ms"
         max-batch-size 1000
     }
 }

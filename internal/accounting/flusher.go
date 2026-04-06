@@ -13,7 +13,7 @@ import (
 )
 
 const (
-	DefaultFlushInterval = 10 * time.Second
+	DefaultFlushInterval = 200 * time.Millisecond
 	DefaultMaxBatchSize  = 1000
 )
 

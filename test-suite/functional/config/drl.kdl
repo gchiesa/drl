@@ -15,7 +15,7 @@ membership {
 
 logging {
     level "info"
-    format "json"
+    format "text"
 }
 
 internal-api {
@@ -27,6 +27,8 @@ accounting {
     settings {
         algorithm "sliding-window"
         retry-after-type "delay-seconds"
+        flush-interval "200ms"
+        max-batch-size 5
     }
     rules {
         "test-endpoint" {
