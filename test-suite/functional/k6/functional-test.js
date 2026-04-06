@@ -52,10 +52,39 @@ export default function () {
   }
 }
 
+// Generate JUnit XML from k6 threshold results for CircleCI Test Insights
+function junitXml(data, suiteName) {
+  const thresholds = data.root_group ? data.root_group.checks || [] : [];
+  const metrics = data.metrics || {};
+  const testcases = [];
+  let failures = 0;
+
+  // Convert each threshold into a JUnit test case
+  for (const [name, metric] of Object.entries(metrics)) {
+    if (!metric.thresholds) continue;
+    for (const [expr, result] of Object.entries(metric.thresholds)) {
+      const passed = result.ok;
+      if (!passed) failures++;
+      const tc = `    <testcase classname="${suiteName}" name="${name}: ${expr}" time="0">` +
+        (passed ? '' : `\n      <failure message="Threshold breached: ${name} ${expr}"/>`) +
+        `\n    </testcase>`;
+      testcases.push(tc);
+    }
+  }
+
+  return `<?xml version="1.0" encoding="UTF-8"?>
+<testsuites>
+  <testsuite name="${suiteName}" tests="${testcases.length}" failures="${failures}">
+${testcases.join('\n')}
+  </testsuite>
+</testsuites>`;
+}
+
 export function handleSummary(data) {
   return {
     '/results/functional-report.html': htmlReport(data),
     '/results/functional-report.json': JSON.stringify(data, null, 2),
+    '/results/functional-results.xml': junitXml(data, 'k6-functional'),
     stdout: textSummary(data, { indent: '  ', enableColors: true }),
   };
 }
