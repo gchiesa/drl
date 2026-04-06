@@ -76,8 +76,6 @@ jobs:
       - run:
           name: Run unit tests
           command: mise run test
-      - store_test_results:
-          path: test-results
       - save-go-cache
 
   functional-test:
@@ -94,8 +92,6 @@ jobs:
           name: Collect logs on failure
           when: on_fail
           command: docker compose -f test-suite/functional/docker-compose.yaml logs drl envoy
-      - store_test_results:
-          path: test-suite/functional/results
       - store_artifacts:
           path: test-suite/functional/results
           destination: functional-test-report
@@ -115,8 +111,6 @@ jobs:
           name: Collect logs on failure
           when: on_fail
           command: docker compose -f test-suite/performance/docker-compose.yaml logs drl envoy
-      - store_test_results:
-          path: test-suite/performance/results
       - store_artifacts:
           path: test-suite/performance/results
           destination: performance-test-report
