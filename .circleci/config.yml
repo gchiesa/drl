@@ -63,6 +63,38 @@ commands:
             docker pull grafana/k6:latest &
             wait
 
+  run-functional-scenario:
+    description: "Run a single functional test scenario"
+    parameters:
+      label:
+        type: string
+      replicas:
+        type: integer
+      allowed_threshold:
+        type: integer
+      blocked_threshold:
+        type: integer
+      wait_seconds:
+        type: integer
+    steps:
+      - run:
+          name: "Run scenario: << parameters.label >>"
+          command: >-
+            ./ci/scripts/test-functional-scenario.sh
+            "<< parameters.label >>"
+            << parameters.replicas >>
+            << parameters.allowed_threshold >>
+            << parameters.blocked_threshold >>
+            << parameters.wait_seconds >>
+          no_output_timeout: 3m
+      - run:
+          name: Collect logs on failure
+          when: on_fail
+          command: docker compose -f test-suite/functional/docker-compose.yaml logs drl envoy
+      - store_artifacts:
+          path: test-suite/functional/results
+          destination: functional-test-report
+
 jobs:
   unit-tests:
     executor: docker-executor
@@ -78,23 +110,44 @@ jobs:
           command: mise run test
       - save-go-cache
 
-  functional-test:
+  functional-single-instance:
     executor: docker-executor
     steps:
       - checkout
       - setup-mise
       - pull-test-images
-      - run:
-          name: Run functional test suite
-          command: mise run test-functional
-          no_output_timeout: 3m
-      - run:
-          name: Collect logs on failure
-          when: on_fail
-          command: docker compose -f test-suite/functional/docker-compose.yaml logs drl envoy
-      - store_artifacts:
-          path: test-suite/functional/results
-          destination: functional-test-report
+      - run-functional-scenario:
+          label: single-instance
+          replicas: 1
+          allowed_threshold: 33
+          blocked_threshold: 55
+          wait_seconds: 10
+
+  functional-5-instances:
+    executor: docker-executor
+    steps:
+      - checkout
+      - setup-mise
+      - pull-test-images
+      - run-functional-scenario:
+          label: 5-instances
+          replicas: 5
+          allowed_threshold: 36
+          blocked_threshold: 50
+          wait_seconds: 15
+
+  functional-10-instances:
+    executor: docker-executor
+    steps:
+      - checkout
+      - setup-mise
+      - pull-test-images
+      - run-functional-scenario:
+          label: 10-instances
+          replicas: 10
+          allowed_threshold: 38
+          blocked_threshold: 45
+          wait_seconds: 20
 
   performance-test:
     executor: docker-executor
@@ -116,22 +169,38 @@ jobs:
           destination: performance-test-report
 
 workflows:
-  # Runs on every push / MR
   merge-request:
     jobs:
       - unit-tests
-      - functional-test:
+      - functional-single-instance:
+          requires:
+            - unit-tests
+      - functional-5-instances:
+          requires:
+            - unit-tests
+      - functional-10-instances:
           requires:
             - unit-tests
 
-  # Runs only on main branch for performance baseline tracking
   main-performance:
     jobs:
       - unit-tests:
           filters:
             branches:
               only: main
-      - functional-test:
+      - functional-single-instance:
+          requires:
+            - unit-tests
+          filters:
+            branches:
+              only: main
+      - functional-5-instances:
+          requires:
+            - unit-tests
+          filters:
+            branches:
+              only: main
+      - functional-10-instances:
           requires:
             - unit-tests
           filters:
@@ -139,7 +208,9 @@ workflows:
               only: main
       - performance-test:
           requires:
-            - functional-test
+            - functional-single-instance
+            - functional-5-instances
+            - functional-10-instances
           filters:
             branches:
               only: main

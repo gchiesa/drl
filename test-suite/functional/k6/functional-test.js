@@ -5,20 +5,22 @@ import { htmlReport } from "https://raw.githubusercontent.com/benc-uk/k6-reporte
 import { textSummary } from "https://jslib.k6.io/k6-summary/0.0.2/index.js";
 
 const TARGET_URL = __ENV.TARGET_URL || 'http://envoy:10000';
+const SCENARIO_LABEL = __ENV.SCENARIO_LABEL || 'default';
+
+// Configurable thresholds via environment variables.
+// ALLOWED_THRESHOLD: maximum number of requests that may pass through (count<N).
+// BLOCKED_THRESHOLD: minimum number of requests that must be blocked (count>N).
+const allowedThreshold = parseInt(__ENV.ALLOWED_THRESHOLD || '35');
+const blockedThreshold = parseInt(__ENV.BLOCKED_THRESHOLD || '50');
 
 // Custom counters to track allowed vs blocked requests
 const requestsAllowed = new Counter('requests_allowed');
 const requestsBlocked = new Counter('requests_blocked');
 const requestsOther   = new Counter('requests_other');
 
-// DRL config: limit 30 req/min on /anything with 3 replicas.
-// Due to distributed nature, allow tolerance: up to 50% over the limit may pass.
+// DRL config: limit 30 req/min on /anything.
 // We send 2 req/s for 45s = 90 total requests.
-// Expected: ~30 allowed (with tolerance up to ~5), rest blocked.
-//
-// Thresholds:
-//   - requests_blocked > 50   → blocking is happening
-//   - requests_allowed < 35   → not more than ~1.6x the limit passed through
+// Thresholds are parameterized per scenario to account for distribution overhead.
 export const options = {
   scenarios: {
     steady_traffic: {
@@ -31,8 +33,8 @@ export const options = {
     },
   },
   thresholds: {
-    'requests_blocked': ['count>50'],
-    'requests_allowed': ['count<35'],
+    'requests_blocked': [`count>${blockedThreshold}`],
+    'requests_allowed': [`count<${allowedThreshold}`],
   },
 };
 
@@ -54,8 +56,8 @@ export default function () {
 
 export function handleSummary(data) {
   return {
-    '/results/functional-report.html': htmlReport(data),
-    '/results/functional-report.json': JSON.stringify(data, null, 2),
+    [`/results/functional-report-${SCENARIO_LABEL}.html`]: htmlReport(data),
+    [`/results/functional-report-${SCENARIO_LABEL}.json`]: JSON.stringify(data, null, 2),
     stdout: textSummary(data, { indent: '  ', enableColors: true }),
   };
 }

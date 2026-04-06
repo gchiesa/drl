@@ -1,36 +1,26 @@
 #!/usr/bin/env bash
-# Run the functional test suite via docker compose.
+# Run all functional test scenarios sequentially (for local development).
+# In CI these run as parallel jobs — see .circleci/config.yml.
+#
 # Usage: mise run test-functional
 set -euo pipefail
 
-REPO_ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
-COMPOSE_FILE="$REPO_ROOT/test-suite/functional/docker-compose.yaml"
-RESULTS_DIR="$REPO_ROOT/test-suite/functional/results"
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+FAILED=0
 
-mkdir -p "$RESULTS_DIR"
-
-cleanup() {
-  echo "==> Tearing down functional test infrastructure..."
-  docker compose -f "$COMPOSE_FILE" down -v --remove-orphans 2>/dev/null || true
+run() {
+  if ! "$SCRIPT_DIR/test-functional-scenario.sh" "$@"; then
+    FAILED=1
+  fi
 }
-trap cleanup EXIT
 
-echo "==> Building DRL image..."
-docker compose -f "$COMPOSE_FILE" build
+run "single-instance"  1  33 55 10
+run "5-instances"       5  36 50 15
+run "10-instances"     10  38 45 20
 
-echo "==> Starting DRL cluster (3 replicas) + Envoy + echo-server..."
-docker compose -f "$COMPOSE_FILE" up -d echo-server drl envoy
-
-echo "==> Waiting for cluster to form and become healthy (20s)..."
-sleep 20
-
-echo "==> Cluster status:"
-docker compose -f "$COMPOSE_FILE" ps
-
-echo "==> Running functional k6 test..."
-docker compose -f "$COMPOSE_FILE" run --rm k6
-
-echo "==> Functional test completed."
-if [ -f "$RESULTS_DIR/functional-report.html" ]; then
-  echo "==> Report: $RESULTS_DIR/functional-report.html"
+if [ "$FAILED" -ne 0 ]; then
+  echo "==> SOME FUNCTIONAL TEST SCENARIOS FAILED"
+  exit 1
 fi
+
+echo "==> All functional test scenarios passed!"
