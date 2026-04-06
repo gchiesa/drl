@@ -14,11 +14,11 @@ const requestsOther   = new Counter('requests_other');
 // DRL config: limit 30 req/min on /anything with 3 replicas.
 // Due to distributed nature, allow tolerance: up to 50% over the limit may pass.
 // We send 2 req/s for 45s = 90 total requests.
-// Expected: ~30 allowed (with tolerance up to ~45), rest blocked.
+// Expected: ~30 allowed (with tolerance up to ~5), rest blocked.
 //
 // Thresholds:
-//   - requests_blocked > 15   → blocking is happening
-//   - requests_allowed < 50   → not more than ~1.6x the limit passed through
+//   - requests_blocked > 50   → blocking is happening
+//   - requests_allowed < 35   → not more than ~1.6x the limit passed through
 export const options = {
   scenarios: {
     steady_traffic: {
@@ -31,8 +31,8 @@ export const options = {
     },
   },
   thresholds: {
-    'requests_blocked': ['count>15'],
-    'requests_allowed': ['count<50'],
+    'requests_blocked': ['count>50'],
+    'requests_allowed': ['count<35'],
   },
 };
 

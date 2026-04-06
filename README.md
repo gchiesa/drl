@@ -1,5 +1,7 @@
 # DRL - Distributed Rate Limiter
 
+[![CircleCI](https://dl.circleci.com/status-badge/img/gh/gchiesa/drl/tree/main.svg?style=svg&circle-token=CCIPRJ_W6h9tCvyGe4fN6NWBNXAiw_f2dae718b887540404732797e971522a5f7684f4)](https://dl.circleci.com/status-badge/redirect/gh/gchiesa/drl/tree/main)
+
 A high-performance, horizontally scalable rate-limiting service designed for Envoy sidecars. DRL eliminates the latency
 of external databases by using a Peer-to-Peer (P2P) Hybrid Architecture.
 

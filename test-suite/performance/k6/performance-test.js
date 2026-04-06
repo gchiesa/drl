@@ -40,9 +40,9 @@ export const options = {
   },
   thresholds: {
     // DRL decision latency targets (end-to-end through Envoy, for both 200 and 429)
-    'drl_decision_latency': ['p(50)<50', 'p(95)<200', 'p(99)<500'],
+    'drl_decision_latency': ['p(50)<2', 'p(95)<5', 'p(99)<10'],
     // Only infrastructure errors count — 429 is a valid DRL decision, not an error
-    'drl_error_rate': ['rate<0.01'],
+    'drl_error_rate': ['rate<0.001'],
   },
 };
 
