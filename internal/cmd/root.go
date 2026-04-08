@@ -98,7 +98,7 @@ func Execute(version string) {
 	}
 
 	// Initialize internal API if enabled
-	apiServer := newApiServer(cfg, localIP, cacheManager, clusterManager, accountingEngine, log)
+	apiServer := newApiServer(cfg, localIP, cacheManager, clusterManager, accountingEngine, metricsManager, log)
 
 	// Initialize gRPC ext_authz server for Envoy
 	grpcServer := newGRPCServer(cfg, cacheManager, accountingEngine, apiServer, metricsManager, log)

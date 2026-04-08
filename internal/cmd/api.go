@@ -10,6 +10,7 @@ import (
 	"github.com/gchiesa/drl/internal/cache"
 	"github.com/gchiesa/drl/internal/config"
 	"github.com/gchiesa/drl/internal/membership"
+	"github.com/gchiesa/drl/internal/metrics"
 )
 
 // newApiServer initializes and starts a new internal API server based on the provided configuration and dependencies.
@@ -27,6 +28,7 @@ func newApiServer(
 	cacheManager *cache.Manager,
 	clusterManager *membership.Cluster,
 	accountingEngine *accounting.Engine,
+	metricsManager *metrics.Metrics,
 	log *slog.Logger,
 ) *api.Server {
 
@@ -55,6 +57,10 @@ func newApiServer(
 		}
 		if accountingEngine != nil {
 			apiCfg.AccountingStats = accountingEngine
+			apiCfg.BulkLoader = accountingEngine
+		}
+		if metricsManager != nil {
+			apiCfg.Metrics = metricsManager
 		}
 		apiServer, err = api.NewServer(apiCfg)
 		if err != nil {

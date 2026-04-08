@@ -25,6 +25,16 @@ type BlockBroadcaster interface {
 	QueueBlockEvent(key string, ttl time.Duration, entity *model.Entity) error
 }
 
+// Bulk-load outcome string constants returned by Engine.BulkLoad. They are
+// also used as the "result" label values for the
+// drl_accounting_bulk_load_total metric.
+const (
+	BulkLoadNoMatch        = "no_match"
+	BulkLoadAcceptedLocal  = "accepted_local"
+	BulkLoadAcceptedRemote = "accepted_remote"
+	BulkLoadDropped        = "dropped"
+)
+
 // Engine is the accounting engine that matches incoming requests against
 // configurable rules, hashes the entity to determine the owner node, and
 // either increments locally or enqueues a remote update via the Flusher.
@@ -121,25 +131,38 @@ func (e *Engine) buildEntity(sourceIP string, rule *accountingRuleWithName, head
 	}
 }
 
+// resolveEntity matches the request against the rule set and returns the
+// rule, the rule-scoped Entity, the entity hash, and its hex key. ok is
+// false when no rule matches. The caller is responsible for bumping the
+// tracked counter (if appropriate) and choosing the downstream action;
+// resolveEntity is purely a lookup helper shared by Process and BulkLoad.
+func (e *Engine) resolveEntity(sourceIP, path string, headers map[string]string) (
+	rule *accountingRuleWithName,
+	entity model.Entity,
+	entityHash uint64,
+	key string,
+	ok bool,
+) {
+	rule = e.matchRuleV2(path)
+	if rule == nil {
+		return nil, model.Entity{}, 0, "", false
+	}
+	entity = e.buildEntity(sourceIP, rule, headers)
+	entityHash = entity.Hash()
+	key = model.HashToEntityKey(entityHash)
+	return rule, entity, entityHash, key, true
+}
+
 // Process evaluates the incoming request against accounting rules. If a rule
 // matches, the entity is hashed and either counted locally (if this node is
 // the owner) or enqueued for remote flushing. When a local increment causes
 // the counter to exceed the rule's limit, the entity is blocked and a block
 // event is broadcast cluster-wide.
 func (e *Engine) Process(sourceIP, path string, headers map[string]string) {
-	rule := e.matchRuleV2(path)
-	if rule == nil {
+	rule, entity, entityHash, key, ok := e.resolveEntity(sourceIP, path, headers)
+	if !ok {
 		return
 	}
-
-	// Bucket the request by rule, not by literal path, so that every request
-	// matching the same rule (and same IP / rule-scoped headers) shares one
-	// counter and is enforced against the rule's limit in aggregate.
-	entity := e.buildEntity(sourceIP, rule, headers)
-	// Hash the entity once; key is just its hex form, used by the local
-	// caches, while the raw uint64 goes on the wire to remote owners.
-	entityHash := entity.Hash()
-	key := model.HashToEntityKey(entityHash)
 
 	e.tracked.Add(1)
 
@@ -192,6 +215,92 @@ func (e *Engine) Process(sourceIP, path string, headers map[string]string) {
 			"path", path,
 		)
 	}
+}
+
+// BulkLoad ingests a single bulk-load record. It mirrors Process up to the
+// rule-match + entity-hash + ownership decision, but skips all rate-limit
+// evaluation, blocklist mutation, and block-event broadcast — bulk loads
+// are intended to preload accounting state for tests and must not trigger
+// blocks as a side effect.
+//
+// When the local node is not the owner, distributionEnabled controls
+// whether the entry is forwarded to the owner via the Flusher
+// (best-effort UDP) or dropped with a debug log. The handler emits a
+// per-request summary warn covering the dropped count.
+//
+// Returns one of the BulkLoad* string constants. Bumps the standard
+// accounting counters (IncAccountingLocal / IncAccountingRemote) so that
+// existing dashboards keep working, and bumps the new bulk-load metric.
+func (e *Engine) BulkLoad(sourceIP, path string, headers map[string]string, distributionEnabled bool) string {
+	_, _, entityHash, key, ok := e.resolveEntity(sourceIP, path, headers)
+	if !ok {
+		if e.metrics != nil {
+			e.metrics.IncAccountingBulkLoad(BulkLoadNoMatch)
+		}
+		return BulkLoadNoMatch
+	}
+
+	e.tracked.Add(1)
+
+	ownerAddr := e.accounting.GetOwner(key)
+	if e.accounting.IsOwner(key) {
+		newCount := e.accounting.Increment(key, 1)
+		if e.metrics != nil {
+			e.metrics.IncAccountingLocal()
+			e.metrics.IncAccountingBulkLoad(BulkLoadAcceptedLocal)
+		}
+		e.logger.Debug("bulk load: local accounting increment",
+			"key", key,
+			"owner", ownerAddr,
+			"source_ip", sourceIP,
+			"path", path,
+			"count", newCount,
+		)
+		return BulkLoadAcceptedLocal
+	}
+
+	// Not the owner.
+	if !distributionEnabled {
+		// Per the milestone: log warn line containing the entity id.
+		// We log at debug for per-line volume reasons (the handler emits
+		// a single summary warn at the end of the request).
+		e.logger.Debug("Skipping non-owned entity in bulk load: "+key+" (distribution disabled)",
+			"key", key,
+			"owner", ownerAddr,
+			"source_ip", sourceIP,
+			"path", path,
+		)
+		if e.metrics != nil {
+			e.metrics.IncAccountingBulkLoad(BulkLoadDropped)
+		}
+		return BulkLoadDropped
+	}
+
+	if e.flusher == nil {
+		e.logger.Warn("bulk load: flusher unavailable, dropping non-owned entity",
+			"key", key,
+			"owner", ownerAddr,
+			"source_ip", sourceIP,
+			"path", path,
+		)
+		if e.metrics != nil {
+			e.metrics.IncAccountingBulkLoad(BulkLoadDropped)
+		}
+		return BulkLoadDropped
+	}
+
+	e.flusher.Enqueue(ownerAddr, entityHash, 1)
+	if e.metrics != nil {
+		e.metrics.IncAccountingRemote()
+		e.metrics.IncAccountingBulkLoad(BulkLoadAcceptedRemote)
+	}
+	e.logger.Debug("bulk load: remote accounting enqueue",
+		"key", key,
+		"owner", ownerAddr,
+		"source_ip", sourceIP,
+		"path", path,
+	)
+	return BulkLoadAcceptedRemote
 }
 
 // PendingUpdates returns the number of batched updates waiting to be flushed.

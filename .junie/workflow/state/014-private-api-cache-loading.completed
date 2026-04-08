@@ -1,0 +1,24 @@
+Milestone 014 — Private API Cache Loading
+
+Implemented POST /accounting/load NDJSON ingestion endpoint that bulk-populates
+the accounting cache without going through rate-limit / blocklist evaluation.
+
+Components:
+- internal/accounting/engine.go: Engine.BulkLoad + resolveEntity helper, four
+  outcome constants (no_match, accepted_local, accepted_remote, dropped).
+- internal/metrics/metrics.go: drl_accounting_bulk_load_total{result=...}.
+- internal/api: AccountingBulkLoader + BulkLoadMetricsRecorder interfaces,
+  handleAccountingLoad streaming NDJSON parser using bufio.Scanner +
+  json.Unmarshal so malformed lines are counted but processing continues.
+- internal/cmd/api.go: wires Engine as BulkLoader + Metrics into ServerConfig.
+- README.md: documents the new endpoint and the bulk_load metric.
+
+Tests:
+- accounting: 6 BulkLoad scenarios incl. load-bearing
+  TestEngine_BulkLoad_DoesNotEvaluateBlocking which proves the blocklist and
+  broadcaster are NEVER touched, even when count exceeds rule.Limit.
+- api: 8 handler tests covering auth, not-configured (404), happy-path
+  outcome routing, distributionEnabled query parsing (true/false/invalid),
+  malformed-line resilience, dropped outcome, and empty body.
+
+Coverage: accounting 91.4%, api 94.5%. Lint clean.
