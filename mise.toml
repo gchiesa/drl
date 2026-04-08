@@ -26,3 +26,7 @@ run = "./ci/scripts/test-functional.sh"
 [tasks.test-performance]
 description = "Run performance test suite (docker compose + k6)"
 run = "./ci/scripts/test-performance.sh"
+
+[tasks.test-handover]
+description = "Run handover functional test (docker compose + k6)"
+run = "./ci/scripts/test-handover.sh"
