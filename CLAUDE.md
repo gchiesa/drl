@@ -68,7 +68,25 @@ traffic:
 
 ## Implementation Guidelines
 
-* **Concurrency**: Use ristretto for the caches to avoid GC overhead and lock contention.
+### Development & Documentation Workflow
+
+To maintain high performance and token efficiency during development, this project uses a specialized Documentation
+Subagent.
+
+### Documentation Retrieval (Primary Method)
+
+**CRITICAL:** Do not use `cat` or `read_file` to understand package APIs, function signatures, or type definitions. This
+wastes tokens on implementation details.
+
+* **Primary Resource**: Use the `go-doc-expert` subagent for all code exploration.
+* **Internal Packages**: Use `go doc ./internal/...` or `go doc ./pkg/...` via the subagent to retrieve contracts.
+* **External Dependencies**: Use `go doc <package_name>` to explore modules in `go.mod`.
+* **Implementation**: Only read the actual `.go` source files when you are explicitly tasked with modifying the internal
+  logic or debugging a specific implementation detail.
+
+### Other technologies / implementation aspects 
+
+* **Concurrency**: Use otter for the caches to avoid GC overhead and lock contention.
 * **Communication**: Internal peer increments should use a dedicated internal gRPC service or lightweight UDP packets.
 * **Reliability**: Implement a Max Hops (1) for internal increments to prevent circular forwarding during hash ring
   transitions.

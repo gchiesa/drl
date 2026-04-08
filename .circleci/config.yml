@@ -149,6 +149,24 @@ jobs:
           blocked_threshold: 45
           wait_seconds: 20
 
+  handover-test:
+    executor: docker-executor
+    steps:
+      - checkout
+      - setup-mise
+      - pull-test-images
+      - run:
+          name: Run handover test
+          command: mise run test-handover
+          no_output_timeout: 5m
+      - run:
+          name: Collect logs on failure
+          when: on_fail
+          command: docker compose -f test-suite/handover/docker-compose.yaml logs drl envoy
+      - store_artifacts:
+          path: test-suite/handover/results
+          destination: handover-test-report
+
   performance-test:
     executor: docker-executor
     resource_class: large
@@ -181,6 +199,9 @@ workflows:
       - functional-10-instances:
           requires:
             - unit-tests
+      - handover-test:
+          requires:
+            - unit-tests
 
   main-performance:
     jobs:
@@ -206,11 +227,18 @@ workflows:
           filters:
             branches:
               only: main
+      - handover-test:
+          requires:
+            - unit-tests
+          filters:
+            branches:
+              only: main
       - performance-test:
           requires:
             - functional-single-instance
             - functional-5-instances
             - functional-10-instances
+            - handover-test
           filters:
             branches:
               only: main
