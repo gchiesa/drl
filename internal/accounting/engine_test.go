@@ -73,12 +73,15 @@ func TestEngine_Process_LocalOwner(t *testing.T) {
 	e, ac := testEngine(t, rules)
 	defer ac.Close()
 
-	// Single node in ring means all keys are local
+	// Single node in ring means all keys are local. Two requests under
+	// different paths but the same matching rule must collapse into one
+	// counter (per-rule bucketing, not per-literal-path).
 	e.Process("10.0.0.1", "/api/v1/resource", nil)
-	e.Process("10.0.0.1", "/api/v1/resource", nil)
+	e.Process("10.0.0.1", "/api/v1/other", nil)
 
-	// Build same entity key to check cache
-	entity := model.Entity{IP: "10.0.0.1", Path: "/api/v1/resource"}
+	// Build same entity key to check cache: the bucket is scoped to the
+	// rule's PathPrefix, not the literal request path.
+	entity := model.Entity{IP: "10.0.0.1", Path: "/api"}
 	key := entity.Key()
 
 	count := ac.Get(key)
@@ -116,7 +119,9 @@ func TestEngine_Process_RemoteOwner(t *testing.T) {
 	remoteCount := int64(0)
 	for i := range 20 {
 		ip := "10.0.0." + string(rune('0'+i%10))
-		entity := model.Entity{IP: ip, Path: "/api/test"}
+		// Bucket key uses the rule's PathPrefix, matching what Engine.Process
+		// computes internally.
+		entity := model.Entity{IP: ip, Path: "/api"}
 		key := entity.Key()
 
 		if ac.IsOwner(key) {
@@ -132,6 +137,95 @@ func TestEngine_Process_RemoteOwner(t *testing.T) {
 	if remoteCount > 0 {
 		assert.Greater(t, f.PendingCount(), int64(0))
 	}
+}
+
+func TestEngine_MatchRule_PathSegmentSemantics(t *testing.T) {
+	// "/anything" must NOT match "/anythingelse" (string-prefix is not enough),
+	// but it MUST match "/anything", "/anything/", and "/anything/other/".
+	// "/" remains a catch-all for everything else.
+	rules := map[string]config.AccountingRule{
+		"catch-all": {PathPrefix: "/", Limit: 100, Per: "minute"},
+		"anything":  {PathPrefix: "/anything", Limit: 10, Per: "minute"},
+	}
+	e, ac := testEngine(t, rules)
+	defer ac.Close()
+
+	cases := []struct {
+		path string
+		want string
+	}{
+		{"/anything", "anything"},
+		{"/anything/", "anything"},
+		{"/anything/other/", "anything"},
+		{"/anything/other/deep", "anything"},
+		{"/anythingelse", "catch-all"},
+		{"/anythingelse/foo", "catch-all"},
+		{"/foo", "catch-all"},
+		{"/", "catch-all"},
+	}
+	for _, tc := range cases {
+		rule := e.matchRuleV2(tc.path)
+		require.NotNil(t, rule, "expected a match for %q", tc.path)
+		assert.Equal(t, tc.want, rule.Name, "wrong rule for path %q", tc.path)
+	}
+}
+
+func TestEngine_Process_RuleBucketing(t *testing.T) {
+	// Every request matching the same rule (and same IP / rule-headers)
+	// must collapse into one counter, regardless of the literal request path.
+	rules := map[string]config.AccountingRule{
+		"anything": {PathPrefix: "/anything", Limit: 10, Per: "minute"},
+	}
+	e, ac := testEngine(t, rules)
+	defer ac.Close()
+
+	e.Process("10.0.0.1", "/anything", nil)
+	e.Process("10.0.0.1", "/anything/foo", nil)
+	e.Process("10.0.0.1", "/anything/bar/baz", nil)
+
+	bucketKey := model.Entity{IP: "10.0.0.1", Path: "/anything"}.Key()
+	assert.Equal(t, int64(3), ac.Get(bucketKey),
+		"all matching paths must aggregate into the rule's bucket")
+	assert.Equal(t, int64(3), e.TrackedEntities())
+
+	// And the gRPC-facing key builder must return the same bucket key for
+	// any path under the prefix, so the blocklist lookup is consistent.
+	for _, p := range []string{"/anything", "/anything/foo", "/anything/bar/baz"} {
+		assert.Equal(t, bucketKey, e.BuildEntityKey("10.0.0.1", p, nil),
+			"BuildEntityKey must return the rule bucket for %q", p)
+	}
+}
+
+func TestEngine_Process_BucketingBlocksAggregate(t *testing.T) {
+	// With per-rule bucketing the limit must trip after N total requests
+	// across any mix of paths under the same rule.
+	ac := testEngineAccountingCache(t)
+	defer ac.Close()
+	bl := newMockBlocklist()
+	bc := &mockBroadcaster{}
+
+	rules := map[string]config.AccountingRule{
+		"anything": {PathPrefix: "/anything", Limit: 3, Per: "minute"},
+	}
+	e := NewEngine(EngineConfig{
+		Rules:       rules,
+		Accounting:  ac,
+		Logger:      testLogger(),
+		Metrics:     metrics.NewMetrics(),
+		Blocklist:   bl,
+		Broadcaster: bc,
+	})
+
+	// 3 distinct paths under the prefix == 3 hits on the same bucket.
+	e.Process("10.0.0.1", "/anything/a", nil)
+	e.Process("10.0.0.1", "/anything/b", nil)
+	e.Process("10.0.0.1", "/anything/c", nil)
+	assert.Equal(t, 0, bl.blockedCount(), "should not block at the limit")
+
+	// 4th hit on a yet-different path tips the bucket over.
+	e.Process("10.0.0.1", "/anything/d", nil)
+	assert.Equal(t, 1, bl.blockedCount(), "must block once aggregate exceeds limit")
+	assert.Equal(t, 1, bc.eventCount(), "must broadcast a block event")
 }
 
 func TestEngine_Process_NoMatch(t *testing.T) {
@@ -160,10 +254,11 @@ func TestEngine_Process_WithHeaders(t *testing.T) {
 
 	e.Process("10.0.0.1", "/api/v1", headers)
 
-	// The entity should only include X-API-Key (from rule headers)
+	// The entity should only include X-API-Key (from rule headers) and the
+	// bucket key uses the rule's PathPrefix, not the literal request path.
 	entity := model.Entity{
 		IP:      "10.0.0.1",
-		Path:    "/api/v1",
+		Path:    "/api",
 		Headers: map[string]string{"X-API-Key": "abc123"},
 	}
 	key := entity.Key()

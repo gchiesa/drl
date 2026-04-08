@@ -23,13 +23,18 @@ type Entity struct {
 	Headers map[string]string `json:"headers" msgpack:"headers"`
 }
 
-// Key returns a deterministic, order-independent cache key for this entity
-// using xxHash-64. The canonical form is:
+// Hash returns the deterministic, order-independent xxHash-64 of this
+// entity's canonical form. The canonical form is:
 //
 //	IP|Path[|HeaderKey:HeaderVal]...
 //
 // where header pairs are sorted lexicographically by key.
-func (e Entity) Key() string {
+//
+// Hash is the single source of truth for entity identity; Key is just its
+// hex string encoding. Callers that need the uint64 (e.g. to put on the
+// wire in a CounterBatch) should call Hash directly to avoid the
+// hex-encode/parse round-trip.
+func (e Entity) Hash() uint64 {
 	keys := make([]string, 0, len(e.Headers))
 	for k := range e.Headers {
 		keys = append(keys, k)
@@ -47,8 +52,19 @@ func (e Entity) Key() string {
 		sb.WriteString(e.Headers[k])
 	}
 
-	hash := xxhash.Sum64String(sb.String())
-	return fmt.Sprintf("%016x", hash)
+	return xxhash.Sum64String(sb.String())
+}
+
+// Key returns the canonical cache key (16-char lowercase hex) for this
+// entity. It is a thin formatter around Hash.
+func (e Entity) Key() string {
+	return HashToEntityKey(e.Hash())
+}
+
+// HashToEntityKey formats a uint64 entity hash as the canonical 16-char
+// lowercase hex cache key. Inverse of EntityKeyToHash.
+func HashToEntityKey(h uint64) string {
+	return fmt.Sprintf("%016x", h)
 }
 
 // EntityKeyToHash converts a hexadecimal string to a uint64 value. Returns an error if the string is not valid hex.

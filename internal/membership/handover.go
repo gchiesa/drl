@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
-	"strconv"
 	"sync"
 	"time"
 
@@ -14,6 +13,7 @@ import (
 	"github.com/cespare/xxhash/v2"
 	"github.com/gchiesa/drl/internal/cache"
 	"github.com/gchiesa/drl/internal/metrics"
+	"github.com/gchiesa/drl/internal/model"
 	drlproto "github.com/gchiesa/drl/internal/proto"
 )
 
@@ -126,7 +126,7 @@ func (h *Handover) Evacuate() error {
 		Entries:   make([]*drlproto.CounterEntry, 0, len(snapshot)),
 	}
 	for key, count := range snapshot {
-		entityHash, err := strconv.ParseUint(key, 16, 64)
+		entityHash, err := model.EntityKeyToHash(key)
 		if err != nil {
 			h.logger.Warn("handover: skipping entry with invalid key", "key", key, "error", err)
 			continue

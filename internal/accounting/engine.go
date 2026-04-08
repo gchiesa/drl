@@ -2,7 +2,6 @@ package accounting
 
 import (
 	"log/slog"
-	"strconv"
 	"sync/atomic"
 	"time"
 
@@ -98,17 +97,28 @@ func (e *Engine) GetFlusher() *Flusher {
 // per the matched rule, and returns the entity key. Returns "" if no rule
 // matches. This is used by the gRPC server for fast blocklist lookups with
 // the same key that Process/blocking uses.
+//
+// The returned key is scoped to the matched rule (not the literal request
+// path), so all requests under a rule's PathPrefix collapse into one bucket
+// per (IP, rule, rule-headers).
 func (e *Engine) BuildEntityKey(sourceIP, path string, headers map[string]string) string {
 	rule := e.matchRuleV2(path)
 	if rule == nil {
 		return ""
 	}
-	entity := model.Entity{
+	return e.buildEntity(sourceIP, rule, headers).Key()
+}
+
+// buildEntity constructs the canonical accounting Entity for a request that
+// matched a rule. The Path field is set to rule.PathPrefix so that every
+// request under that prefix shares one counter, and the Headers field is
+// filtered to only the keys named by the rule.
+func (e *Engine) buildEntity(sourceIP string, rule *accountingRuleWithName, headers map[string]string) model.Entity {
+	return model.Entity{
 		IP:      sourceIP,
-		Path:    path,
+		Path:    rule.PathPrefix,
 		Headers: filterHeaders(headers, rule.Headers),
 	}
-	return entity.Key()
 }
 
 // Process evaluates the incoming request against accounting rules. If a rule
@@ -122,17 +132,14 @@ func (e *Engine) Process(sourceIP, path string, headers map[string]string) {
 		return
 	}
 
-	// Build entity using only the headers specified in the rule
-	entity := model.Entity{
-		IP:      sourceIP,
-		Path:    path,
-		Headers: filterHeaders(headers, rule.Headers),
-	}
-
-	key := entity.Key()
-
-	// Parse entity hash from the hex key for the protobuf batch
-	entityHash, _ := strconv.ParseUint(key, 16, 64)
+	// Bucket the request by rule, not by literal path, so that every request
+	// matching the same rule (and same IP / rule-scoped headers) shares one
+	// counter and is enforced against the rule's limit in aggregate.
+	entity := e.buildEntity(sourceIP, rule, headers)
+	// Hash the entity once; key is just its hex form, used by the local
+	// caches, while the raw uint64 goes on the wire to remote owners.
+	entityHash := entity.Hash()
+	key := model.HashToEntityKey(entityHash)
 
 	e.tracked.Add(1)
 
@@ -205,14 +212,56 @@ func (e *Engine) EstimatedEntities() int64 {
 	return e.accounting.GetEstimatedEntities()
 }
 
-// matchRuleV2 attempts to find the longest prefix match for the given path in the rules and returns the corresponding rule.
-// Returns nil if no matching rule is found.
+// matchRuleV2 attempts to find the longest path-prefix match for the given
+// path and returns the corresponding rule. Returns nil if no matching rule
+// is found.
+//
+// The radix tree's LongestPrefix is a string-prefix match, which would
+// incorrectly match e.g. "/anythingelse" against a rule with PathPrefix
+// "/anything". To enforce path-segment semantics we walk shorter candidates
+// in the tree until we find one that ends at a path boundary in the input
+// (i.e. the prefix itself ends with '/', equals the input path, or the next
+// character in the input is '/'). The "/" rule always matches.
 func (e *Engine) matchRuleV2(path string) *accountingRuleWithName {
-	_, rule, found := e.rules.Root().LongestPrefix([]byte(path))
-	if found {
-		return rule
+	root := e.rules.Root()
+	candidate := []byte(path)
+	for {
+		k, rule, found := root.LongestPrefix(candidate)
+		if !found {
+			return nil
+		}
+		if isPathSegmentMatch(path, string(k)) {
+			return rule
+		}
+		// The matched key is a string-prefix but not a path-segment prefix
+		// (e.g. tree has "/anything" and input is "/anythingelse"). Trim
+		// the candidate by one byte and retry to find a shorter prefix
+		// that does sit on a segment boundary.
+		if len(k) == 0 {
+			return nil
+		}
+		candidate = []byte(string(k)[:len(k)-1])
 	}
-	return nil
+}
+
+// isPathSegmentMatch reports whether prefix is a path-segment prefix of
+// path (not merely a string prefix). The root prefix "/" always matches.
+func isPathSegmentMatch(path, prefix string) bool {
+	if prefix == "/" || prefix == "" {
+		return true
+	}
+	if len(prefix) > len(path) || path[:len(prefix)] != prefix {
+		return false
+	}
+	if len(path) == len(prefix) {
+		return true
+	}
+	// prefix already ends in '/' (e.g. "/api/") -- any continuation is fine
+	if prefix[len(prefix)-1] == '/' {
+		return true
+	}
+	// next byte after the prefix in the path must be a segment separator
+	return path[len(prefix)] == '/'
 }
 
 // filterHeaders returns a new map containing only the specified header keys.
