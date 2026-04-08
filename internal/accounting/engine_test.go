@@ -386,6 +386,168 @@ func TestEngine_Process_ThresholdBlocking(t *testing.T) {
 	assert.Equal(t, 1, bc.eventCount(), "should broadcast block event")
 }
 
+func TestEngine_BulkLoad_LocalOwner(t *testing.T) {
+	rules := map[string]config.AccountingRule{
+		"api-limit": {PathPrefix: "/api", Limit: 100, Per: "minute"},
+	}
+	e, ac := testEngine(t, rules)
+	defer ac.Close()
+
+	result := e.BulkLoad("10.0.0.1", "/api/v1/resource", nil, false)
+	assert.Equal(t, BulkLoadAcceptedLocal, result)
+
+	bucketKey := model.Entity{IP: "10.0.0.1", Path: "/api"}.Key()
+	assert.Equal(t, int64(1), ac.Get(bucketKey))
+	assert.Equal(t, int64(1), e.TrackedEntities())
+}
+
+func TestEngine_BulkLoad_RemoteEnqueue_DistributionEnabled(t *testing.T) {
+	ac := testEngineAccountingCache(t)
+	defer ac.Close()
+	f := NewFlusher(testFlusherConfig(t, ac, nil))
+
+	// Two-node ring so some keys are non-local
+	ac.AddNode("remote-node-1")
+
+	rules := map[string]config.AccountingRule{
+		"api-limit": {PathPrefix: "/api", Limit: 100, Per: "minute"},
+	}
+	e := NewEngine(EngineConfig{
+		Rules:      rules,
+		Accounting: ac,
+		Flusher:    f,
+		Logger:     testLogger(),
+		Metrics:    metrics.NewMetrics(),
+	})
+
+	// Find an IP that hashes to the remote owner.
+	var remoteIP string
+	for i := range 100 {
+		candidate := "10.0.0." + string(rune('0'+i%10)) + "-" + string(rune('a'+i/10))
+		key := model.Entity{IP: candidate, Path: "/api"}.Key()
+		if !ac.IsOwner(key) {
+			remoteIP = candidate
+			break
+		}
+	}
+	require.NotEmpty(t, remoteIP, "expected to find a non-local owner with two-node ring")
+
+	result := e.BulkLoad(remoteIP, "/api/test", nil, true)
+	assert.Equal(t, BulkLoadAcceptedRemote, result)
+	assert.Equal(t, int64(1), f.PendingCount(), "remote enqueue must hit the flusher")
+}
+
+func TestEngine_BulkLoad_RemoteDrop_DistributionDisabled(t *testing.T) {
+	ac := testEngineAccountingCache(t)
+	defer ac.Close()
+	f := NewFlusher(testFlusherConfig(t, ac, nil))
+
+	ac.AddNode("remote-node-1")
+
+	rules := map[string]config.AccountingRule{
+		"api-limit": {PathPrefix: "/api", Limit: 100, Per: "minute"},
+	}
+	e := NewEngine(EngineConfig{
+		Rules:      rules,
+		Accounting: ac,
+		Flusher:    f,
+		Logger:     testLogger(),
+		Metrics:    metrics.NewMetrics(),
+	})
+
+	var remoteIP string
+	for i := range 100 {
+		candidate := "10.0.0." + string(rune('0'+i%10)) + "-" + string(rune('a'+i/10))
+		key := model.Entity{IP: candidate, Path: "/api"}.Key()
+		if !ac.IsOwner(key) {
+			remoteIP = candidate
+			break
+		}
+	}
+	require.NotEmpty(t, remoteIP)
+
+	result := e.BulkLoad(remoteIP, "/api/test", nil, false)
+	assert.Equal(t, BulkLoadDropped, result)
+	assert.Equal(t, int64(0), f.PendingCount(), "must not enqueue when distribution disabled")
+}
+
+func TestEngine_BulkLoad_NoMatch(t *testing.T) {
+	rules := map[string]config.AccountingRule{
+		"api-limit": {PathPrefix: "/api", Limit: 100, Per: "minute"},
+	}
+	e, ac := testEngine(t, rules)
+	defer ac.Close()
+
+	result := e.BulkLoad("10.0.0.1", "/other/path", nil, true)
+	assert.Equal(t, BulkLoadNoMatch, result)
+	assert.Equal(t, int64(0), e.TrackedEntities(), "tracked must not bump on no_match")
+}
+
+func TestEngine_BulkLoad_FlusherNil(t *testing.T) {
+	ac := testEngineAccountingCache(t)
+	defer ac.Close()
+	ac.AddNode("remote-node-1")
+
+	rules := map[string]config.AccountingRule{
+		"api-limit": {PathPrefix: "/api", Limit: 100, Per: "minute"},
+	}
+	e := NewEngine(EngineConfig{
+		Rules:      rules,
+		Accounting: ac,
+		Flusher:    nil, // explicitly no flusher
+		Logger:     testLogger(),
+		Metrics:    metrics.NewMetrics(),
+	})
+
+	var remoteIP string
+	for i := range 100 {
+		candidate := "10.0.0." + string(rune('0'+i%10)) + "-" + string(rune('a'+i/10))
+		key := model.Entity{IP: candidate, Path: "/api"}.Key()
+		if !ac.IsOwner(key) {
+			remoteIP = candidate
+			break
+		}
+	}
+	require.NotEmpty(t, remoteIP)
+
+	// Must not panic, must return Dropped.
+	result := e.BulkLoad(remoteIP, "/api/test", nil, true)
+	assert.Equal(t, BulkLoadDropped, result)
+}
+
+func TestEngine_BulkLoad_DoesNotEvaluateBlocking(t *testing.T) {
+	// Load-bearing test for the milestone's "no blocking" rule: even if a
+	// bulk load drives the count well past the rule's limit, the blocklist
+	// and broadcaster must never be touched.
+	ac := testEngineAccountingCache(t)
+	defer ac.Close()
+	bl := newMockBlocklist()
+	bc := &mockBroadcaster{}
+
+	rules := map[string]config.AccountingRule{
+		"api-limit": {PathPrefix: "/api", Limit: 1, Per: "minute"},
+	}
+	e := NewEngine(EngineConfig{
+		Rules:       rules,
+		Accounting:  ac,
+		Logger:      testLogger(),
+		Metrics:     metrics.NewMetrics(),
+		Blocklist:   bl,
+		Broadcaster: bc,
+	})
+
+	for range 5 {
+		result := e.BulkLoad("10.0.0.1", "/api/v1", nil, false)
+		assert.Equal(t, BulkLoadAcceptedLocal, result)
+	}
+
+	assert.Equal(t, 0, bl.blockedCount(), "BulkLoad must not block entities")
+	assert.Equal(t, 0, bc.eventCount(), "BulkLoad must not broadcast block events")
+
+	bucketKey := model.Entity{IP: "10.0.0.1", Path: "/api"}.Key()
+	assert.Equal(t, int64(5), ac.Get(bucketKey), "all hits must accumulate")
+}
+
 func TestFilterHeaders(t *testing.T) {
 	headers := map[string]string{
 		"X-API-Key":    "key1",

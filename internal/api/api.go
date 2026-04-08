@@ -42,6 +42,20 @@ type AccountingStatsProvider interface {
 	EstimatedEntities() int64
 }
 
+// AccountingBulkLoader ingests a single bulk-load record into the accounting
+// engine. Implementations return one of the bulk-load outcome strings:
+// "no_match", "accepted_local", "accepted_remote", or "dropped".
+type AccountingBulkLoader interface {
+	BulkLoad(sourceIP, path string, headers map[string]string, distributionEnabled bool) string
+}
+
+// BulkLoadMetricsRecorder lets the bulk-load handler bump the
+// drl_accounting_bulk_load_total counter for parser-side outcomes
+// (e.g. "invalid") that the engine doesn't know about.
+type BulkLoadMetricsRecorder interface {
+	IncAccountingBulkLoad(result string)
+}
+
 // Server represents the internal API server
 type Server struct {
 	app             *fiber.App
@@ -56,6 +70,8 @@ type Server struct {
 	broadcaster     Broadcaster
 	defaultBlockTTL time.Duration
 	accountingStats AccountingStatsProvider
+	bulkLoader      AccountingBulkLoader
+	metrics         BulkLoadMetricsRecorder
 }
 
 // ServerConfig holds configuration for the API server
@@ -76,6 +92,10 @@ type ServerConfig struct {
 	DefaultBlockTTL time.Duration
 	// AccountingStats is optional; when set, the /accounting/stats endpoint is active.
 	AccountingStats AccountingStatsProvider
+	// BulkLoader is optional; when set, the POST /accounting/load endpoint is active.
+	BulkLoader AccountingBulkLoader
+	// Metrics is optional; when set, the bulk-load handler records parser-side outcomes.
+	Metrics BulkLoadMetricsRecorder
 }
 
 // NewServer creates a new internal API server
@@ -110,6 +130,8 @@ func NewServer(cfg ServerConfig) (*Server, error) {
 		broadcaster:     cfg.Broadcaster,
 		defaultBlockTTL: defaultTTL,
 		accountingStats: cfg.AccountingStats,
+		bulkLoader:      cfg.BulkLoader,
+		metrics:         cfg.Metrics,
 	}
 
 	// Setup routes
@@ -135,6 +157,11 @@ func (s *Server) setupRoutes() {
 
 	// Accounting stats
 	s.app.Get("/accounting/stats", authMW, s.handleAccountingStats)
+
+	// Bulk-load accounting (testing endpoint, milestone 014)
+	if s.bulkLoader != nil {
+		s.app.Post("/accounting/load", authMW, s.handleAccountingLoad)
+	}
 }
 
 // Start starts the internal API server

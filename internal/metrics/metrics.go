@@ -29,6 +29,7 @@ type Metrics struct {
 	AccountingRemoteIncTotal prometheus.Counter
 	AccountingFlushTotal     prometheus.Counter
 	AccountingMsgRecvTotal   prometheus.Counter
+	AccountingBulkLoadTotal  *prometheus.CounterVec
 
 	// Membership messaging metrics
 	MembershipReliableMsgsTotal   prometheus.Counter
@@ -110,6 +111,10 @@ func NewMetrics() *Metrics {
 			Name: "drl_accounting_msg_recv_total",
 			Help: "Total number of accounting batch messages received",
 		}),
+		AccountingBulkLoadTotal: prometheus.NewCounterVec(prometheus.CounterOpts{
+			Name: "drl_accounting_bulk_load_total",
+			Help: "Total number of bulk-load entries processed via the private API, by outcome",
+		}, []string{"result"}),
 		MembershipReliableMsgsTotal: prometheus.NewCounter(prometheus.CounterOpts{
 			Name: "drl_membership_reliable_msgs_total",
 			Help: "Total number of reliable messages sent via memberlist",
@@ -168,6 +173,7 @@ func NewMetrics() *Metrics {
 	registry.MustRegister(m.AccountingRemoteIncTotal)
 	registry.MustRegister(m.AccountingFlushTotal)
 	registry.MustRegister(m.AccountingMsgRecvTotal)
+	registry.MustRegister(m.AccountingBulkLoadTotal)
 	registry.MustRegister(m.MembershipReliableMsgsTotal)
 	registry.MustRegister(m.MembershipBestEffortMsgsTotal)
 	registry.MustRegister(m.HandoverOutEntities)
@@ -239,6 +245,13 @@ func (m *Metrics) IncAccountingFlush() {
 // IncAccountingMsgRecv increments the accounting message receive counter
 func (m *Metrics) IncAccountingMsgRecv() {
 	m.AccountingMsgRecvTotal.Inc()
+}
+
+// IncAccountingBulkLoad increments the bulk-load counter for the given outcome.
+// Result must be one of: "no_match", "accepted_local", "accepted_remote",
+// "dropped", or "invalid".
+func (m *Metrics) IncAccountingBulkLoad(result string) {
+	m.AccountingBulkLoadTotal.WithLabelValues(result).Inc()
 }
 
 // IncMembershipReliable increments the reliable message counter

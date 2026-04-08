@@ -117,6 +117,104 @@ Returns cluster status information including node ID, cluster name, active peers
 }
 ```
 
+#### GET /accounting/stats
+
+Returns local accounting statistics for the node.
+
+**Response:**
+
+```json
+{
+  "local_node_id": "node-1",
+  "monitored_entities_count": 1234,
+  "batched_updates_pending": 17,
+  "estimated_entities_count": 1200
+}
+```
+
+#### GET /blocked-entity
+
+Returns the list of all entities currently held in the local blocklist cache.
+
+#### POST /blocked-entity/:ip/_path/*
+
+Adds an entity (IP + URI path + optional headers) to the local blocklist and gossips a block event to peers.
+
+The wildcard path may carry an optional `/_headers/<key:val,key2:val2>` suffix to scope the block to a specific
+header tuple. The TTL defaults to `cache.blocklist-default-ttl-seconds` and can be overridden per-request via the
+`?ttl=<seconds>` query parameter.
+
+```bash
+curl --digest -u ":$DRL_PRIVATE_API_KEY" -X POST \
+  "http://localhost:8082/blocked-entity/192.168.1.10/_path/api/v1/payments/_headers/User-Agent:ScraperBot?ttl=3600"
+```
+
+#### DELETE /blocked-entity/:ip/_path/*
+
+Removes the matching entity from the local blocklist and gossips an unblock event to peers.
+
+#### POST /accounting/load
+
+Bulk-ingests entities directly into the accounting cache **without going through rate-limit / blocklist evaluation**.
+The endpoint exists to support load-testing the cache and warming nodes; entities loaded this way will never be
+blocked, even if their counts exceed the configured rule limit.
+
+**Body:** NDJSON (one JSON object per line). Each record:
+
+```json
+{"sourceIP": "10.0.0.1", "path": "/api/v1/users", "headers": {"X-API-Key": "abc"}}
+```
+
+`sourceIP` and `path` are required; `headers` is optional. Blank lines are skipped. Malformed lines are counted as
+`invalid` but processing continues.
+
+**Query parameters:**
+
+| Parameter              | Default | Description                                                                                                                  |
+|------------------------|---------|------------------------------------------------------------------------------------------------------------------------------|
+| `distributionEnabled`  | `false` | When `false`, records whose owner is a remote node are dropped. When `true`, they are forwarded to the owning node via the flusher. |
+
+**Response:**
+
+```json
+{
+  "id": "1712534400000000000",
+  "total": 1000,
+  "accepted_local": 920,
+  "accepted_remote": 60,
+  "dropped": 0,
+  "no_match": 15,
+  "invalid": 5,
+  "errors": ["line 7: unexpected end of JSON input"]
+}
+```
+
+**Outcome counters:**
+
+- `accepted_local` — entity owned by this node, counter incremented in-process.
+- `accepted_remote` — entity owned by another node, increment forwarded to its flusher (only when `distributionEnabled=true`).
+- `dropped` — entity is non-local and `distributionEnabled=false`, or no flusher is configured.
+- `no_match` — no accounting rule matched the path.
+- `invalid` — line failed JSON parsing or required-field validation.
+
+**Example:**
+
+```bash
+cat <<'EOF' > /tmp/load.ndjson
+{"sourceIP":"10.0.0.1","path":"/api/v1/users"}
+{"sourceIP":"10.0.0.2","path":"/api/v1/users"}
+{"sourceIP":"10.0.0.3","path":"/api/v1/orders","headers":{"X-API-Key":"abc"}}
+EOF
+
+curl --digest -u ":$DRL_PRIVATE_API_KEY" \
+  -X POST \
+  -H "Content-Type: application/x-ndjson" \
+  --data-binary @/tmp/load.ndjson \
+  "http://localhost:8082/accounting/load?distributionEnabled=true"
+```
+
+Bulk-load outcomes are exported via the `drl_accounting_bulk_load_total{result=...}` Prometheus counter.
+
 ### Digest Authentication (SHA-256)
 
 The internal API uses HTTP Digest Authentication (RFC 7616) with SHA-256 algorithm. This challenge-response mechanism
@@ -261,6 +359,7 @@ DRL exposes Prometheus metrics on the configured metrics port (default: 9091).
 | `drl_accounting_local_increments_total` | Counter | Local accounting increments (this node is owner)   |
 | `drl_accounting_remote_increments_total`| Counter | Remote accounting increments (forwarded to owner)  |
 | `drl_ratelimit_blocks_total`            | Counter | Entities blocked by the rate limiter               |
+| `drl_accounting_bulk_load_total`        | Counter | Bulk-load ingest outcomes by `result` label        |
 
 ### Endpoints
 
