@@ -1,0 +1,235 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches-ignore:
+      - main
+
+jobs:
+  unit-tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+
+      - name: Restore mise tool cache
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+        with:
+          path: |
+            ~/.local/share/mise
+            ~/.local/bin/mise
+          key: mise-v1-${{ hashFiles('mise.toml') }}
+          restore-keys: mise-v1-
+
+      - name: Install mise
+        run: |
+          if [ ! -f ~/.local/bin/mise ]; then
+            curl https://mise.run | sh
+          fi
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+
+      - name: Install tools via mise
+        run: mise install
+
+      - name: Restore Go module cache
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+        with:
+          path: |
+            ~/go/pkg/mod
+            ~/.cache/go-build
+          key: gomod-v1-${{ hashFiles('go.sum') }}
+          restore-keys: gomod-v1-
+
+      - name: Run linter
+        run: mise run lint
+
+      - name: Run unit tests
+        run: mise run test
+
+  functional-single-instance:
+    needs: unit-tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+
+      - name: Restore mise tool cache
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+        with:
+          path: |
+            ~/.local/share/mise
+            ~/.local/bin/mise
+          key: mise-v1-${{ hashFiles('mise.toml') }}
+          restore-keys: mise-v1-
+
+      - name: Install mise
+        run: |
+          if [ ! -f ~/.local/bin/mise ]; then
+            curl https://mise.run | sh
+          fi
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+
+      - name: Install tools via mise
+        run: mise install
+
+      - name: Pull test infrastructure images
+        run: |
+          docker pull mccutchen/go-httpbin:latest &
+          docker pull envoyproxy/envoy:v1.30-latest &
+          docker pull grafana/k6:latest &
+          wait
+
+      - name: Run scenario single-instance
+        run: ./ci/scripts/test-functional-scenario.sh single-instance 1 33 55 10
+        timeout-minutes: 3
+
+      - name: Collect logs on failure
+        if: failure()
+        run: docker compose -f test-suite/functional/docker-compose.yaml logs drl envoy
+
+      - name: Upload functional report
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: functional-single-instance-report
+          path: test-suite/functional/results/
+
+  functional-5-instances:
+    needs: unit-tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+
+      - name: Restore mise tool cache
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+        with:
+          path: |
+            ~/.local/share/mise
+            ~/.local/bin/mise
+          key: mise-v1-${{ hashFiles('mise.toml') }}
+          restore-keys: mise-v1-
+
+      - name: Install mise
+        run: |
+          if [ ! -f ~/.local/bin/mise ]; then
+            curl https://mise.run | sh
+          fi
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+
+      - name: Install tools via mise
+        run: mise install
+
+      - name: Pull test infrastructure images
+        run: |
+          docker pull mccutchen/go-httpbin:latest &
+          docker pull envoyproxy/envoy:v1.30-latest &
+          docker pull grafana/k6:latest &
+          wait
+
+      - name: Run scenario 5-instances
+        run: ./ci/scripts/test-functional-scenario.sh 5-instances 5 36 50 15
+        timeout-minutes: 3
+
+      - name: Collect logs on failure
+        if: failure()
+        run: docker compose -f test-suite/functional/docker-compose.yaml logs drl envoy
+
+      - name: Upload functional report
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: functional-5-instances-report
+          path: test-suite/functional/results/
+
+  functional-10-instances:
+    needs: unit-tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+
+      - name: Restore mise tool cache
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+        with:
+          path: |
+            ~/.local/share/mise
+            ~/.local/bin/mise
+          key: mise-v1-${{ hashFiles('mise.toml') }}
+          restore-keys: mise-v1-
+
+      - name: Install mise
+        run: |
+          if [ ! -f ~/.local/bin/mise ]; then
+            curl https://mise.run | sh
+          fi
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+
+      - name: Install tools via mise
+        run: mise install
+
+      - name: Pull test infrastructure images
+        run: |
+          docker pull mccutchen/go-httpbin:latest &
+          docker pull envoyproxy/envoy:v1.30-latest &
+          docker pull grafana/k6:latest &
+          wait
+
+      - name: Run scenario 10-instances
+        run: ./ci/scripts/test-functional-scenario.sh 10-instances 10 38 45 20
+        timeout-minutes: 3
+
+      - name: Collect logs on failure
+        if: failure()
+        run: docker compose -f test-suite/functional/docker-compose.yaml logs drl envoy
+
+      - name: Upload functional report
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: functional-10-instances-report
+          path: test-suite/functional/results/
+
+  handover-test:
+    needs: unit-tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+
+      - name: Restore mise tool cache
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+        with:
+          path: |
+            ~/.local/share/mise
+            ~/.local/bin/mise
+          key: mise-v1-${{ hashFiles('mise.toml') }}
+          restore-keys: mise-v1-
+
+      - name: Install mise
+        run: |
+          if [ ! -f ~/.local/bin/mise ]; then
+            curl https://mise.run | sh
+          fi
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+
+      - name: Install tools via mise
+        run: mise install
+
+      - name: Pull test infrastructure images
+        run: |
+          docker pull mccutchen/go-httpbin:latest &
+          docker pull envoyproxy/envoy:v1.30-latest &
+          docker pull grafana/k6:latest &
+          wait
+
+      - name: Run handover test
+        run: mise run test-handover
+        timeout-minutes: 5
+
+      - name: Collect logs on failure
+        if: failure()
+        run: docker compose -f test-suite/handover/docker-compose.yaml logs drl envoy
+
+      - name: Upload handover report
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: handover-test-report
+          path: test-suite/handover/results/
