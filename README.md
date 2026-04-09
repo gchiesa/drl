@@ -1,18 +1,6 @@
 # DRL - Distributed Rate Limiter
 
-[![CI](https://github.com/gchiesa/drl/actions/workflows/ci.yml/badge.svg)](https://github.com/gchiesa/drl/actions/workflows/ci.yml)
-[![Main](https://github.com/gchiesa/drl/actions/workflows/main.yml/badge.svg)](https://github.com/gchiesa/drl/actions/workflows/main.yml)
-
-## Test Reports (latest `main`)
-
-| Test Suite | Report |
-|---|---|
-| Functional — single instance | [functional-report-single-instance.html](https://gchiesa.github.io/drl/reports/functional-single-instance/functional-report-single-instance.html) |
-| Functional — 5 instances | [functional-report-5-instances.html](https://gchiesa.github.io/drl/reports/functional-5-instances/functional-report-5-instances.html) |
-| Functional — 10 instances | [functional-report-10-instances.html](https://gchiesa.github.io/drl/reports/functional-10-instances/functional-report-10-instances.html) |
-| Handover — phase 1 | [handover-report-handover-phase1.html](https://gchiesa.github.io/drl/reports/handover/handover-report-handover-phase1.html) |
-| Handover — phase 2 | [handover-report-handover-phase2.html](https://gchiesa.github.io/drl/reports/handover/handover-report-handover-phase2.html) |
-| Performance | [performance-report.html](https://gchiesa.github.io/drl/reports/performance/performance-report.html) |
+[![CircleCI](https://dl.circleci.com/status-badge/img/gh/gchiesa/drl/tree/main.svg?style=svg&circle-token=CCIPRJ_W6h9tCvyGe4fN6NWBNXAiw_f2dae718b887540404732797e971522a5f7684f4)](https://dl.circleci.com/status-badge/redirect/gh/gchiesa/drl/tree/main)
 
 A high-performance, horizontally scalable rate-limiting service designed for Envoy sidecars. DRL eliminates the latency
 of external databases by using a Peer-to-Peer (P2P) Hybrid Architecture.
