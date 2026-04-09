@@ -1,526 +1,75 @@
-# DRL - Distributed Rate Limiter
+# DRL — Distributed Rate Limiter
 
 [![CircleCI](https://dl.circleci.com/status-badge/img/gh/gchiesa/drl/tree/main.svg?style=svg&circle-token=CCIPRJ_W6h9tCvyGe4fN6NWBNXAiw_f2dae718b887540404732797e971522a5f7684f4)](https://dl.circleci.com/status-badge/redirect/gh/gchiesa/drl/tree/main)
 
-A high-performance, horizontally scalable rate-limiting service designed for Envoy sidecars. DRL eliminates the latency
-of external databases by using a Peer-to-Peer (P2P) Hybrid Architecture.
+A high-performance, horizontally scalable rate-limiting service designed for Envoy sidecars. DRL eliminates
+the latency of external databases by using a **Peer-to-Peer Hybrid Architecture**:
 
-## Features
+- **Local enforcement** — fully-replicated in-memory Blocklist for O(1) rejection
+- **Shadow accounting** — hashed, asynchronous global quota tracking
+- **Warm-bootstrap** — state sync on startup prevents vulnerability windows during rolling updates
 
-- **Local Enforcement**: Fully replicated Blocklist for O(1) rejection
-- **Shadow Accounting**: Hashed, asynchronous global quota tracking
-- **State Sync**: Warm-bootstrapping to prevent "vulnerability windows" during rolling updates
-- **Cluster Discovery**: Automatic peer discovery via DNS using Hashicorp Memberlist
-- **Digest Authentication (SHA-256)**: Secure internal API with RFC 7616 compliant HTTP Digest authentication
+## Infrastructure overview
 
-## Quick Start
+```mermaid
+graph TB
+    subgraph pod-a ["Pod A"]
+        WA["Workload"] <--> EA["Envoy\nsidecar"]
+    end
+    subgraph pod-b ["Pod B"]
+        WB["Workload"] <--> EB["Envoy\nsidecar"]
+    end
+    subgraph pod-c ["Pod C"]
+        WC["Workload"] <--> EC["Envoy\nsidecar"]
+    end
 
-### Prerequisites
+    EA -->|"gRPC ShouldRateLimit"| DRL1
+    EB -->|"gRPC ShouldRateLimit"| DRL2
+    EC -->|"gRPC ShouldRateLimit"| DRL3
 
-- Go 1.25+
-- Docker & Docker Compose (for local testing)
+    subgraph drl-fleet ["DRL Fleet"]
+        DRL1["DRL-1\nOwns keys A–F"]
+        DRL2["DRL-2\nOwns keys G–M"]
+        DRL3["DRL-3\nOwns keys N–Z"]
+        DRL1 <-->|"Memberlist gossip\n+ block events"| DRL2
+        DRL2 <-->|"Memberlist gossip\n+ block events"| DRL3
+        DRL1 <-->|"Memberlist gossip\n+ block events"| DRL3
+    end
 
-### Building
+    DRL1 -->|"OK / OVER_LIMIT"| EA
+    DRL2 -->|"OK / OVER_LIMIT"| EB
+    DRL3 -->|"OK / OVER_LIMIT"| EC
 
-```bash
-mise run build
+    DRL1 -.->|"Async UDP CounterBatch\nto owner node"| DRL2
+    DRL2 -.->|"Async UDP CounterBatch\nto owner node"| DRL3
 ```
 
-### Running
-
-```bash
-# Set the required API key (minimum 16 characters)
-export DRL_PRIVATE_API_KEY="your-secure-api-key-here"
-
-# Run with default configuration
-./bin/drl
-
-# Run with custom configuration file
-./bin/drl --config config.kdl
-```
-
-## Configuration
-
-DRL uses KDL configuration files with environment variable overrides. Configuration precedence (highest to lowest):
-
-1. Environment variables (`DRL_*` pattern)
-2. KDL configuration file
-3. Default values
-
-### Example Configuration (config.kdl)
-
-```kdl
-listen {
-    grpc ":8081"
-    metrics ":9091"
-}
-
-membership {
-    service-name "drl"
-    port 7946
-    bind-addr "0.0.0.0"
-    startup-delay "3s"
-    gossip-interval "50ms"
-    gossip-nodes 5
-}
-
-logging {
-    level "info"
-    format "json"
-}
-
-internal-api {
-    enabled true
-    address ":8082"
-}
-```
-
-### Environment Variables
-
-| Variable                      | Description                                                      | Default   |
-|-------------------------------|------------------------------------------------------------------|-----------|
-| `DRL_PRIVATE_API_KEY`         | API key for internal API authentication (required, min 16 chars) | -         |
-| `DRL_NODE_NAME`               | Unique node identifier                                           | hostname  |
-| `DRL_LISTEN_GRPC`             | gRPC server address                                              | `:8081`   |
-| `DRL_LISTEN_METRICS`          | Prometheus metrics address                                       | `:9091`   |
-| `DRL_MEMBERSHIP_SERVICE_NAME` | DNS name for peer discovery                                      | `drl`     |
-| `DRL_MEMBERSHIP_PORT`         | Memberlist gossip port                                           | `7946`    |
-| `DRL_MEMBERSHIP_BIND_ADDR`    | Address to bind memberlist                                       | `0.0.0.0` |
-| `DRL_INTERNAL_API_ENABLED`    | Enable internal API                                              | `true`    |
-| `DRL_INTERNAL_API_ADDRESS`    | Internal API server address                                      | `:8082`   |
-| `DRL_LOGGING_LEVEL`           | Log level (debug, info, warn, error)                             | `info`    |
-| `DRL_LOGGING_FORMAT`          | Log format (json, text)                                          | `json`    |
-
-## Internal API
-
-DRL exposes an internal API on port 8082 (configurable) protected by HTTP Digest Authentication with SHA-256.
-
-### Endpoints
-
-#### GET /status
-
-Returns cluster status information including node ID, cluster name, active peers, and uptime.
-
-**Response:**
-
-```json
-{
-  "cluster_name": "drl",
-  "node_id": "node-1",
-  "active_peers": [
-    "node-1",
-    "node-2",
-    "node-3"
-  ],
-  "uptime": "2h30m15s",
-  "uptime_seconds": 9015.5
-}
-```
-
-#### GET /accounting/stats
-
-Returns local accounting statistics for the node.
-
-**Response:**
-
-```json
-{
-  "local_node_id": "node-1",
-  "monitored_entities_count": 1234,
-  "batched_updates_pending": 17,
-  "estimated_entities_count": 1200
-}
-```
-
-#### GET /blocked-entity
-
-Returns the list of all entities currently held in the local blocklist cache.
-
-#### POST /blocked-entity/:ip/_path/*
-
-Adds an entity (IP + URI path + optional headers) to the local blocklist and gossips a block event to peers.
-
-The wildcard path may carry an optional `/_headers/<key:val,key2:val2>` suffix to scope the block to a specific
-header tuple. The TTL defaults to `cache.blocklist-default-ttl-seconds` and can be overridden per-request via the
-`?ttl=<seconds>` query parameter.
-
-```bash
-curl --digest -u ":$DRL_PRIVATE_API_KEY" -X POST \
-  "http://localhost:8082/blocked-entity/192.168.1.10/_path/api/v1/payments/_headers/User-Agent:ScraperBot?ttl=3600"
-```
-
-#### DELETE /blocked-entity/:ip/_path/*
-
-Removes the matching entity from the local blocklist and gossips an unblock event to peers.
-
-#### POST /accounting/load
-
-Bulk-ingests entities directly into the accounting cache **without going through rate-limit / blocklist evaluation**.
-The endpoint exists to support load-testing the cache and warming nodes; entities loaded this way will never be
-blocked, even if their counts exceed the configured rule limit.
-
-**Body:** NDJSON (one JSON object per line). Each record:
-
-```json
-{"sourceIP": "10.0.0.1", "path": "/api/v1/users", "headers": {"X-API-Key": "abc"}}
-```
-
-`sourceIP` and `path` are required; `headers` is optional. Blank lines are skipped. Malformed lines are counted as
-`invalid` but processing continues.
-
-**Query parameters:**
-
-| Parameter              | Default | Description                                                                                                                  |
-|------------------------|---------|------------------------------------------------------------------------------------------------------------------------------|
-| `distributionEnabled`  | `false` | When `false`, records whose owner is a remote node are dropped. When `true`, they are forwarded to the owning node via the flusher. |
-
-**Response:**
-
-```json
-{
-  "id": "1712534400000000000",
-  "total": 1000,
-  "accepted_local": 920,
-  "accepted_remote": 60,
-  "dropped": 0,
-  "no_match": 15,
-  "invalid": 5,
-  "errors": ["line 7: unexpected end of JSON input"]
-}
-```
-
-**Outcome counters:**
-
-- `accepted_local` — entity owned by this node, counter incremented in-process.
-- `accepted_remote` — entity owned by another node, increment forwarded to its flusher (only when `distributionEnabled=true`).
-- `dropped` — entity is non-local and `distributionEnabled=false`, or no flusher is configured.
-- `no_match` — no accounting rule matched the path.
-- `invalid` — line failed JSON parsing or required-field validation.
-
-**Example:**
-
-```bash
-cat <<'EOF' > /tmp/load.ndjson
-{"sourceIP":"10.0.0.1","path":"/api/v1/users"}
-{"sourceIP":"10.0.0.2","path":"/api/v1/users"}
-{"sourceIP":"10.0.0.3","path":"/api/v1/orders","headers":{"X-API-Key":"abc"}}
-EOF
-
-curl --digest -u ":$DRL_PRIVATE_API_KEY" \
-  -X POST \
-  -H "Content-Type: application/x-ndjson" \
-  --data-binary @/tmp/load.ndjson \
-  "http://localhost:8082/accounting/load?distributionEnabled=true"
-```
-
-Bulk-load outcomes are exported via the `drl_accounting_bulk_load_total{result=...}` Prometheus counter.
-
-### Digest Authentication (SHA-256)
-
-The internal API uses HTTP Digest Authentication (RFC 7616) with SHA-256 algorithm. This challenge-response mechanism
-never transmits the password over the wire, making it suitable for secure API authentication.
-
-#### Quick Testing with curl
-
-The simplest way to test the API is using curl's built-in digest authentication support:
-
-```bash
-# Testing the Private API with Digest (empty username, API key as password)
-curl --digest -u ":$DRL_PRIVATE_API_KEY" http://localhost:8082/status
-
-# Or with explicit admin username
-curl --digest -u "admin:$DRL_PRIVATE_API_KEY" http://localhost:8082/status
-
-# Get the blocked entities 
-curl --silent --digest -u "admin:$DRL_PRIVATE_API_KEY" drl-drl-1:8082/blocked-entity/ | jq
-
-# Add an entitiy
-
-```
-
-#### Authentication Flow
-
-1. **Client Request**: Client requests a protected resource
-2. **Server Challenge**: Server responds with 401 and `WWW-Authenticate` header containing nonce, realm, and algorithm
-3. **Client Response**: Client calculates digest response using password and sends `Authorization` header
-4. **Server Verification**: Server verifies the digest and grants access
-
-#### Manual Authentication Example
-
-**Step 1: Get Challenge**
-
-```bash
-curl -v http://localhost:8082/status
-```
-
-Response (401 Unauthorized):
-
-```
-WWW-Authenticate: Digest realm="DRL Internal API", nonce="abc123...", algorithm=SHA-256, qop="auth"
-```
-
-**Step 2: Send Authenticated Request**
-
-The digest response is calculated as:
-- `A1 = SHA256(username:realm:password)`
-- `A2 = SHA256(method:uri)`
-- `response = SHA256(A1:nonce:nc:cnonce:qop:A2)`
-
-#### Programmatic Example (Go)
-
-```go
-package main
-
-import (
-	"crypto/sha256"
-	"encoding/hex"
-	"fmt"
-	"net/http"
-)
-
-func sha256Hash(s string) string {
-	h := sha256.Sum256([]byte(s))
-	return hex.EncodeToString(h[:])
-}
-
-func main() {
-	// Parse the challenge from WWW-Authenticate header
-	realm := "DRL Internal API"
-	nonce := "server-nonce-here"
-	uri := "/status"
-	method := "GET"
-	username := "admin"
-	password := "your-api-key"
-	cnonce := "client-nonce"
-	nc := "00000001"
-	qop := "auth"
-
-	// Calculate digest
-	a1 := sha256Hash(fmt.Sprintf("%s:%s:%s", username, realm, password))
-	a2 := sha256Hash(fmt.Sprintf("%s:%s", method, uri))
-	response := sha256Hash(fmt.Sprintf("%s:%s:%s:%s:%s:%s", a1, nonce, nc, cnonce, qop, a2))
-
-	// Build Authorization header
-	auth := fmt.Sprintf(`Digest username="%s", realm="%s", nonce="%s", uri="%s", algorithm=SHA-256, qop=%s, nc=%s, cnonce="%s", response="%s"`,
-		username, realm, nonce, uri, qop, nc, cnonce, response)
-
-	req, _ := http.NewRequest("GET", "http://localhost:8082/status", nil)
-	req.Header.Set("Authorization", auth)
-	// ... execute request
-}
-```
-
-### Security Notes
-
-- **Production Deployment**: The internal API should be bound to `localhost` or protected by mTLS/VPN
-- **API Key Requirements**: Must be at least 16 characters
-- **Credential Storage**: DRL never stores the raw API key. Only the A1 hash (`SHA256(username:realm:password)`) is kept in memory
-- **Replay Protection**: Each nonce can only be used once and expires after 5 minutes
-- **Error Messages**: Authentication errors do not reveal whether the username exists or if credentials are incorrect
-
-## Docker Deployment
-
-### Docker Compose
-
-```bash
-# Start the full stack (DRL cluster + Envoy + workload)
-docker-compose up -d
-
-# Scale DRL replicas
-docker-compose up -d --scale drl=5
-```
-
-### Environment Variables for Docker
-
-```yaml
-services:
-  drl:
-    image: drl:latest
-    environment:
-      - DRL_PRIVATE_API_KEY=your-secure-api-key-minimum-16-chars
-      - DRL_MEMBERSHIP_SERVICE_NAME=drl
-      - DRL_LOGGING_LEVEL=info
-```
-
-## Metrics
-
-DRL exposes Prometheus metrics on the configured metrics port (default: 9091).
-
-### Available Metrics
-
-| Metric                                  | Type    | Description                                       |
-|-----------------------------------------|---------|---------------------------------------------------|
-| `drl_membership_cluster_size`           | Gauge   | Number of active cluster members                  |
-| `drl_membership_events_total`           | Counter | Membership events by type (join, leave, fail)     |
-| `drl_membership_reliable_msgs_total`    | Counter | Reliable messages sent via memberlist              |
-| `drl_membership_best_effort_msgs_total` | Counter | Best-effort messages sent via memberlist            |
-| `drl_accounting_msg_recv_total`         | Counter | Accounting batch messages received                 |
-| `drl_accounting_flush_total`            | Counter | Accounting batch flushes sent                      |
-| `drl_accounting_local_increments_total` | Counter | Local accounting increments (this node is owner)   |
-| `drl_accounting_remote_increments_total`| Counter | Remote accounting increments (forwarded to owner)  |
-| `drl_ratelimit_blocks_total`            | Counter | Entities blocked by the rate limiter               |
-| `drl_accounting_bulk_load_total`        | Counter | Bulk-load ingest outcomes by `result` label        |
-
-### Endpoints
-
-- `GET /metrics` - Prometheus metrics endpoint
-- `GET /health` - Health check endpoint
-
-## Development
-
-### Running Tests
-
-```bash
-mise run test
-```
-
-### Running Linter
-
-```bash
-mise run lint
-```
-
-### Building
-
-```bash
-mise run build
-```
-
-## Internal Accounting
-
-DRL uses a **shadow accounting** model: incoming requests are counted asynchronously in the background without
-adding latency to the Envoy request path.
-
-### Entity Hashing & Ownership
-
-Each rate-limiting entity (IP + path + configured headers) is hashed with xxHash64 to produce a deterministic key.
-A consistent hash ring distributes key ownership across cluster nodes. The **owner node** is the single authority
-for that entity's counter.
-
-### Batched Accounting via Memberlist
-
-When a non-owner node sees a request, it **enqueues** the increment into a per-owner buffer. A background goroutine
-periodically flushes these buffers:
-
-- **Flush Interval** (default `10s`): How often batches are sent.
-- **Max Batch Size** (default `1000`): Triggers an immediate flush when the buffer grows past this threshold.
-
-Both values are configurable via KDL (`accounting.settings.flush-interval`, `accounting.settings.max-batch-size`).
-
-Batches are serialized as **Protobuf** `DrlMessage` envelopes (containing a `CounterBatch`) and sent using
-`memberlist.SendBestEffort` — a UDP-based, fire-and-forget delivery that fits DRL's "Availability > Consistency"
-philosophy. Packet loss is tolerable for shadow accounting.
-
-### Zero-Copy Optimisation
-
-`sync.Pool` is used to reuse `CounterBatch` protobuf objects, avoiding GC pressure on the hot path.
-
-## Internal Membership
-
-DRL uses [Hashicorp Memberlist](https://github.com/hashicorp/memberlist) for cluster formation, failure detection,
-and inter-node messaging.
-
-### P2P Discovery
-
-Nodes discover peers via **DNS resolution** of a configurable service name (e.g. `drl`). On startup, each node
-resolves the name, filters its own IP, and joins the cluster.
-
-### State Sync (Warm Bootstrap)
-
-When a new node joins, memberlist's **TCP Push/Pull** protocol transfers the full blocklist from an existing peer.
-This prevents a "vulnerability window" where a freshly-started node would allow traffic that should be blocked.
-The node reports **Ready** only after the initial sync completes (or a configurable timeout expires).
-
-### Gossip Tuning
-
-For low-latency convergence the gossip protocol is tuned with:
-
-- **GossipInterval** (default `50ms`): Time between gossip rounds.
-- **GossipNodes** (default `5`): Number of peers contacted per round.
-
-Both are configurable via KDL (`membership.gossip-interval`, `membership.gossip-nodes`).
-
-### Reliable Blocklist Propagation
-
-When an entity exceeds its rate limit, the owner node blocks it locally and broadcasts a `BlockEvent` to every
-peer using `memberlist.SendReliable` (TCP, guaranteed delivery). This ensures all nodes update their replicated
-blocklist immediately, so the next request from any Envoy is rejected at the local blocklist check (O(1)).
-
-All inter-node messages use a unified **Protobuf `DrlMessage` envelope** with a `oneof` discriminator:
-
-| Message Type       | Delivery         | Use Case                      |
-|-------------------|------------------|-------------------------------|
-| `CounterBatch`     | `SendBestEffort` | Shadow accounting batches     |
-| `BlockEvent`       | `SendReliable`   | Blocklist propagation         |
-| `UnblockEvent`     | `SendReliable`   | Blocklist removal             |
-| `HandoverPayload`  | `SendReliable`   | Graceful state evacuation     |
-
-## Lifecycle & Resilience
-
-### Graceful State Handover
-
-During rolling updates or scale-down events, a departing DRL node evacuates its local accounting state to a
-healthy peer (the **Adopter**) to prevent rate-limit counter loss.
-
-**Sender (Leaving Node) Sequence:**
-
-1. SIGTERM received → stop accepting requests (API + gRPC stopped)
-2. Flush pending accounting batches to their owners
-3. Snapshot all local accounting counters
-4. Compress snapshot with **Zstd** (fast, low-CPU compression)
-5. Send compressed `HandoverPayload` via `memberlist.SendReliable` to the first available peer
-6. If the adopter rejects (also shutting down), retry with the next peer
-7. Hard timeout of **10 seconds** — if handover fails, log error and proceed to avoid blocking the orchestrator
-
-**Adopter (Receiving Node) Sequence:**
-
-1. Receive `HandoverPayload` via `NotifyMsg`
-2. If this node is also shutting down → reject immediately
-3. Decompress Zstd payload → unmarshal `CounterBatch`
-4. Wait a **Settling Period** (2 seconds) for the hash ring to converge after the sender's departure
-5. Redistribute each entry to its new owner:
-   - If this node owns the key → merge into local `AccountingCache`
-   - If another node owns the key → enqueue to the `Flusher` for the next batch cycle
-6. No `BlockEvents` are triggered from handover merges to prevent double-blocking
-
-### Why the Settling Period?
-
-When a node leaves the cluster, the consistent hash ring must update across all remaining nodes. The 2-second
-settling period ensures the ring has converged before the adopter re-calculates ownership, preventing entries
-from being routed to the departed node.
-
-## Architecture
-
-```
-┌─────────────────────────────────────────────────────────────┐
-│                        Envoy Sidecar                        │
-│  ┌─────────────┐    ┌─────────────────────────────────────┐ │
-│  │   Request   │───▶│        DRL Rate Limiter             │ │
-│  │   Traffic   │    │  ┌─────────────────────────────┐    │ │
-│  │             │◀───│  │     Local Blocklist         │    │ │
-│  └─────────────┘    │  │     (Replicated)            │    │ │
-│                     │  └─────────────────────────────┘    │ │
-│                     │             │                       │ │
-│                     │             ▼                       │ │
-│                     │  ┌─────────────────────────────┐    │ │
-│                     │  │   Hashed Accounting         │    │ │
-│                     │  │   (Async Background)        │    │ │
-│                     │  └─────────────────────────────┘    │ │
-│                     └───────────────┬─────────────────────┘ │
-└─────────────────────────────────────┼───────────────────────┘
-                                      │
-                    ┌─────────────────┼─────────────────┐
-                    │                 │                 │
-                    ▼                 ▼                 ▼
-              ┌──────────┐     ┌──────────┐     ┌──────────┐
-              │  DRL-1   │◀───▶│  DRL-2   │◀───▶│  DRL-3   │
-              │(Owner A) │     │(Owner B) │     │(Owner C) │
-              └──────────┘     └──────────┘     └──────────┘
-                    ▲                 ▲                 ▲
-                    │                 │                 │
-                    └─────────────────┴─────────────────┘
-                           Memberlist Gossip
-```
+## Documentation
+
+| Topic | Description |
+|-------|-------------|
+| [Getting Started](https://gchiesa.github.io/drl/) | Quick start and overview |
+| [Configuration](https://gchiesa.github.io/drl/configuration/) | Complete KDL config reference and environment variables |
+| [Membership](https://gchiesa.github.io/drl/membership/) | Cluster formation, gossip, warm-bootstrap, block propagation |
+| [Cache](https://gchiesa.github.io/drl/cache/) | In-memory blocklist and accounting cache architecture |
+| [Accounting](https://gchiesa.github.io/drl/accounting/) | Shadow accounting, entity hashing, batched flushing |
+| [gRPC API](https://gchiesa.github.io/drl/api/) | Envoy `ratelimit.v3` service implementation |
+| [Internal HTTP API](https://gchiesa.github.io/drl/internal-api/) | Management endpoints and digest authentication |
+
+## CI reports
+
+| Job | Description | Reports |
+|-----|-------------|---------|
+| Unit Tests | Lint + Go unit tests with coverage | [Pipeline dashboard](https://app.circleci.com/pipelines/github/gchiesa/drl?branch=main) |
+| Functional (1 replica) | Single-instance rate limiting | Artifacts → `functional-test-report` |
+| Functional (5 replicas) | 5-node cluster functional test | Artifacts → `functional-test-report` |
+| Functional (10 replicas) | 10-node cluster functional test | Artifacts → `functional-test-report` |
+| Handover Test | Graceful state handover during rolling update | Artifacts → `handover-test-report` |
+| Performance Test | Throughput benchmark (main branch only) | Artifacts → `performance-test-report` |
+
+Test artifacts are stored per pipeline run. Navigate to the relevant pipeline in the
+[CircleCI dashboard](https://app.circleci.com/pipelines/github/gchiesa/drl) and open the **Artifacts** tab
+of the corresponding job.
 
 ## License
 
