@@ -4,3 +4,8 @@ bin
 # golang
 coverage.out
 test-output.json
+
+# docs (Astro)
+docs/node_modules/
+docs/dist/
+docs/.astro/
