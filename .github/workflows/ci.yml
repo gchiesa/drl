@@ -226,3 +226,80 @@ jobs:
         with:
           name: handover-test-report
           path: test-suite/handover/results/
+
+  # ── Publish HTML reports to GitHub Pages (main branch only) ────────────────
+  #
+  # Runs after all test jobs regardless of their outcome so reports from
+  # partially-failed runs are still published. Uses keep_files: true so
+  # this deploy doesn't wipe the Hugo documentation deployed by docs.yml.
+  deploy-reports:
+    name: Publish CI Reports
+    needs:
+      - functional-single-instance
+      - functional-5-instances
+      - functional-10-instances
+      - handover-test
+    # Only publish from main; skip on pull-request builds.
+    if: always() && github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        # actions/checkout v4
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
+
+      # Download each test artifact into its own subdirectory so they land at
+      # separate URLs under /reports/ on the published site.
+      - name: Download functional-single-instance report
+        # actions/download-artifact v4
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        with:
+          name: functional-single-instance-report
+          path: /tmp/reports/functional-single-instance/
+
+      - name: Download functional-5-instances report
+        # actions/download-artifact v4
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        with:
+          name: functional-5-instances-report
+          path: /tmp/reports/functional-5-instances/
+
+      - name: Download functional-10-instances report
+        # actions/download-artifact v4
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        with:
+          name: functional-10-instances-report
+          path: /tmp/reports/functional-10-instances/
+
+      - name: Download handover report
+        # actions/download-artifact v4
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        with:
+          name: handover-test-report
+          path: /tmp/reports/handover/
+
+      # Copy each directory's first HTML file to index.html so GitHub Pages
+      # serves it at a clean URL (e.g. /reports/handover/) without the filename.
+      - name: Normalise report filenames to index.html
+        run: |
+          for dir in /tmp/reports/*/; do
+            html=$(find "$dir" -maxdepth 1 -name "*.html" | sort | head -1)
+            if [ -n "$html" ] && [ "$(basename "$html")" != "index.html" ]; then
+              cp "$html" "$(dirname "$html")/index.html"
+            fi
+          done
+
+      # keep_files: true prevents this deploy from deleting the Hugo docs that
+      # docs.yml publishes to the same gh-pages branch under docs/.
+      - name: Deploy reports to gh-pages (docs/reports/)
+        # peaceiris/actions-gh-pages v4
+        uses: peaceiris/actions-gh-pages@e9c66a37f080288a11235e32cbe2dc5fb3a679cc
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          publish_dir: /tmp/reports
+          publish_branch: gh-pages
+          # Nest under docs/ to match the GitHub Pages source directory.
+          destination_dir: docs/reports
+          # Do not wipe existing content (Hugo docs live alongside reports).
+          keep_files: true
+          commit_message: "ci: publish test reports [skip ci]"
+          enable_jekyll: false

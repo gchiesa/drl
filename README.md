@@ -1,6 +1,7 @@
 # DRL — Distributed Rate Limiter
 
-[![CircleCI](https://dl.circleci.com/status-badge/img/gh/gchiesa/drl/tree/main.svg?style=svg&circle-token=CCIPRJ_W6h9tCvyGe4fN6NWBNXAiw_f2dae718b887540404732797e971522a5f7684f4)](https://dl.circleci.com/status-badge/redirect/gh/gchiesa/drl/tree/main)
+[![CI](https://github.com/gchiesa/drl/actions/workflows/ci.yml/badge.svg)](https://github.com/gchiesa/drl/actions/workflows/ci.yml)
+[![Performance](https://github.com/gchiesa/drl/actions/workflows/performance.yml/badge.svg)](https://github.com/gchiesa/drl/actions/workflows/performance.yml)
 
 A high-performance, horizontally scalable rate-limiting service designed for Envoy sidecars. DRL eliminates
 the latency of external databases by using a **Peer-to-Peer Hybrid Architecture**:
@@ -48,28 +49,25 @@ graph TB
 
 | Topic | Description |
 |-------|-------------|
-| [Getting Started](https://gchiesa.github.io/drl/) | Quick start and overview |
-| [Configuration](https://gchiesa.github.io/drl/configuration/) | Complete KDL config reference and environment variables |
-| [Membership](https://gchiesa.github.io/drl/membership/) | Cluster formation, gossip, warm-bootstrap, block propagation |
-| [Cache](https://gchiesa.github.io/drl/cache/) | In-memory blocklist and accounting cache architecture |
-| [Accounting](https://gchiesa.github.io/drl/accounting/) | Shadow accounting, entity hashing, batched flushing |
-| [gRPC API](https://gchiesa.github.io/drl/api/) | Envoy `ratelimit.v3` service implementation |
-| [Internal HTTP API](https://gchiesa.github.io/drl/internal-api/) | Management endpoints and digest authentication |
+| [Getting Started](https://drl.gchiesa.dev/) | Quick start and overview |
+| [Configuration](https://drl.gchiesa.dev/configuration/) | Complete KDL config reference and environment variables |
+| [Membership](https://drl.gchiesa.dev/membership/) | Cluster formation, gossip, warm-bootstrap, block propagation |
+| [Cache](https://drl.gchiesa.dev/cache/) | In-memory blocklist and accounting cache architecture |
+| [Accounting](https://drl.gchiesa.dev/accounting/) | Shadow accounting, entity hashing, batched flushing |
+| [gRPC API](https://drl.gchiesa.dev/api/) | Envoy `ratelimit.v3` service implementation |
+| [Internal HTTP API](https://drl.gchiesa.dev/internal-api/) | Management endpoints and digest authentication |
 
 ## CI reports
 
-| Job | Description | Reports |
-|-----|-------------|---------|
-| Unit Tests | Lint + Go unit tests with coverage | [Pipeline dashboard](https://app.circleci.com/pipelines/github/gchiesa/drl?branch=main) |
-| Functional (1 replica) | Single-instance rate limiting | Artifacts → `functional-test-report` |
-| Functional (5 replicas) | 5-node cluster functional test | Artifacts → `functional-test-report` |
-| Functional (10 replicas) | 10-node cluster functional test | Artifacts → `functional-test-report` |
-| Handover Test | Graceful state handover during rolling update | Artifacts → `handover-test-report` |
-| Performance Test | Throughput benchmark (main branch only) | Artifacts → `performance-test-report` |
+Reports are published to GitHub Pages after each successful run on `main`.
 
-Test artifacts are stored per pipeline run. Navigate to the relevant pipeline in the
-[CircleCI dashboard](https://app.circleci.com/pipelines/github/gchiesa/drl) and open the **Artifacts** tab
-of the corresponding job.
+| Job | Report |
+|-----|--------|
+| Functional (1 replica) | [functional-single-instance](https://drl.gchiesa.dev/reports/functional-single-instance/) |
+| Functional (5 replicas) | [functional-5-instances](https://drl.gchiesa.dev/reports/functional-5-instances/) |
+| Functional (10 replicas) | [functional-10-instances](https://drl.gchiesa.dev/reports/functional-10-instances/) |
+| Handover | [handover](https://drl.gchiesa.dev/reports/handover/) |
+| Performance | [performance](https://drl.gchiesa.dev/reports/performance/) |
 
 ## License
 

@@ -82,5 +82,8 @@ jobs:
           # GitHub Pages is configured to serve from the docs/ subdirectory
           # of gh-pages, so we place the built site there.
           destination_dir: docs
+          # keep_files: true prevents wiping docs/reports/ which ci.yml and
+          # performance.yml publish independently to the same gh-pages branch.
+          keep_files: true
           commit_message: "docs: deploy GitHub Pages [skip ci]"
           enable_jekyll: false
