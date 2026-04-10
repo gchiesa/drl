@@ -1,0 +1,77 @@
+# Docs Workflow
+#
+# Builds the Astro/Starlight documentation site and deploys it to the
+# gh-pages branch whenever docs source or the workflow itself changes on main.
+#
+# The gh-pages branch is what GitHub Pages serves at:
+#   https://gchiesa.github.io/drl/
+#
+# REPOSITORY SETUP REQUIRED (one-time):
+#   Settings → Pages → Source: "Deploy from a branch"
+#               Branch: gh-pages / (root)
+#   Settings → Actions → General → Workflow permissions:
+#               "Read and write permissions" (needed by peaceiris/actions-gh-pages)
+
+name: Docs
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "docs/**"
+      - "README.md"
+      - ".github/workflows/docs.yml"
+
+jobs:
+  deploy-docs:
+    name: Build & Deploy Docs
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        # Full history is not required for docs; depth 1 is sufficient.
+        # actions/checkout v4
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
+
+      - name: Set up Node.js 22
+        # Matches the Node version used previously (cimg/node:22.12).
+        # actions/setup-node v4
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: "22"
+
+      - name: Cache npm dependencies
+        # actions/cache v4
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830
+        with:
+          path: docs/node_modules
+          # Cache is invalidated when the lockfile changes.
+          key: npm-${{ runner.os }}-${{ hashFiles('docs/package-lock.json', 'docs/package.json') }}
+          restore-keys: npm-${{ runner.os }}-
+
+      - name: Install docs dependencies
+        # Use ci (not install) to respect the lockfile exactly.
+        run: npm ci
+        working-directory: docs
+
+      - name: Build Astro docs site
+        # Output lands in docs/dist/ as configured in astro.config.mjs.
+        run: npm run build
+        working-directory: docs
+
+      # peaceiris/actions-gh-pages commits docs/dist/ to the gh-pages branch.
+      # It adds a .nojekyll file automatically so GitHub Pages serves Astro
+      # assets (underscore-prefixed dirs like _astro/) without jekyll filtering.
+      - name: Deploy to gh-pages branch
+        # peaceiris/actions-gh-pages v4
+        uses: peaceiris/actions-gh-pages@e9c66a37f080288a11235e32cbe2dc5fb3a679cc
+        with:
+          # GITHUB_TOKEN is provided automatically by Actions; no secret needed.
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          # Directory to publish — the Astro build output.
+          publish_dir: docs/dist
+          # Branch where the built site is committed.
+          publish_branch: gh-pages
+          # Commit message recorded on the gh-pages branch.
+          commit_message: "docs: deploy GitHub Pages [skip ci]"
+          # Prevent Actions from running again on the gh-pages commit.
+          enable_jekyll: false
