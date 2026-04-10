@@ -1,6 +1,7 @@
 ---
 title: Internal HTTP API
 description: Management endpoints, digest authentication, and usage examples for DRL's internal HTTP API.
+weight: 7
 ---
 
 DRL exposes an internal HTTP API on port `8082` (configurable) for cluster management, observability, and
@@ -28,7 +29,7 @@ internal-api {
 The API uses HTTP Digest Authentication (RFC 7616) with SHA-256. The challenge-response mechanism **never
 transmits the password over the wire**:
 
-```mermaid
+{{< mermaid >}}
 sequenceDiagram
     participant C as Client
     participant S as DRL Internal API
@@ -38,7 +39,7 @@ sequenceDiagram
     Note over C: Compute:\nA1 = SHA256(username:realm:password)\nA2 = SHA256(method:uri)\nresponse = SHA256(A1:nonce:nc:cnonce:qop:A2)
     C->>S: GET /status Authorization: Digest username="...", response="..."
     S-->>C: 200 OK
-```
+{{< /mermaid >}}
 
 ### Using curl (recommended)
 

@@ -1,11 +1,13 @@
 ---
-title: DRL - Distributed Rate Limiter
-description: A high-performance, horizontally scalable rate-limiting service for Envoy sidecars using a P2P Hybrid Architecture.
+title: DRL — Distributed Rate Limiter
+description: >
+  A high-performance, horizontally scalable rate-limiting service for Envoy
+  sidecars using a P2P Hybrid Architecture.
+weight: 1
 ---
 
 DRL is a high-performance, horizontally scalable rate-limiting service designed to run alongside Envoy proxies. It
-eliminates external-database round-trips by keeping all enforcement state in-process, distributed via a gossip
-mesh.
+eliminates external-database round-trips by keeping all enforcement state in-process, distributed via a gossip mesh.
 
 ## How it works
 
@@ -81,9 +83,9 @@ accounting {
 
 | Topic | Description |
 |-------|-------------|
-| [Configuration](./configuration) | Complete KDL config reference and all environment variables |
-| [Membership](./membership) | Cluster formation, gossip, warm-bootstrap, and block propagation |
-| [Cache](./cache) | In-memory blocklist and accounting cache architecture |
-| [Accounting](./accounting) | Shadow accounting model, entity hashing, and batched flush |
-| [gRPC API](./api) | Envoy `ratelimit.v3` service implementation |
-| [Internal HTTP API](./internal-api) | Management endpoints, digest authentication, and examples |
+| [Configuration]({{< ref "configuration" >}}) | Complete KDL config reference and all environment variables |
+| [Membership]({{< ref "membership" >}}) | Cluster formation, gossip, warm-bootstrap, and block propagation |
+| [Cache]({{< ref "cache" >}}) | In-memory blocklist and accounting cache architecture |
+| [Accounting]({{< ref "accounting" >}}) | Shadow accounting model, entity hashing, and batched flush |
+| [gRPC API]({{< ref "api" >}}) | Envoy `ratelimit.v3` service implementation |
+| [Internal HTTP API]({{< ref "internal-api" >}}) | Management endpoints, digest authentication, and examples |

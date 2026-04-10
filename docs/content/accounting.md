@@ -1,6 +1,7 @@
 ---
 title: Accounting
 description: Shadow accounting model, entity hashing, consistent-ring ownership, and batched flushing in DRL.
+weight: 5
 ---
 
 The `internal/accounting` package implements the **shadow accounting** model: request counters are updated
@@ -38,7 +39,7 @@ The entity key is mapped to an **owner node** using a consistent hash ring (back
 [buraksezer/consistent](https://github.com/buraksezer/consistent)). The owner is the single source of truth
 for that entity's counter.
 
-```mermaid
+{{< mermaid >}}
 flowchart TD
     R[gRPC Request\nIP + Path + Headers] --> H[xxHash64\nentity key]
     H --> C{Consistent Ring\nGetOwner}
@@ -48,10 +49,10 @@ flowchart TD
     T -->|Yes| B[Add to BlocklistCache\n+ BroadcastBlock]
     T -->|No| OK[OK]
     Q --> F[Batch flush\nvia UDP to owner]
-```
+{{< /mermaid >}}
 
 When the hash ring changes (node join or leave), ownership of some keys shifts to different nodes.
-The graceful handover mechanism (see [Membership](./membership)) transfers counters to new owners before a
+The graceful handover mechanism (see [Membership]({{< ref "membership" >}})) transfers counters to new owners before a
 node exits.
 
 ## Batched flushing

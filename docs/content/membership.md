@@ -1,6 +1,7 @@
 ---
 title: Membership
 description: Cluster formation, gossip protocol, warm-bootstrap state sync, and block propagation in DRL.
+weight: 3
 ---
 
 The `internal/membership` package manages everything related to cluster topology: peer discovery, failure detection,
@@ -46,7 +47,7 @@ update would open a "vulnerability window" where a blocked entity can slip throu
 The `StateDelegate` implements the Memberlist `Delegate` interface. When a new node joins, Memberlist
 automatically initiates a **TCP Push/Pull** exchange with an existing peer:
 
-```mermaid
+{{< mermaid >}}
 sequenceDiagram
     participant N as New Node
     participant DNS as DNS
@@ -59,7 +60,7 @@ sequenceDiagram
     N->>N: MergeSnapshot → hydrate BlocklistCache
     Note over N: Node reports Ready
     N-->>N: Start serving gRPC
-```
+{{< /mermaid >}}
 
 The node only reports **Ready** after the initial sync completes (or `cache.sync-timeout-seconds` expires — an
 acceptable fallback to avoid blocking deployments).
@@ -81,7 +82,7 @@ cluster the defaults achieve sub-second convergence.
 When a rate-limit threshold is breached, the owner node must propagate the block to all peers so they can enforce
 it on their local Envoy at O(1) cost.
 
-```mermaid
+{{< mermaid >}}
 sequenceDiagram
     participant O as Owner Node
     participant P1 as Peer 1
@@ -94,7 +95,7 @@ sequenceDiagram
     P1->>P1: Add entity to local BlocklistCache
     P2->>P2: Add entity to local BlocklistCache
     Note over O,P2: All nodes now reject this entity at O(1)
-```
+{{< /mermaid >}}
 
 `SendReliable` uses TCP and guarantees delivery. This is intentionally more expensive than the best-effort UDP
 used for accounting — correctness of blocklist propagation is non-negotiable.
@@ -136,7 +137,7 @@ All keys must be valid AES lengths: **16, 24, or 32 bytes**.
 When a DRL node receives `SIGTERM`, it evacuates its accounting counters to a healthy peer (the _Adopter_) so
 that rate-limit counters are not lost during rolling updates.
 
-```mermaid
+{{< mermaid >}}
 sequenceDiagram
     participant L as Leaving Node
     participant A as Adopter (peer)
@@ -153,7 +154,7 @@ sequenceDiagram
     A->>R: Recalculate ownership after ring converges
     A->>A: Merge local entries into AccountingCache
     A->>A: Enqueue remote entries to Flusher
-```
+{{< /mermaid >}}
 
 The **settling period** (2 seconds) exists because the consistent hash ring must converge across all remaining
 nodes after the departing node leaves. If the adopter re-calculates ownership before the ring update propagates,

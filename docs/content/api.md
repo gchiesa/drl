@@ -1,6 +1,7 @@
 ---
 title: gRPC Rate Limit API
 description: Envoy ratelimit.v3 gRPC service implementation in DRL.
+weight: 6
 ---
 
 The `internal/api` package implements the Envoy `ratelimit.v3` gRPC service, which is the primary interface
@@ -31,7 +32,7 @@ func NewRateLimitServer(
 
 ## Request processing flow
 
-```mermaid
+{{< mermaid >}}
 sequenceDiagram
     participant E as Envoy
     participant D as DRL gRPC Server
@@ -49,7 +50,7 @@ sequenceDiagram
         D-->>E: OK (code 200)
         D-)A: Increment(entityKey) [async goroutine]
     end
-```
+{{< /mermaid >}}
 
 The response is returned to Envoy **before** the accounting goroutine completes. This is the core of the
 shadow accounting model — no counter write ever sits on the Envoy request path.
@@ -111,7 +112,7 @@ DRL extracts rate-limiting entity components from the Envoy `RateLimitDescriptor
 | `path` | URI path |
 | Any other key | Header value (if the key matches a configured header name) |
 
-The entity key is then hashed with xxHash64 and looked up in the blocklist. See [Accounting](./accounting)
+The entity key is then hashed with xxHash64 and looked up in the blocklist. See [Accounting]({{< ref "accounting" >}})
 for details on how header matching works in accounting rules.
 
 ## Max hops

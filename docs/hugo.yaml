@@ -1,0 +1,42 @@
+baseURL: https://drl.gchiesa.dev/
+languageCode: en-us
+title: DRL — Distributed Rate Limiter
+
+# Hugo modules: Hextra theme is pulled as a Go module — no npm, no node_modules.
+module:
+  imports:
+    - path: github.com/imfing/hextra
+
+# Goldmark (Hugo's markdown renderer) — unsafe enables raw HTML passthrough.
+markup:
+  goldmark:
+    renderer:
+      unsafe: true
+  highlight:
+    # Use Hextra's built-in syntax highlighting (no external JS needed).
+    noClasses: false
+
+params:
+  description: >
+    A high-performance, horizontally scalable rate-limiting service for
+    Envoy sidecars using a P2P Hybrid Architecture.
+
+  navbar:
+    displayTitle: true
+    displayLogo: false
+    links:
+      - name: GitHub
+        url: https://github.com/gchiesa/drl
+        external: true
+
+  footer:
+    displayCopyright: true
+    displayPoweredBy: false
+
+  editURL:
+    enable: true
+    base: https://github.com/gchiesa/drl/edit/main/docs/content/
+
+  # Hextra page width — "wide" gives more room for tables and code blocks.
+  page:
+    width: wide

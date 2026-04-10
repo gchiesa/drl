@@ -1,6 +1,7 @@
 ---
 title: Cache
 description: In-memory blocklist and accounting cache architecture in DRL.
+weight: 4
 ---
 
 The `internal/cache` package owns the two hot-path data stores that every Envoy request touches:
@@ -18,13 +19,13 @@ library that avoids the lock contention of `sync.Map` and the GC overhead of poi
 The blocklist is the primary enforcement mechanism. Every DRL node maintains a **complete replica** of the
 cluster-wide blocklist so that any node can reject a blocked entity instantly, without network round-trips.
 
-```mermaid
+{{< mermaid >}}
 flowchart LR
     E[Envoy gRPC Request] --> C{BlocklistCache\nContains?}
     C -->|Yes| D[Return OVER_LIMIT]
     C -->|No| O[Return OK]
     O --> A[Async accounting\nin background]
-```
+{{< /mermaid >}}
 
 ### API
 
@@ -82,7 +83,7 @@ cache {
 ## AccountingCache
 
 The accounting cache stores per-entity request counters on the **owner node** only. Non-owner nodes forward
-increments to the owner via the Flusher (see [Accounting](./accounting)).
+increments to the owner via the Flusher (see [Accounting]({{< ref "accounting" >}})).
 
 ```go
 // NewAccountingCache creates a new accounting cache sized by the config.

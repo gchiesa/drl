@@ -1,6 +1,7 @@
 ---
 title: Configuration
 description: Complete KDL configuration reference and environment variable overrides for DRL.
+weight: 2
 ---
 
 DRL uses [KDL](https://kdl.dev/) configuration files. Configuration is applied in three layers (highest wins):
