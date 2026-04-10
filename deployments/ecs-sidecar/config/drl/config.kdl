@@ -1,0 +1,50 @@
+// DRL - Distributed Rate Limiter Configuration
+// ECS Sidecar deployment
+//
+// Peer discovery: DRL instances across ECS tasks discover each other via
+// AWS Cloud Map DNS (drl.drl.local). The memberlist library resolves
+// the DNS name to all task IPs and establishes gossip connections.
+
+listen {
+    grpc ":8081"
+    metrics ":9091"
+}
+
+membership {
+    service-name "drl"
+    port 7946
+    bind-addr "0.0.0.0"
+    // Cloud Map DNS for peer discovery across ECS tasks
+    // All task IPs registered under drl.drl.local resolve here
+    join-addr "drl.drl.local"
+    startup-delay "5s"
+}
+
+logging {
+    level "info"
+    format "json"
+}
+
+internal-api {
+    enabled true
+    address ":8082"
+}
+
+accounting {
+    settings {
+        algorithm "sliding-window"
+        retry-after-type "delay-seconds"
+    }
+    rules {
+        "catch-all" {
+            path-prefix "/"
+            limit 100
+            per "minute"
+        }
+        "anything" {
+            path-prefix "/anything"
+            limit 10
+            per "minute"
+        }
+    }
+}

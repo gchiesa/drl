@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project version="4">
+  <component name="MarkdownSettings">
+    <option name="customStylesheetText" value="body {&#10;  filter: invert(1);&#10;  background: #fff;&#10;  font-family: 'Segoe UI';&#10;  font-size: 16px;&#10;}&#10;&#10;img {&#10;  filter: invert(1);&#10;}&#10;" />
+    <option name="useCustomStylesheetText" value="true" />
+  </component>
+</project>
