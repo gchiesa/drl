@@ -1,0 +1,58 @@
+# Performance Workflow
+#
+# Runs only on the main branch, and only after the CI workflow succeeds.
+# Gated via workflow_run so it never races with or duplicates CI jobs.
+#
+# Uses ubuntu-latest; for more stable latency numbers you can swap the
+# runner to a self-hosted larger machine or a GitHub-hosted 4-core runner
+# (ubuntu-latest-4-core) if your plan includes it.
+
+name: Performance
+
+on:
+  workflow_run:
+    # Wait for the full CI suite to complete before starting.
+    workflows: [CI]
+    types: [completed]
+    # Only trigger for pushes that landed on main.
+    branches: [main]
+
+jobs:
+  performance-test:
+    name: Performance Test Suite
+    # Skip entirely if the upstream CI workflow did not succeed.
+    if: ${{ github.event.workflow_run.conclusion == 'success' }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        # actions/checkout v4
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
+
+      - name: Install mise and project tools
+        # jdx/mise-action v2
+        uses: jdx/mise-action@c37c93293d6b742fc901e1406b8f764f6fb19dac
+
+      # Pull all images in parallel — performance tests are sensitive to cold-start
+      # latency so we front-load the Docker pulls before the suite begins.
+      - name: Pull test infrastructure Docker images
+        run: |
+          docker pull mccutchen/go-httpbin:latest &
+          docker pull envoyproxy/envoy:v1.30-latest &
+          docker pull grafana/k6:latest &
+          wait
+
+      - name: Run performance test suite
+        run: mise run test-performance
+        timeout-minutes: 10
+
+      - name: Collect Docker logs on failure
+        if: failure()
+        run: docker compose -f test-suite/performance/docker-compose.yaml logs drl envoy
+
+      - name: Upload performance report
+        if: always()
+        # actions/upload-artifact v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: performance-test-report
+          path: test-suite/performance/results/
