@@ -1,10 +1,12 @@
 # Docs Workflow
 #
-# Builds the Astro/Starlight documentation site and deploys it to the
-# gh-pages branch whenever docs source or the workflow itself changes on main.
+# Builds the Hugo/Hextra documentation site and deploys it to the gh-pages
+# branch whenever docs source or the workflow itself changes on main.
 #
-# The gh-pages branch is what GitHub Pages serves at:
-#   https://gchiesa.github.io/drl/
+# Hugo is installed via mise (single Go binary — no npm, no node_modules).
+# The Hextra theme is fetched as a Go module (hugo mod get).
+#
+# The site is served at: https://gchiesa.github.io/drl/
 #
 # REPOSITORY SETUP REQUIRED (one-time):
 #   Settings → Pages → Source: "Deploy from a branch"
@@ -28,50 +30,54 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout repository
-        # Full history is not required for docs; depth 1 is sufficient.
         # actions/checkout v4
         uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
-
-      - name: Set up Node.js 22
-        # Matches the Node version used previously (cimg/node:22.12).
-        # actions/setup-node v4
-        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
         with:
-          node-version: "22"
+          # Fetch enough history for Hugo's .GitInfo and lastmod to work correctly.
+          fetch-depth: 0
 
-      - name: Cache npm dependencies
+      # mise installs Hugo (and all other project tools) from mise.toml.
+      # Hugo is a single static binary — no npm, no package manager involved.
+      - name: Install mise and project tools (includes Hugo)
+        # jdx/mise-action v2
+        uses: jdx/mise-action@c37c93293d6b742fc901e1406b8f764f6fb19dac
+
+      - name: Cache Hugo module downloads
+        # Cache the Hugo module cache (Go module proxy) to avoid re-fetching
+        # the Hextra theme on every run.
         # actions/cache v4
         uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830
         with:
-          path: docs/node_modules
-          # Cache is invalidated when the lockfile changes.
-          key: npm-${{ runner.os }}-${{ hashFiles('docs/package-lock.json', 'docs/package.json') }}
-          restore-keys: npm-${{ runner.os }}-
+          path: |
+            ~/.cache/hugo_cache
+          key: hugo-modules-${{ hashFiles('docs/go.sum') }}
+          restore-keys: hugo-modules-
 
-      - name: Install docs dependencies
-        # Use ci (not install) to respect the lockfile exactly.
-        run: npm ci
+      - name: Fetch Hugo theme (Hextra via Go modules)
+        # Equivalent to "go mod download" for Hugo — populates the module cache.
+        run: hugo mod get
         working-directory: docs
+        env:
+          HUGO_CACHEDIR: ~/.cache/hugo_cache
 
-      - name: Build Astro docs site
-        # Output lands in docs/dist/ as configured in astro.config.mjs.
-        run: npm run build
-        working-directory: docs
+      - name: Build Hugo docs site
+        # Output lands in docs/public/ (Hugo default destination).
+        # --minify reduces HTML/CSS/JS size; safe for static sites.
+        run: mise run docs-build
+        env:
+          HUGO_CACHEDIR: ~/.cache/hugo_cache
 
-      # peaceiris/actions-gh-pages commits docs/dist/ to the gh-pages branch.
-      # It adds a .nojekyll file automatically so GitHub Pages serves Astro
-      # assets (underscore-prefixed dirs like _astro/) without jekyll filtering.
+      # peaceiris/actions-gh-pages commits docs/public/ to the gh-pages branch.
+      # It automatically adds .nojekyll so GitHub Pages serves Hugo's
+      # underscore-prefixed asset directories without Jekyll interference.
       - name: Deploy to gh-pages branch
         # peaceiris/actions-gh-pages v4
         uses: peaceiris/actions-gh-pages@e9c66a37f080288a11235e32cbe2dc5fb3a679cc
         with:
-          # GITHUB_TOKEN is provided automatically by Actions; no secret needed.
+          # GITHUB_TOKEN is provided automatically — no extra secret needed.
           github_token: ${{ secrets.GITHUB_TOKEN }}
-          # Directory to publish — the Astro build output.
-          publish_dir: docs/dist
-          # Branch where the built site is committed.
+          # Hugo writes output to docs/public/ by default.
+          publish_dir: docs/public
           publish_branch: gh-pages
-          # Commit message recorded on the gh-pages branch.
           commit_message: "docs: deploy GitHub Pages [skip ci]"
-          # Prevent Actions from running again on the gh-pages commit.
           enable_jekyll: false

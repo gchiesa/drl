@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="utf-8" standalone="yes"?>
+<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9"
+  xmlns:xhtml="http://www.w3.org/1999/xhtml">
+  <url>
+    <loc>http://localhost:1313/drl/</loc>
+  </url><url>
+    <loc>http://localhost:1313/drl/configuration/</loc>
+  </url><url>
+    <loc>http://localhost:1313/drl/membership/</loc>
+  </url><url>
+    <loc>http://localhost:1313/drl/cache/</loc>
+  </url><url>
+    <loc>http://localhost:1313/drl/accounting/</loc>
+  </url><url>
+    <loc>http://localhost:1313/drl/api/</loc>
+  </url><url>
+    <loc>http://localhost:1313/drl/internal-api/</loc>
+  </url><url>
+    <loc>http://localhost:1313/drl/categories/</loc>
+  </url><url>
+    <loc>http://localhost:1313/drl/tags/</loc>
+  </url>
+</urlset>

@@ -2,6 +2,7 @@
 go = "1.25.6"
 golangci-lint = "2.8"
 protoc = "29.6"
+hugo = "0.160.1"
 
 [tasks.build]
 description = "Build the DRL binary"
@@ -30,3 +31,11 @@ run = "./ci/scripts/test-performance.sh"
 [tasks.test-handover]
 description = "Run handover functional test (docker compose + k6)"
 run = "./ci/scripts/test-handover.sh"
+
+[tasks.docs-build]
+description = "Build Hugo documentation site (output: docs/public/)"
+run = "./ci/scripts/docs-build.sh"
+
+[tasks.docs-serve]
+description = "Serve Hugo documentation site locally with live reload"
+run = "hugo server --disableFastRender --source docs"
