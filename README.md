@@ -61,13 +61,13 @@ graph TB
 
 Reports are published to GitHub Pages after each successful run on `main`.
 
-| Job | Report |
-|-----|--------|
-| Functional (1 replica) | [functional-single-instance](https://drl.gchiesa.dev/reports/functional-single-instance/) |
-| Functional (5 replicas) | [functional-5-instances](https://drl.gchiesa.dev/reports/functional-5-instances/) |
-| Functional (10 replicas) | [functional-10-instances](https://drl.gchiesa.dev/reports/functional-10-instances/) |
-| Handover | [handover](https://drl.gchiesa.dev/reports/handover/) |
-| Performance | [performance](https://drl.gchiesa.dev/reports/performance/) |
+| Job | Goal | Report |
+|-----|------|--------|
+| Functional (1 replica) | Validates core rate-limiting correctness on a single node: requests below the threshold are allowed; requests above it are blocked at the configured ratio. | [report](https://drl.gchiesa.dev/reports/functional-single-instance/) |
+| Functional (5 replicas) | Same correctness check on a 5-node cluster. Verifies that block events propagate via gossip and are enforced cluster-wide, not just on the owner node. | [report](https://drl.gchiesa.dev/reports/functional-5-instances/) |
+| Functional (10 replicas) | Stress-tests gossip convergence and consistent-hash ownership at a larger scale. Confirms allowed/blocked ratios stay within acceptable thresholds as the ring grows. | [report](https://drl.gchiesa.dev/reports/functional-10-instances/) |
+| Handover | Verifies graceful state transfer during a rolling update: a leaving node evacuates its accounting counters to a peer, so rate-limit enforcement continues uninterrupted after scale-down. | [report](https://drl.gchiesa.dev/reports/handover/) |
+| Performance | Measures sustained throughput and p95/p99 latency of the `ShouldRateLimit` gRPC path under a ramp-up traffic model. Establishes a baseline for regression detection. | [report](https://drl.gchiesa.dev/reports/performance/) |
 
 ## License
 
