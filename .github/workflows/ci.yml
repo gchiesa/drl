@@ -116,7 +116,7 @@ jobs:
   functional-5-instances:
     name: Functional — 5 replicas
     needs: lint-and-unit
-    runs-on: ubuntu-latest-4-core
+    runs-on: ubuntu-latest
     steps:
       - name: Checkout repository
         # actions/checkout v4
@@ -154,7 +154,7 @@ jobs:
   functional-10-instances:
     name: Functional — 10 replicas
     needs: lint-and-unit
-    runs-on: ubuntu-latest-4-core
+    runs-on: ubuntu-latest
     steps:
       - name: Checkout repository
         # actions/checkout v4
