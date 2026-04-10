@@ -56,3 +56,41 @@ jobs:
         with:
           name: performance-test-report
           path: test-suite/performance/results/
+
+  # ── Publish performance report to GitHub Pages ─────────────────────────────
+  deploy-performance-report:
+    name: Publish Performance Report
+    needs: performance-test
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        # actions/checkout v4
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
+
+      - name: Download performance report
+        # actions/download-artifact v4
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        with:
+          name: performance-test-report
+          path: /tmp/reports/performance/
+
+      # Serve the report at /reports/performance/ with a clean URL.
+      - name: Normalise report filename to index.html
+        run: |
+          html=$(find /tmp/reports/performance/ -maxdepth 1 -name "*.html" | sort | head -1)
+          if [ -n "$html" ] && [ "$(basename "$html")" != "index.html" ]; then
+            cp "$html" /tmp/reports/performance/index.html
+          fi
+
+      - name: Deploy performance report to gh-pages (docs/reports/performance/)
+        # peaceiris/actions-gh-pages v4
+        uses: peaceiris/actions-gh-pages@e9c66a37f080288a11235e32cbe2dc5fb3a679cc
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          publish_dir: /tmp/reports/performance
+          publish_branch: gh-pages
+          destination_dir: docs/reports/performance
+          keep_files: true
+          commit_message: "ci: publish performance report [skip ci]"
+          enable_jekyll: false
