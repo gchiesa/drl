@@ -1,15 +1,15 @@
 <!DOCTYPE html>
-<html lang="en" dir="ltr"><head><script src="/drl/livereload.js?mindelay=10&amp;v=2&amp;port=1313&amp;path=drl/livereload" data-no-instant defer></script>
+<html lang="en" dir="ltr"><head><script src="/livereload.js?mindelay=10&amp;v=2&amp;port=1313&amp;path=livereload" data-no-instant defer></script>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" /><meta name="robots" content="noindex, nofollow" />
-  <link rel="icon shortcut" href="/drl/favicon.ico" sizes="32x32" />
-<link rel="icon" href="/drl/favicon.svg" type="image/svg+xml" id="favicon-svg" />
-<link rel="icon" href="/drl/favicon-16x16.png" type="image/png" sizes="16x16" />
-<link rel="icon" href="/drl/favicon-32x32.png" type="image/png" sizes="32x32" />
-<link rel="apple-touch-icon" href="/drl/apple-touch-icon.png" sizes="180x180" />
-<link fetchpriority="low" href="/drl/site.webmanifest" rel="manifest" />
+  <link rel="icon shortcut" href="/favicon.ico" sizes="32x32" />
+<link rel="icon" href="/favicon.svg" type="image/svg+xml" id="favicon-svg" />
+<link rel="icon" href="/favicon-16x16.png" type="image/png" sizes="16x16" />
+<link rel="icon" href="/favicon-32x32.png" type="image/png" sizes="32x32" />
+<link rel="apple-touch-icon" href="/apple-touch-icon.png" sizes="180x180" />
+<link fetchpriority="low" href="/site.webmanifest" rel="manifest" />
 <title>Cache – DRL — Distributed Rate Limiter</title>
-  <meta name="description" content="In-memory blocklist and accounting cache architecture in DRL." /><link rel="canonical" href="http://localhost:1313/drl/cache/" itemprop="url" />
+  <meta name="description" content="In-memory blocklist and accounting cache architecture in DRL." /><link rel="canonical" href="http://localhost:1313/cache/" itemprop="url" />
 
 <meta property="og:title" content="Cache">
 <meta
@@ -22,7 +22,7 @@
   content="
     article
   ">
-<meta property="og:url" content="http://localhost:1313/drl/cache/"><meta property="article:section" content="">
+<meta property="og:url" content="http://localhost:1313/cache/"><meta property="article:section" content="">
 
 
 
@@ -33,12 +33,12 @@
   <meta name="twitter:card" content="summary">
   <meta name="twitter:title" content="Cache">
   <meta name="twitter:description" content="In-memory blocklist and accounting cache architecture in DRL.">
-<link href="/drl/css/compiled/main.css" rel="stylesheet" />
-    <link href="/drl/css/variables.css" rel="stylesheet" />
-    <link href="/drl/css/custom.css" rel="stylesheet" />
+<link href="/css/compiled/main.css" rel="stylesheet" />
+    <link href="/css/variables.css" rel="stylesheet" />
+    <link href="/css/custom.css" rel="stylesheet" />
 
   
-<script src="/drl/js/main-head.js" integrity=""></script>
+<script src="/js/main-head.js" integrity=""></script>
 
   
   
@@ -64,7 +64,7 @@
   ></div>
 
   <nav class="hextra-max-navbar-width hx:mx-auto hx:flex hx:items-center hx:justify-end hx:gap-2 hx:h-16 hx:px-6">
-    <a class="hx:flex hx:items-center hx:hover:opacity-75 hx:ltr:mr-auto hx:rtl:ml-auto" href="/drl/">
+    <a class="hx:flex hx:items-center hx:hover:opacity-75 hx:ltr:mr-auto hx:rtl:ml-auto" href="/">
     <span class="hx:mr-2 hx:font-extrabold hx:inline hx:select-none">DRL — Distributed Rate Limiter</span>
 </a>
 <button type="button" aria-label="Menu" aria-expanded="false" class="hextra-hamburger-menu hx:cursor-pointer hx:-mr-2 hx:rounded-sm hx:p-2 hx:active:bg-gray-400/20 hx:md:hidden hx:hextra-focus-visible-inset"><svg height=24 fill="none" viewBox="0 0 24 24" stroke="currentColor"><g><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 8H20"></path></g><g><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16H20"></path></g></svg></button>
@@ -355,7 +355,7 @@ the TTL expires naturally.</p>
 </div>
 <h2>AccountingCache<span class="hx:absolute hx:-mt-20" id="accountingcache"></span>
     <a href="#accountingcache" class="subheading-anchor" aria-label="Permalink for this section"></a></h2><p>The accounting cache stores per-entity request counters on the <strong>owner node</strong> only. Non-owner nodes forward
-increments to the owner via the Flusher (see <a href="http://localhost:1313/drl/accounting/">Accounting</a>).</p>
+increments to the owner via the Flusher (see <a href="http://localhost:1313/accounting/">Accounting</a>).</p>
 <div class="hextra-code-block hx:relative hx:mt-6 hx:first:mt-0 hx:group/code">
 
 <div><div class="highlight"><pre tabindex="0" class="chroma"><code class="language-go" data-lang="go"><span class="line"><span class="cl"><span class="c1">// NewAccountingCache creates a new accounting cache sized by the config.</span><span class="w">
@@ -501,7 +501,7 @@ stuck deployments when the cluster is empty (first node) or when a peer is unrea
       <div class="hx:flex hx:w-full hx:flex-col hx:items-center hx:sm:items-start"><div class="hx:mt-6 hx:text-xs">© 2025 Hextra Project.</div></div>
     </div></footer>
     
-    <script defer src="/drl/js/main.js" integrity=""></script>
-<script defer src="/drl/js/flexsearch.9f5b5908f93ae86f1ecd4b043b799f580c2d1654e703dd9357d568ac41b2547a.js" integrity="sha256-n1tZCPk66G8ezUsEO3mfWAwtFlTnA92TV9VorEGyVHo=" crossorigin="anonymous"></script><script defer src="/drl/en.search.js" integrity=""></script>
+    <script defer src="/js/main.js" integrity=""></script>
+<script defer src="/js/flexsearch.9f5b5908f93ae86f1ecd4b043b799f580c2d1654e703dd9357d568ac41b2547a.js" integrity="sha256-n1tZCPk66G8ezUsEO3mfWAwtFlTnA92TV9VorEGyVHo=" crossorigin="anonymous"></script><script defer src="/en.search.js" integrity=""></script>
   </body>
 </html>

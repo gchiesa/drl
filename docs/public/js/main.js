@@ -126,8 +126,8 @@ document.addEventListener('DOMContentLoaded', function () {
   const faviconDarkExists = "false" === "true";
 
   if (faviconEl && faviconDarkExists) {
-    const lightFavicon = '/drl/favicon.svg';
-    const darkFavicon = '/drl/favicon-dark.svg';
+    const lightFavicon = '/favicon.svg';
+    const darkFavicon = '/favicon-dark.svg';
 
     const darkModeQuery = window.matchMedia("(prefers-color-scheme: dark)");
 

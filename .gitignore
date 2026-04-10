@@ -5,7 +5,6 @@ bin
 coverage.out
 test-output.json
 
-# docs (Astro)
-docs/node_modules/
-docs/dist/
-docs/.astro/
+# docs (Hugo)
+docs/public/
+docs/.hugo_build.lock
