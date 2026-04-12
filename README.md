@@ -13,7 +13,7 @@ the latency of external databases by using a **Peer-to-Peer Hybrid Architecture*
 - **Shadow accounting** — hashed, asynchronous global quota tracking
 - **Warm-bootstrap** — state sync on startup prevents vulnerability windows during rolling updates
 
-## Infrastructure overview
+## Architecture overview
 
 DRL's primary deployment model is as a **second sidecar in the same pod as Envoy**. The `ShouldRateLimit`
 gRPC call never crosses a network boundary — it resolves over the loopback interface, eliminating DNS
@@ -74,7 +74,7 @@ enforcement path at sub-millisecond latency.
 | **Consistency window** | Strong (synchronous write before OK) | Eventual — gossip convergence typically < 1 s |
 | **Failure mode** | Store outage → rate limiting fails open or hard | Node isolation → local blocklist still enforces; remote counters lag |
 
-### Why eventual consistency is the right trade-off here
+### About Eventual consistency trade-off
 
 The scenarios where a few requests sneak through are narrow and short-lived:
 
