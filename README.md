@@ -15,38 +15,48 @@ the latency of external databases by using a **Peer-to-Peer Hybrid Architecture*
 
 ## Infrastructure overview
 
+DRL's primary deployment model is as a **second sidecar in the same pod as Envoy**. The `ShouldRateLimit`
+gRPC call never crosses a network boundary — it resolves over the loopback interface, eliminating DNS
+resolution, TLS negotiation, and switch hops from the enforcement path entirely. Block decisions are
+O(1) in-process blocklist lookups that return in microseconds.
+
+Everything else — counter forwarding to the consistent-hash owner and block-event gossip across the
+cluster — happens **asynchronously, after the response has already been returned to Envoy**. A slow peer,
+a GC pause, or a temporary network partition between DRL instances never delays a rate-limit decision.
+
 ```mermaid
-graph TB
+%%{init: {'flowchart': {'curve': 'step'}}}%%
+flowchart LR
     subgraph pod-a ["Pod A"]
         WA["Workload"] <--> EA["Envoy\nsidecar"]
+        EA -- "① localhost gRPC" --> DA["DRL\nsidecar"]
+        DA -- "OK / OVER_LIMIT" --> EA
     end
     subgraph pod-b ["Pod B"]
         WB["Workload"] <--> EB["Envoy\nsidecar"]
+        EB -- "① localhost gRPC" --> DB["DRL\nsidecar"]
+        DB -- "OK / OVER_LIMIT" --> EB
     end
     subgraph pod-c ["Pod C"]
         WC["Workload"] <--> EC["Envoy\nsidecar"]
+        EC -- "① localhost gRPC" --> DC["DRL\nsidecar"]
+        DC -- "OK / OVER_LIMIT" --> EC
     end
 
-    EA -->|"gRPC ShouldRateLimit"| DRL1
-    EB -->|"gRPC ShouldRateLimit"| DRL2
-    EC -->|"gRPC ShouldRateLimit"| DRL3
+    DA <-.->|"② gossip + block events"| DB
+    DB <-.->|"② gossip + block events"| DC
+    DA <-.->|"② gossip + block events"| DC
 
-    subgraph drl-fleet ["DRL Fleet"]
-        DRL1["DRL-1\nOwns keys A–F"]
-        DRL2["DRL-2\nOwns keys G–M"]
-        DRL3["DRL-3\nOwns keys N–Z"]
-        DRL1 <-->|"Memberlist gossip\n+ block events"| DRL2
-        DRL2 <-->|"Memberlist gossip\n+ block events"| DRL3
-        DRL1 <-->|"Memberlist gossip\n+ block events"| DRL3
-    end
-
-    DRL1 -->|"OK / OVER_LIMIT"| EA
-    DRL2 -->|"OK / OVER_LIMIT"| EB
-    DRL3 -->|"OK / OVER_LIMIT"| EC
-
-    DRL1 -.->|"Async UDP CounterBatch\nto owner node"| DRL2
-    DRL2 -.->|"Async UDP CounterBatch\nto owner node"| DRL3
+    DA -.->|"③ UDP counter batch"| DB
+    DB -.->|"③ UDP counter batch"| DC
+    DC -.->|"③ UDP counter batch"| DA
 ```
+
+| | Path | Transport | Blocks Envoy? |
+|-|------|-----------|:-------------:|
+| ① | Envoy → DRL block check | localhost gRPC | yes — microseconds |
+| ② | DRL → DRL block propagation | Memberlist gossip (UDP/TCP) | no — fire and forget |
+| ③ | DRL → owner counter increment | UDP `CounterBatch` | no — fire and forget |
 
 ## Design philosophy: availability over consistency
 
