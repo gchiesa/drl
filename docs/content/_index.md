@@ -23,8 +23,8 @@ DRL operates in three parallel planes:
 
 Code for DRL is hosted on GitHub: https://github.com/gchiesa/drl
 
-At this moment is in alpha state, and you are required to build it yourself or use the exemplary deployment folder with
-`docker-compose`.
+At this moment is in alpha state, and you are required to build it yourself or use one of the
+[deployment configurations]({{< ref "deployments" >}}) provided in the repository.
 
 ## Quick start
 
@@ -96,3 +96,4 @@ accounting {
 | [Accounting]({{< ref "accounting" >}})          | Shadow accounting model, entity hashing, and batched flush       |
 | [gRPC API]({{< ref "api" >}})                   | Envoy `ratelimit.v3` service implementation                      |
 | [Internal HTTP API]({{< ref "internal-api" >}}) | Management endpoints, digest authentication, and examples        |
+| [Deployment Models]({{< ref "deployments" >}})  | Docker Compose, ECS Fargate, Kubernetes sidecar/fleet, and Istio |

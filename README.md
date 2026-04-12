@@ -107,6 +107,19 @@ consistency, while the latency and reliability properties are dramatically bette
 | [Internal HTTP API](https://drl.gchiesa.dev/docs/internal-api/) | Management endpoints and digest authentication |
 | [Metrics](https://drl.gchiesa.dev/docs/metrics/) | Prometheus metrics reference, label definitions, and Grafana panel queries |
 | [Sizing Guide](https://drl.gchiesa.dev/docs/sizing/) | Memory footprint, capacity tables, and deployment recommendations |
+| [Deployment Models](https://drl.gchiesa.dev/docs/deployments/) | Docker Compose, ECS Fargate, Kubernetes sidecar/fleet, and Istio configurations |
+
+## Deployment flavours
+
+Ready-to-use deployment configurations live under [`deployments/`](deployments/):
+
+| Flavour | Path | Infrastructure | Description |
+|---------|------|----------------|-------------|
+| [Docker Compose](deployments/docker-compose/README.md) | `deployments/docker-compose/` | Local machine | Full stack via `docker compose up` — fastest way to try DRL |
+| [ECS Sidecar](deployments/ecs-sidecar/README.md) | `deployments/ecs-sidecar/` | AWS ECS Fargate (Terraform) | echo-server + envoy + DRL as co-located Fargate task sidecars |
+| [K8s Sidecar](deployments/k8s-sidecar/README.md) | `deployments/k8s-sidecar/` | Any Kubernetes cluster (Kustomize) | DRL as a third container inside each application pod |
+| [K8s Fleet](deployments/k8s-fleet/README.md) | `deployments/k8s-fleet/` | Any Kubernetes cluster (Kustomize) | DRL as a dedicated Deployment; Envoy connects via ClusterIP Service |
+| [Istio](deployments/istio/README.md) | `deployments/istio/` | Istio service mesh | Configuration guide: inject DRL into existing Istio-managed sidecars via `EnvoyFilter` / `AuthorizationPolicy` |
 
 ## CI reports
 
