@@ -1,0 +1,45 @@
+---
+# ClusterIP service — load-balanced entry point for Envoy ext_authz calls
+apiVersion: v1
+kind: Service
+metadata:
+  name: drl
+  namespace: drl
+  labels:
+    app: drl
+spec:
+  selector:
+    app: drl
+  ports:
+    - name: grpc
+      port: 8081
+      targetPort: 8081
+      protocol: TCP
+    - name: metrics
+      port: 9091
+      targetPort: 9091
+      protocol: TCP
+  type: ClusterIP
+---
+# Headless service — used by DRL memberlist for P2P peer discovery.
+# Resolves to A records for every DRL pod IP.
+apiVersion: v1
+kind: Service
+metadata:
+  name: drl-headless
+  namespace: drl
+  labels:
+    app: drl
+spec:
+  clusterIP: None
+  selector:
+    app: drl
+  ports:
+    - name: memberlist-tcp
+      port: 7946
+      targetPort: 7946
+      protocol: TCP
+    - name: memberlist-udp
+      port: 7946
+      targetPort: 7946
+      protocol: UDP

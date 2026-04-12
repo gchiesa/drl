@@ -1,0 +1,41 @@
+---
+# ClusterIP service — exposes Envoy's HTTP port for ingress/internal access
+apiVersion: v1
+kind: Service
+metadata:
+  name: echo-server
+  namespace: drl
+  labels:
+    app: echo-server
+spec:
+  selector:
+    app: echo-server
+  ports:
+    - name: http
+      port: 80
+      targetPort: 10000
+      protocol: TCP
+  type: ClusterIP
+---
+# Headless service — used by DRL memberlist for peer discovery.
+# Resolves to A records for every pod IP in the deployment.
+apiVersion: v1
+kind: Service
+metadata:
+  name: drl-headless
+  namespace: drl
+  labels:
+    app: echo-server
+spec:
+  clusterIP: None
+  selector:
+    app: echo-server
+  ports:
+    - name: memberlist-tcp
+      port: 7946
+      targetPort: 7946
+      protocol: TCP
+    - name: memberlist-udp
+      port: 7946
+      targetPort: 7946
+      protocol: UDP

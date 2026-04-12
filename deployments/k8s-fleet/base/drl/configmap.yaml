@@ -1,0 +1,54 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: drl-config
+  namespace: drl
+data:
+  config.kdl: |
+    // DRL - Distributed Rate Limiter Configuration
+    // K8s Fleet deployment
+    //
+    // Peer discovery: DRL pods discover each other via the headless
+    // Service "drl-headless" which returns A records for all pod IPs.
+
+    listen {
+        grpc ":8081"
+        metrics ":9091"
+    }
+
+    membership {
+        service-name "drl"
+        port 7946
+        bind-addr "0.0.0.0"
+        join-addr "drl-headless.drl.svc.cluster.local"
+        startup-delay "3s"
+    }
+
+    logging {
+        level "info"
+        format "json"
+    }
+
+    internal-api {
+        enabled true
+        address ":8082"
+    }
+
+    accounting {
+        settings {
+            algorithm "sliding-window"
+            retry-after-type "delay-seconds"
+        }
+        rules {
+            "catch-all" {
+                path-prefix "/"
+                limit 100
+                per "minute"
+            }
+            "anything" {
+                path-prefix "/anything"
+                limit 10
+                per "minute"
+            }
+        }
+    }

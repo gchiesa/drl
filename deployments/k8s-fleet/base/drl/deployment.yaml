@@ -1,0 +1,111 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: drl
+  namespace: drl
+  labels:
+    app: drl
+spec:
+  replicas: 3
+  selector:
+    matchLabels:
+      app: drl
+  strategy:
+    # RollingUpdate ensures the cluster always has quorum during updates.
+    # maxUnavailable: 1 keeps at least 2 nodes forming a consistent ring.
+    type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: 1
+      maxSurge: 1
+  template:
+    metadata:
+      labels:
+        app: drl
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "9091"
+        prometheus.io/path: "/metrics"
+    spec:
+      # Anti-affinity: spread DRL pods across nodes for HA
+      affinity:
+        podAntiAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+            - weight: 100
+              podAffinityTerm:
+                labelSelector:
+                  matchLabels:
+                    app: drl
+                topologyKey: kubernetes.io/hostname
+
+      containers:
+        - name: drl
+          image: ghcr.io/your-org/drl:latest  # replace with your image
+          args: ["serve"]
+          env:
+            - name: DRL_CONFIG_PATH
+              value: /etc/drl/config.kdl
+            - name: DRL_PRIVATE_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: drl-secrets
+                  key: private-api-key
+            - name: DRL_MEMBERSHIP_PRIMARY_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: drl-secrets
+                  key: membership-primary-key
+            - name: DRL_MEMBERSHIP_SECONDARY_KEYS
+              valueFrom:
+                secretKeyRef:
+                  name: drl-secrets
+                  key: membership-secondary-keys
+                  optional: true
+          ports:
+            - name: grpc
+              containerPort: 8081
+              protocol: TCP
+            - name: internal-api
+              containerPort: 8082
+              protocol: TCP
+            - name: metrics
+              containerPort: 9091
+              protocol: TCP
+            - name: memberlist-tcp
+              containerPort: 7946
+              protocol: TCP
+            - name: memberlist-udp
+              containerPort: 7946
+              protocol: UDP
+          volumeMounts:
+            - name: drl-config
+              mountPath: /etc/drl
+              readOnly: true
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 9091
+            initialDelaySeconds: 15
+            periodSeconds: 10
+            failureThreshold: 3
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 9091
+            initialDelaySeconds: 10
+            periodSeconds: 5
+            failureThreshold: 3
+          resources:
+            requests:
+              cpu: "200m"
+              memory: "256Mi"
+            limits:
+              cpu: "500m"
+              memory: "512Mi"
+
+      volumes:
+        - name: drl-config
+          configMap:
+            name: drl-config
+
+      # Allow DRL 30s to leave the memberlist cluster cleanly on shutdown
+      terminationGracePeriodSeconds: 30

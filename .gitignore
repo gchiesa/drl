@@ -8,3 +8,5 @@ test-output.json
 # docs (Hugo)
 docs/public/
 docs/.hugo_build.lock
+
+.idea
