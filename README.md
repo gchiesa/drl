@@ -99,14 +99,14 @@ consistency, while the latency and reliability properties are dramatically bette
 | Topic | Description |
 |-------|-------------|
 | [Getting Started](https://drl.gchiesa.dev/) | Quick start and overview |
-| [Configuration](https://drl.gchiesa.dev/configuration/) | Complete KDL config reference and environment variables |
-| [Membership](https://drl.gchiesa.dev/membership/) | Cluster formation, gossip, warm-bootstrap, block propagation |
-| [Cache](https://drl.gchiesa.dev/cache/) | In-memory blocklist and accounting cache architecture |
-| [Accounting](https://drl.gchiesa.dev/accounting/) | Shadow accounting, entity hashing, batched flushing |
-| [gRPC API](https://drl.gchiesa.dev/api/) | Envoy `ratelimit.v3` service implementation |
-| [Internal HTTP API](https://drl.gchiesa.dev/internal-api/) | Management endpoints and digest authentication |
-| [Metrics](https://drl.gchiesa.dev/metrics/) | Prometheus metrics reference, label definitions, and Grafana panel queries |
-| [Sizing Guide](https://drl.gchiesa.dev/sizing/) | Memory footprint, capacity tables, and deployment recommendations |
+| [Configuration](https://drl.gchiesa.dev/docs/configuration/) | Complete KDL config reference and environment variables |
+| [Membership](https://drl.gchiesa.dev/docs/membership/) | Cluster formation, gossip, warm-bootstrap, block propagation |
+| [Cache](https://drl.gchiesa.dev/docs/cache/) | In-memory blocklist and accounting cache architecture |
+| [Accounting](https://drl.gchiesa.dev/docs/accounting/) | Shadow accounting, entity hashing, batched flushing |
+| [gRPC API](https://drl.gchiesa.dev/docs/api/) | Envoy `ratelimit.v3` service implementation |
+| [Internal HTTP API](https://drl.gchiesa.dev/docs/internal-api/) | Management endpoints and digest authentication |
+| [Metrics](https://drl.gchiesa.dev/docs/metrics/) | Prometheus metrics reference, label definitions, and Grafana panel queries |
+| [Sizing Guide](https://drl.gchiesa.dev/docs/sizing/) | Memory footprint, capacity tables, and deployment recommendations |
 
 ## CI reports
 

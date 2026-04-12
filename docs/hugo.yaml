@@ -7,6 +7,14 @@ module:
   imports:
     - path: github.com/imfing/hextra
 
+menu:
+  sidebar:
+    - name: GitHub
+      weight: 10
+      url: "https://github.com/gchiesa/drl"
+      params:
+        icon: github
+
 # Goldmark (Hugo's markdown renderer) — unsafe enables raw HTML passthrough.
 markup:
   goldmark:
@@ -35,7 +43,7 @@ params:
 
   editURL:
     enable: true
-    base: https://github.com/gchiesa/drl/edit/main/docs/content/
+    base: https://github.com/gchiesa/drl/edit/main/docs/content/docs/
 
   # Hextra page width — "wide" gives more room for tables and code blocks.
   page:
