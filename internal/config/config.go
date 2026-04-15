@@ -24,22 +24,22 @@ const (
 
 type Config struct {
 	// Listen configuration
-	Listen ListenConfig `kdl:"listen" envPrefix:"DRL_LISTEN_"`
+	Listen ListenConfig `kdl:"listen" envPrefix:"DRL_LISTEN_" json:"listen"`
 
 	// Membership configuration
-	Membership MembershipConfig `kdl:"membership" envPrefix:"DRL_MEMBERSHIP_"`
+	Membership MembershipConfig `kdl:"membership" envPrefix:"DRL_MEMBERSHIP_" json:"membership"`
 
 	// Logging configuration
-	Logging LoggingConfig `kdl:"logging" envPrefix:"DRL_LOGGING_"`
+	Logging LoggingConfig `kdl:"logging" envPrefix:"DRL_LOGGING_" json:"logging"`
 
 	// InternalAPI configuration
-	InternalAPI InternalAPIConfig `kdl:"internal-api" envPrefix:"DRL_INTERNAL_API_"`
+	InternalAPI InternalAPIConfig `kdl:"internal-api" envPrefix:"DRL_INTERNAL_API_" json:"internal-api"`
 
 	// Cache configuration
-	Cache CacheConfig `kdl:"cache" envPrefix:"DRL_CACHE_"`
+	Cache CacheConfig `kdl:"cache" envPrefix:"DRL_CACHE_" json:"cache"`
 
 	// Accounting configuration
-	Accounting AccountingConfig `kdl:"accounting"`
+	Accounting AccountingConfig `kdl:"accounting" envPrefix:"DRL_ACCOUNTING_" json:"accounting"`
 
 	// meta
 	externalConfigFilePath string
@@ -47,28 +47,32 @@ type Config struct {
 
 // AccountingConfig holds accounting rules for entity rate limiting
 type AccountingConfig struct {
-	Settings AccountingSettings        `kdl:"settings"`
-	Rules    map[string]AccountingRule `kdl:"rules"`
+	Settings AccountingSettings        `kdl:"settings" envPrefix:"SETTINGS_" json:"settings"`
+	Rules    map[string]AccountingRule `kdl:"rules"                          json:"rules,omitempty"`
 }
 
 // AccountingSettings holds global accounting settings
 type AccountingSettings struct {
-	// Algorithm is the rate limiting algorithm ("sliding-window" is default)
-	Algorithm string `kdl:"algorithm"`
+	// Algorithm is the rate limiting algorithm ("sliding-window" or "token-bucket")
+	Algorithm string `kdl:"algorithm" env:"ALGORITHM" json:"algorithm"`
 	// RetryAfterType determines the Retry-After header format: "delay-seconds" or "http-date"
-	RetryAfterType string `kdl:"retry-after-type"`
+	RetryAfterType string `kdl:"retry-after-type" env:"RETRY_AFTER_TYPE" json:"retry-after-type"`
 	// FlushInterval is the interval between flusher batch sends
-	FlushInterval time.Duration `kdl:"flush-interval"`
+	FlushInterval time.Duration `kdl:"flush-interval" env:"FLUSH_INTERVAL" json:"flush-interval"`
 	// MaxBatchSize is the maximum number of entries per batch before auto-flush
-	MaxBatchSize int `kdl:"max-batch-size"`
+	MaxBatchSize int `kdl:"max-batch-size" env:"MAX_BATCH_SIZE" json:"max-batch-size"`
+	// Capacity is the token bucket burst size (required when algorithm is "token-bucket")
+	Capacity int64 `kdl:"capacity" env:"CAPACITY" json:"capacity,omitempty"`
+	// RefillRate is the token bucket refill rate in tokens per second (required when algorithm is "token-bucket")
+	RefillRate float64 `kdl:"refill-rate" env:"REFILL_RATE" json:"refill-rate,omitempty"`
 }
 
 // AccountingRule defines a rate-limiting rule for a path prefix
 type AccountingRule struct {
-	PathPrefix string   `kdl:"path-prefix"`
-	Headers    []string `kdl:"headers"`
-	Limit      int64    `kdl:"limit"`
-	Per        string   `kdl:"per"`
+	PathPrefix string   `kdl:"path-prefix" json:"path-prefix"`
+	Headers    []string `kdl:"headers"     json:"headers,omitempty"`
+	Limit      int64    `kdl:"limit"       json:"limit"`
+	Per        string   `kdl:"per"         json:"per"`
 }
 
 // WindowDuration returns the time.Duration for the rule's rate window
@@ -82,59 +86,59 @@ func (r AccountingRule) WindowDuration() time.Duration {
 // ListenConfig holds listener configuration
 type ListenConfig struct {
 	// GRPC is the address for gRPC server
-	GRPC string `kdl:"grpc" env:"GRPC"`
+	GRPC string `kdl:"grpc" env:"GRPC" json:"grpc"`
 	// Metrics is the address for Prometheus metrics endpoint
-	Metrics string `kdl:"metrics" env:"METRICS"`
+	Metrics string `kdl:"metrics" env:"METRICS" json:"metrics"`
 }
 
 // MembershipConfig holds cluster membership configuration
 type MembershipConfig struct {
 	// ServiceName is the DNS name to resolve for peer discovery
-	ServiceName string `kdl:"service-name" env:"SERVICE_NAME"`
+	ServiceName string `kdl:"service-name" env:"SERVICE_NAME" json:"service-name"`
 	// Port is the port for memberlist gossip
-	Port int `kdl:"port" env:"PORT"`
+	Port int `kdl:"port" env:"PORT" json:"port"`
 	// BindAddr is the address to bind memberlist to
-	BindAddr string `kdl:"bind-addr" env:"BIND_ADDR"`
+	BindAddr string `kdl:"bind-addr" env:"BIND_ADDR" json:"bind-addr"`
 	// StartupDelay is the delay before attempting to join the cluster
-	StartupDelay time.Duration `kdl:"startup-delay" env:"STARTUP_DELAY"`
+	StartupDelay time.Duration `kdl:"startup-delay" env:"STARTUP_DELAY" json:"startup-delay"`
 	// GossipInterval is the interval between gossip rounds
-	GossipInterval time.Duration `kdl:"gossip-interval" env:"GOSSIP_INTERVAL"`
+	GossipInterval time.Duration `kdl:"gossip-interval" env:"GOSSIP_INTERVAL" json:"gossip-interval"`
 	// GossipNodes is the number of nodes to gossip to per round
-	GossipNodes int `kdl:"gossip-nodes" env:"GOSSIP_NODES"`
+	GossipNodes int `kdl:"gossip-nodes" env:"GOSSIP_NODES" json:"gossip-nodes"`
 	// SecretKeys is a list of AES encryption keys for memberlist.
 	// The first key is the primary (used for encryption); additional keys
 	// are secondary (decryption only, for key rotation). All keys must be
 	// valid AES lengths (16, 24, or 32 bytes).
 	// Override via env: DRL_MEMBERSHIP_PRIMARY_KEY + DRL_MEMBERSHIP_SECONDARY_KEYS
-	SecretKeys []string `kdl:"secret-keys"`
+	SecretKeys []string `kdl:"secret-keys" json:"-"` // never serialised — contains sensitive key material
 }
 
 // LoggingConfig holds logging configuration
 type LoggingConfig struct {
 	// Level is the log level (debug, info, warn, error)
-	Level string `kdl:"level" env:"LEVEL"`
+	Level string `kdl:"level" env:"LEVEL" json:"level"`
 	// Format is the log format (json, text)
-	Format string `kdl:"format" env:"FORMAT"`
+	Format string `kdl:"format" env:"FORMAT" json:"format"`
 }
 
 // InternalAPIConfig holds internal API configuration
 type InternalAPIConfig struct {
 	// Enabled indicates if the internal API is enabled
-	Enabled bool `kdl:"enabled" env:"ENABLED"`
+	Enabled bool `kdl:"enabled" env:"ENABLED" json:"enabled"`
 	// Address is the address for the internal API server
-	Address string `kdl:"address" env:"ADDRESS"`
+	Address string `kdl:"address" env:"ADDRESS" json:"address"`
 }
 
 // CacheConfig holds cache configuration
 type CacheConfig struct {
 	// BlocklistSizeMB is the maximum size in MB for the blocklist cache
-	BlocklistSizeMB int64 `kdl:"blocklist-size-mb" env:"BLOCKLIST_SIZE_MB"`
+	BlocklistSizeMB int64 `kdl:"blocklist-size-mb" env:"BLOCKLIST_SIZE_MB" json:"blocklist-size-mb"`
 	// AccountingSizeMB is the maximum size in MB for the accounting cache
-	AccountingSizeMB int64 `kdl:"accounting-size-mb" env:"ACCOUNTING_SIZE_MB"`
+	AccountingSizeMB int64 `kdl:"accounting-size-mb" env:"ACCOUNTING_SIZE_MB" json:"accounting-size-mb"`
 	// SyncTimeoutSeconds is the timeout in seconds for initial state sync
-	SyncTimeoutSeconds int `kdl:"sync-timeout-seconds" env:"SYNC_TIMEOUT_SECONDS"`
+	SyncTimeoutSeconds int `kdl:"sync-timeout-seconds" env:"SYNC_TIMEOUT_SECONDS" json:"sync-timeout-seconds"`
 	// BlocklistDefaultTTLSeconds is the default TTL in seconds for admin-API blocks
-	BlocklistDefaultTTLSeconds int `kdl:"blocklist-default-ttl-seconds" env:"BLOCKLIST_DEFAULT_TTL_SECONDS"`
+	BlocklistDefaultTTLSeconds int `kdl:"blocklist-default-ttl-seconds" env:"BLOCKLIST_DEFAULT_TTL_SECONDS" json:"blocklist-default-ttl-seconds"`
 }
 
 func NewConfig() *Config {
@@ -322,9 +326,17 @@ func (c *Config) Validate() error {
 	}
 
 	// Validate accounting settings
-	validAlgorithms := map[string]bool{"sliding-window": true}
+	validAlgorithms := map[string]bool{"sliding-window": true, "token-bucket": true}
 	if !validAlgorithms[strings.ToLower(c.Accounting.Settings.Algorithm)] {
-		errs = append(errs, fmt.Sprintf("accounting.settings.algorithm must be one of sliding-window; got %q", c.Accounting.Settings.Algorithm))
+		errs = append(errs, fmt.Sprintf("accounting.settings.algorithm must be one of sliding-window, token-bucket; got %q", c.Accounting.Settings.Algorithm))
+	}
+	if strings.ToLower(c.Accounting.Settings.Algorithm) == "token-bucket" {
+		if c.Accounting.Settings.Capacity <= 0 {
+			errs = append(errs, fmt.Sprintf("accounting.settings.capacity must be > 0 when algorithm is token-bucket, got %d", c.Accounting.Settings.Capacity))
+		}
+		if c.Accounting.Settings.RefillRate <= 0 {
+			errs = append(errs, fmt.Sprintf("accounting.settings.refill-rate must be > 0 when algorithm is token-bucket, got %g", c.Accounting.Settings.RefillRate))
+		}
 	}
 	validRetryAfter := map[string]bool{"delay-seconds": true, "http-date": true}
 	if !validRetryAfter[strings.ToLower(c.Accounting.Settings.RetryAfterType)] {
@@ -368,6 +380,29 @@ func (c *Config) MetricsPort() int {
 func GetPrivateAPIKey() (string, bool) {
 	key := os.Getenv("DRL_PRIVATE_API_KEY")
 	return key, key != ""
+}
+
+// GetConfigSection returns the JSON-serialisable representation of the named
+// top-level configuration section. Recognised names (case-insensitive):
+// "accounting", "membership", "cache", "listen", "logging", "internal-api".
+// Returns (nil, false) for unknown section names.
+func (c *Config) GetConfigSection(section string) (any, bool) {
+	switch strings.ToLower(section) {
+	case "accounting":
+		return c.Accounting, true
+	case "membership":
+		return c.Membership, true
+	case "cache":
+		return c.Cache, true
+	case "listen":
+		return c.Listen, true
+	case "logging":
+		return c.Logging, true
+	case "internal-api":
+		return c.InternalAPI, true
+	default:
+		return nil, false
+	}
 }
 
 // ValidatePrivateAPIKey validates the private API key meets security requirements

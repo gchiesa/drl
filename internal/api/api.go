@@ -55,6 +55,12 @@ type BulkLoadMetricsRecorder interface {
 	IncAccountingBulkLoad(result string)
 }
 
+// StaticConfigProvider returns the JSON-serialisable representation of a named
+// top-level configuration section (e.g. "accounting", "membership", "cache").
+type StaticConfigProvider interface {
+	GetConfigSection(section string) (any, bool)
+}
+
 // Server represents the internal API server
 type Server struct {
 	app             *fiber.App
@@ -71,6 +77,7 @@ type Server struct {
 	accountingStats AccountingStatsProvider
 	bulkLoader      AccountingBulkLoader
 	metrics         BulkLoadMetricsRecorder
+	staticConfig    StaticConfigProvider
 }
 
 // ServerConfig holds configuration for the API server
@@ -95,6 +102,8 @@ type ServerConfig struct {
 	BulkLoader AccountingBulkLoader
 	// Metrics is optional; when set, the bulk-load handler records parser-side outcomes.
 	Metrics BulkLoadMetricsRecorder
+	// StaticConfig is optional; when set, the GET /configuration/static/:section endpoint is active.
+	StaticConfig StaticConfigProvider
 }
 
 // NewServer creates a new internal API server
@@ -131,6 +140,7 @@ func NewServer(cfg ServerConfig) (*Server, error) {
 		accountingStats: cfg.AccountingStats,
 		bulkLoader:      cfg.BulkLoader,
 		metrics:         cfg.Metrics,
+		staticConfig:    cfg.StaticConfig,
 	}
 
 	// Setup routes
@@ -161,6 +171,9 @@ func (s *Server) setupRoutes() {
 	if s.bulkLoader != nil {
 		s.app.Post("/accounting/load", authMW, s.handleAccountingLoad)
 	}
+
+	// Static configuration introspection
+	s.app.Get("/configuration/static/:section", authMW, s.handleGetStaticConfig)
 }
 
 // Start starts the internal API server

@@ -1,0 +1,99 @@
+# Milestone 015 — Token Bucket Algorithm
+**Status**: COMPLETED
+**Date**: 2026-04-15
+
+---
+
+## Summary
+
+Implemented the Token Bucket rate-limiting algorithm as a high-performance alternative to the existing Sliding Window, added full configuration support with environment variable overrides, extended Prometheus metrics, and introduced a new authenticated `/configuration/static/:section` API endpoint.
+
+---
+
+## Changes
+
+### `internal/ratelimit/token_bucket.go` (new)
+- `TokenBucket` struct with `sync.Map` for per-entity bucket state (`tokens float64`, `lastRefill time.Time`, mutex-protected)
+- `NewTokenBucket(capacity, refillRate float64)` — constructs with global capacity and refill rate
+- `Evaluate(key, currentCount, rule, ruleName)` — refills tokens based on elapsed time, consumes 1 if available, sets `RetryAfter` to time-until-next-token when blocked
+
+### `internal/ratelimit/ratelimit.go`
+- `Evaluate` interface now takes `key string` as first param (for stateful algorithms)
+- `Decision.TokensRemaining float64` added — set to the real value by token bucket, `-1` by sliding window
+
+### `internal/ratelimit/sliding_window.go`
+- Updated `Evaluate` signature to match new interface (key param ignored, `TokensRemaining` set to `-1`)
+
+### `internal/config/config.go`
+- `AccountingSettings` gains `Capacity int64` and `RefillRate float64` with `kdl`, `env`, and `json` tags
+- All config structs now have `json` tags (enables the config API endpoint); `SecretKeys` excluded with `json:"-"`
+- `envPrefix:"DRL_ACCOUNTING_"` / `envPrefix:"SETTINGS_"` wired so env vars like `DRL_ACCOUNTING_SETTINGS_ALGORITHM`, `DRL_ACCOUNTING_SETTINGS_CAPACITY`, `DRL_ACCOUNTING_SETTINGS_REFILL_RATE` work
+- `Validate()` allows `"token-bucket"` and enforces `capacity > 0` and `refill-rate > 0` when selected
+- `GetConfigSection(section string) (any, bool)` added for the API endpoint
+
+### `internal/metrics/metrics.go`
+- `drl_ratelimit_tokens_consumed_total` — counter per rule (token bucket allowed requests)
+- `drl_ratelimit_bucket_exhausted_total` — counter per rule (token bucket denials)
+- `drl_ratelimit_tokens_current` — gauge per rule (sampled on each TB decision)
+
+### `internal/accounting/engine.go`
+- `Evaluate` call updated to pass `key` as first argument
+- After each local evaluation, if `decision.TokensRemaining >= 0` (token bucket): emits `IncRateLimitTokensConsumed` or `IncRateLimitBucketExhausted` and updates the tokens-current gauge
+
+### `internal/api/api.go`
+- `StaticConfigProvider` interface added
+- `staticConfig StaticConfigProvider` field added to `Server` and `ServerConfig`
+- `GET /configuration/static/:section` route wired, protected by existing Digest auth middleware
+
+### `internal/api/handlers_config.go` (new)
+- `handleGetStaticConfig` handler — returns JSON of the requested config section, 404 for unknown sections, 503 if provider unavailable
+
+### `internal/cmd/accounting.go`
+- `newRateLimiter()` reads `cfg.Accounting.Settings.Algorithm` and constructs either `TokenBucket` or `SlidingWindow`
+- Logs the selected algorithm and its parameters at startup
+
+### `internal/cmd/api.go`
+- `apiCfg.StaticConfig = cfg` — passes the loaded config as the `StaticConfigProvider`
+
+---
+
+## Configuration
+
+### KDL (token-bucket mode)
+```kdl
+accounting {
+    settings {
+        algorithm "token-bucket"
+        capacity 100       // burst size (tokens)
+        refill-rate 10     // tokens per second
+    }
+}
+```
+
+### Environment variables
+| Variable | Description |
+|---|---|
+| `DRL_ACCOUNTING_SETTINGS_ALGORITHM` | `sliding-window` (default) or `token-bucket` |
+| `DRL_ACCOUNTING_SETTINGS_CAPACITY` | Burst size in tokens (required for token-bucket) |
+| `DRL_ACCOUNTING_SETTINGS_REFILL_RATE` | Tokens added per second (required for token-bucket) |
+| `DRL_ACCOUNTING_SETTINGS_RETRY_AFTER_TYPE` | `delay-seconds` or `http-date` |
+| `DRL_ACCOUNTING_SETTINGS_FLUSH_INTERVAL` | Batch flush interval |
+| `DRL_ACCOUNTING_SETTINGS_MAX_BATCH_SIZE` | Max entries per flush batch |
+
+---
+
+## API Endpoint
+
+`GET /configuration/static/:section`
+- **Auth**: Digest (SHA-256), same credentials as other internal API endpoints
+- **Sections**: `accounting`, `membership`, `cache`, `listen`, `logging`, `internal-api`
+- **Response**: JSON representation of the section; sensitive fields (encryption keys) are omitted
+
+---
+
+## Tests
+- 8 new `TestTokenBucket_*` unit tests covering: full start, draining, blocking, refill over time, capacity cap, independent entities, RetryAfter calculation, TokensRemaining field
+- Existing `TestSlidingWindow_*` tests updated for new `key` parameter
+- 9 new `internal/config` tests: `TestAccountingSettings_TokenBucketKDL`, `TestAccountingSettings_TokenBucketEnvOverride`, `TestAccountingSettings_SlidingWindowEnvOverride`, `TestValidate_TokenBucketMissingCapacity`, `TestValidate_TokenBucketMissingRefillRate`, `TestValidate_TokenBucketValid`, `TestValidate_InvalidAlgorithm`, `TestGetConfigSection`, `TestGetConfigSection_AccountingContent`
+
+**All tests pass. Zero lint issues.**

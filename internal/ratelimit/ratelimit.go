@@ -20,10 +20,14 @@ type Decision struct {
 	Limit int64
 	// RuleName is the name of the matching rule.
 	RuleName string
+	// TokensRemaining is the number of tokens left after this request.
+	// Set to -1 when the algorithm is not token-bucket.
+	TokensRemaining float64
 }
 
 // RateLimiter evaluates whether a request count has exceeded a rule's limit.
 type RateLimiter interface {
 	// Evaluate checks the current count against the rule and returns a decision.
-	Evaluate(currentCount int64, rule *config.AccountingRule, ruleName string) Decision
+	// key uniquely identifies the entity (used by stateful algorithms like token bucket).
+	Evaluate(key string, currentCount int64, rule *config.AccountingRule, ruleName string) Decision
 }

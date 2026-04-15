@@ -46,6 +46,11 @@ type Metrics struct {
 	RateLimitPropagationLatencyMs prometheus.Histogram
 	GRPCResponseCodeTotal         *prometheus.CounterVec
 
+	// Token bucket metrics
+	RateLimitTokensConsumedTotal  *prometheus.CounterVec
+	RateLimitBucketExhaustedTotal *prometheus.CounterVec
+	RateLimitTokensCurrent        *prometheus.GaugeVec
+
 	registry *prometheus.Registry
 	server   *http.Server
 }
@@ -158,6 +163,20 @@ func NewMetrics() *Metrics {
 			Help: "Total gRPC Check responses by code",
 		}, []string{"code"}),
 
+		// Token bucket metrics
+		RateLimitTokensConsumedTotal: prometheus.NewCounterVec(prometheus.CounterOpts{
+			Name: "drl_ratelimit_tokens_consumed_total",
+			Help: "Total number of tokens consumed by allowed requests (token-bucket algorithm)",
+		}, []string{"rule_name"}),
+		RateLimitBucketExhaustedTotal: prometheus.NewCounterVec(prometheus.CounterOpts{
+			Name: "drl_ratelimit_bucket_exhausted_total",
+			Help: "Total number of requests denied due to an empty token bucket",
+		}, []string{"rule_name"}),
+		RateLimitTokensCurrent: prometheus.NewGaugeVec(prometheus.GaugeOpts{
+			Name: "drl_ratelimit_tokens_current",
+			Help: "Remaining tokens in the bucket after the most recent request (sampled, token-bucket algorithm)",
+		}, []string{"rule_name"}),
+
 		registry: registry,
 	}
 
@@ -183,6 +202,9 @@ func NewMetrics() *Metrics {
 	registry.MustRegister(m.RateLimitBlocksTotal)
 	registry.MustRegister(m.RateLimitPropagationLatencyMs)
 	registry.MustRegister(m.GRPCResponseCodeTotal)
+	registry.MustRegister(m.RateLimitTokensConsumedTotal)
+	registry.MustRegister(m.RateLimitBucketExhaustedTotal)
+	registry.MustRegister(m.RateLimitTokensCurrent)
 
 	return m
 }
@@ -329,6 +351,23 @@ func (m *Metrics) Stop() error {
 		return m.server.Close()
 	}
 	return nil
+}
+
+// IncRateLimitTokensConsumed increments the token-consumed counter for a rule.
+func (m *Metrics) IncRateLimitTokensConsumed(ruleName string) {
+	m.RateLimitTokensConsumedTotal.WithLabelValues(ruleName).Inc()
+}
+
+// IncRateLimitBucketExhausted increments the bucket-exhausted counter for a rule.
+func (m *Metrics) IncRateLimitBucketExhausted(ruleName string) {
+	m.RateLimitBucketExhaustedTotal.WithLabelValues(ruleName).Inc()
+}
+
+// SetRateLimitTokensCurrent updates the remaining-tokens gauge for a rule.
+// This is sampled on each token-bucket decision; callers should use a consistent
+// rule_name label to avoid unbounded cardinality.
+func (m *Metrics) SetRateLimitTokensCurrent(ruleName string, tokens float64) {
+	m.RateLimitTokensCurrent.WithLabelValues(ruleName).Set(tokens)
 }
 
 // CacheType constants for metrics labels

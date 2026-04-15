@@ -182,7 +182,7 @@ func (e *Engine) Process(sourceIP, path string, headers map[string]string) {
 		)
 
 		// Evaluate rate limit
-		decision := e.limiter.Evaluate(newCount, &rule.AccountingRule, rule.Name)
+		decision := e.limiter.Evaluate(key, newCount, &rule.AccountingRule, rule.Name)
 		if decision.Blocked {
 			e.logger.Warn("rate limit exceeded, blocking entity",
 				"key", key,
@@ -199,6 +199,15 @@ func (e *Engine) Process(sourceIP, path string, headers map[string]string) {
 			if e.metrics != nil {
 				e.metrics.IncRateLimitBlock(rule.Name, "threshold_exceeded")
 			}
+		}
+		// Token bucket metrics (TokensRemaining >= 0 only when algorithm is token-bucket)
+		if e.metrics != nil && decision.TokensRemaining >= 0 {
+			if decision.Blocked {
+				e.metrics.IncRateLimitBucketExhausted(rule.Name)
+			} else {
+				e.metrics.IncRateLimitTokensConsumed(rule.Name)
+			}
+			e.metrics.SetRateLimitTokensCurrent(rule.Name, decision.TokensRemaining)
 		}
 	} else {
 		// Remote enqueue
