@@ -114,29 +114,15 @@ func (b *BlocklistCache) IsBlocked(key string) bool {
 	return found
 }
 
-// Block adds a key to the blocklist with a TTL.
-func (b *BlocklistCache) Block(key string, entity *model.Entity, ttl time.Duration) {
+// Block adds a key to the blocklist with a TTL and optional entity metadata.
+// The metadata is preserved so that ListEntries can reconstruct the original
+// entity for the admin GET endpoint.
+func (b *BlocklistCache) Block(key string, ttl time.Duration, entity *model.Entity) {
 	expiresAt := time.Now().Add(ttl)
 	b.cache.Set(key, &blocklistEntryData{expiresAt: expiresAt, entity: entity})
 
 	if b.logger != nil {
 		b.logger.Debug("entity blocked",
-			"key", key,
-			"ttl", ttl,
-			"expires_at", expiresAt,
-		)
-	}
-}
-
-// BlockWithMeta adds a key to the blocklist with a TTL and entity metadata.
-// The metadata is preserved so that ListEntries can reconstruct the original
-// entity for the admin GET endpoint.
-func (b *BlocklistCache) BlockWithMeta(key string, ttl time.Duration, entity *model.Entity) {
-	expiresAt := time.Now().Add(ttl)
-	b.cache.Set(key, &blocklistEntryData{expiresAt: expiresAt, entity: entity})
-
-	if b.logger != nil {
-		b.logger.Debug("entity blocked with metadata",
 			"key", key,
 			"ttl", ttl,
 			"expires_at", expiresAt,

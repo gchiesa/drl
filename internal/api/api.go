@@ -21,8 +21,7 @@ type ClusterInfo interface {
 // BlocklistOperator allows the API to add and remove entities from the local
 // Ristretto blocklist cache.
 type BlocklistOperator interface {
-	Block(key string, entity *model.Entity, ttl time.Duration)
-	BlockWithMeta(key string, ttl time.Duration, entity *model.Entity)
+	Block(key string, ttl time.Duration, entity *model.Entity)
 	Unblock(key string)
 	IsBlocked(key string) bool
 	ListEntries() []model.BlockedEntityInfo
