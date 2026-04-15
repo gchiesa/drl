@@ -1089,6 +1089,174 @@ func TestSecretKeys_EmptyList(t *testing.T) {
 	assert.Empty(t, cfg.Membership.SecretKeys)
 }
 
+// ── Token Bucket configuration ────────────────────────────────────────────────
+
+func TestAccountingSettings_TokenBucketKDL(t *testing.T) {
+	clearEnvVars(t)
+
+	tmpDir := t.TempDir()
+	configPath := filepath.Join(tmpDir, "tb.kdl")
+
+	kdlConfig := `
+accounting {
+    settings {
+        algorithm "token-bucket"
+        capacity 100
+        refill-rate 10
+    }
+    rules {
+        "catch-all" {
+            path-prefix "/"
+            limit 100
+            per "minute"
+        }
+    }
+}
+`
+	require.NoError(t, os.WriteFile(configPath, []byte(kdlConfig), 0644))
+
+	cfg, err := Load(configPath)
+	require.NoError(t, err)
+	assert.Equal(t, "token-bucket", cfg.Accounting.Settings.Algorithm)
+	assert.Equal(t, int64(100), cfg.Accounting.Settings.Capacity)
+	assert.Equal(t, float64(10), cfg.Accounting.Settings.RefillRate)
+}
+
+func TestAccountingSettings_TokenBucketEnvOverride(t *testing.T) {
+	clearEnvVars(t)
+
+	t.Setenv("DRL_ACCOUNTING_SETTINGS_ALGORITHM", "token-bucket")
+	t.Setenv("DRL_ACCOUNTING_SETTINGS_CAPACITY", "200")
+	t.Setenv("DRL_ACCOUNTING_SETTINGS_REFILL_RATE", "20.5")
+
+	// Load defaults only — token-bucket with capacity+refill-rate and no rules is valid
+	cfg, err := Load("")
+	require.NoError(t, err)
+	assert.Equal(t, "token-bucket", cfg.Accounting.Settings.Algorithm)
+	assert.Equal(t, int64(200), cfg.Accounting.Settings.Capacity)
+	assert.InDelta(t, 20.5, cfg.Accounting.Settings.RefillRate, 0.001)
+}
+
+func TestAccountingSettings_SlidingWindowEnvOverride(t *testing.T) {
+	clearEnvVars(t)
+	t.Setenv("DRL_ACCOUNTING_SETTINGS_ALGORITHM", "sliding-window")
+
+	cfg, err := Load("")
+	require.NoError(t, err)
+	assert.Equal(t, "sliding-window", cfg.Accounting.Settings.Algorithm)
+}
+
+func TestValidate_TokenBucketMissingCapacity(t *testing.T) {
+	clearEnvVars(t)
+
+	cfg := validBaseConfig()
+	cfg.Accounting.Settings.Algorithm = "token-bucket"
+	cfg.Accounting.Settings.Capacity = 0
+	cfg.Accounting.Settings.RefillRate = 10
+
+	err := cfg.Validate()
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "accounting.settings.capacity must be > 0")
+}
+
+func TestValidate_TokenBucketMissingRefillRate(t *testing.T) {
+	clearEnvVars(t)
+
+	cfg := validBaseConfig()
+	cfg.Accounting.Settings.Algorithm = "token-bucket"
+	cfg.Accounting.Settings.Capacity = 100
+	cfg.Accounting.Settings.RefillRate = 0
+
+	err := cfg.Validate()
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "accounting.settings.refill-rate must be > 0")
+}
+
+func TestValidate_TokenBucketValid(t *testing.T) {
+	clearEnvVars(t)
+
+	cfg := validBaseConfig()
+	cfg.Accounting.Settings.Algorithm = "token-bucket"
+	cfg.Accounting.Settings.Capacity = 100
+	cfg.Accounting.Settings.RefillRate = 10
+
+	err := cfg.Validate()
+	assert.NoError(t, err)
+}
+
+func TestValidate_InvalidAlgorithm(t *testing.T) {
+	clearEnvVars(t)
+
+	cfg := validBaseConfig()
+	cfg.Accounting.Settings.Algorithm = "leaky-bucket"
+
+	err := cfg.Validate()
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "accounting.settings.algorithm must be one of sliding-window, token-bucket")
+}
+
+func TestGetConfigSection(t *testing.T) {
+	clearEnvVars(t)
+
+	cfg, err := Load("")
+	require.NoError(t, err)
+
+	tests := []struct {
+		section string
+		wantOK  bool
+	}{
+		{"accounting", true},
+		{"membership", true},
+		{"cache", true},
+		{"listen", true},
+		{"logging", true},
+		{"internal-api", true},
+		{"ACCOUNTING", true}, // case-insensitive
+		{"unknown", false},
+		{"", false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.section, func(t *testing.T) {
+			data, ok := cfg.GetConfigSection(tt.section)
+			assert.Equal(t, tt.wantOK, ok)
+			if tt.wantOK {
+				assert.NotNil(t, data)
+			} else {
+				assert.Nil(t, data)
+			}
+		})
+	}
+}
+
+func TestGetConfigSection_AccountingContent(t *testing.T) {
+	clearEnvVars(t)
+
+	cfg, err := Load("")
+	require.NoError(t, err)
+
+	data, ok := cfg.GetConfigSection("accounting")
+	require.True(t, ok)
+
+	ac, ok := data.(AccountingConfig)
+	require.True(t, ok)
+	assert.Equal(t, "sliding-window", ac.Settings.Algorithm)
+}
+
+// validBaseConfig returns a Config that passes validation with defaults.
+func validBaseConfig() *Config {
+	return &Config{
+		Listen:     ListenConfig{GRPC: ":8081", Metrics: ":9091"},
+		Membership: MembershipConfig{ServiceName: "drl", Port: 7946, BindAddr: "0.0.0.0"},
+		Logging:    LoggingConfig{Level: "info", Format: "json"},
+		Cache: CacheConfig{
+			BlocklistSizeMB:            64,
+			AccountingSizeMB:           128,
+			SyncTimeoutSeconds:         30,
+			BlocklistDefaultTTLSeconds: 300,
+		},
+	}
+}
+
 // clearEnvVars clears all DRL_ environment variables to ensure test isolation
 func clearEnvVars(t *testing.T) {
 	t.Helper()
@@ -1110,6 +1278,12 @@ func clearEnvVars(t *testing.T) {
 		"DRL_CACHE_BLOCKLIST_DEFAULT_TTL_SECONDS",
 		"DRL_MEMBERSHIP_PRIMARY_KEY",
 		"DRL_MEMBERSHIP_SECONDARY_KEYS",
+		"DRL_ACCOUNTING_SETTINGS_ALGORITHM",
+		"DRL_ACCOUNTING_SETTINGS_CAPACITY",
+		"DRL_ACCOUNTING_SETTINGS_REFILL_RATE",
+		"DRL_ACCOUNTING_SETTINGS_RETRY_AFTER_TYPE",
+		"DRL_ACCOUNTING_SETTINGS_FLUSH_INTERVAL",
+		"DRL_ACCOUNTING_SETTINGS_MAX_BATCH_SIZE",
 	}
 
 	for _, env := range envVars {

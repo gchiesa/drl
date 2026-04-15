@@ -47,7 +47,7 @@ IP + uriPath + optional:zero or more Headers key-value pairs
 * **Membership & Discovery**: Hashicorp Memberlist
 * **Event Broadcast**: Hashicorp Serf
 * **Consistency**: Consistent Hashing (stathat/consistent)
-* **In-Memory Store**: Ristretto (High-concurrency cache)
+* **In-Memory Store**: Otter (High-concurrency cache)
 * **Metrics**: The application should publish metrics in prometheus compatible format on the standard port and path
 
 ## Node Lifecycle & State Transfer Startup & Warm-up
@@ -90,8 +90,7 @@ wastes tokens on implementation details.
 * **Communication**: Internal peer increments should use a dedicated internal gRPC service or lightweight UDP packets.
 * **Reliability**: Implement a Max Hops (1) for internal increments to prevent circular forwarding during hash ring
   transitions.
-* **Serialization**: Use protobuf or msgpack for efficient state transfer in GetState() and MergeState(). Development
-  Commands
+* **Serialization**: Use protobuf for efficient state transfer in GetState() and MergeState().
 * **Error Handling**: If a Peer Increment fails (network timeout), the node should log a warning but NOT fail the Envoy
   request. Availability > Consistency.
 * **Protocols**: Use envoyproxy/go-control-plane for gRPC stubs to ensure 100% compatibility with the ratelimit.v3

@@ -16,11 +16,13 @@ func NewSlidingWindow() *SlidingWindow {
 }
 
 // Evaluate checks whether the current count exceeds the rule's limit.
-func (sw *SlidingWindow) Evaluate(currentCount int64, rule *config.AccountingRule, ruleName string) Decision {
+// key is unused by the sliding window algorithm.
+func (sw *SlidingWindow) Evaluate(_ string, currentCount int64, rule *config.AccountingRule, ruleName string) Decision {
 	d := Decision{
-		CurrentCount: currentCount,
-		Limit:        rule.Limit,
-		RuleName:     ruleName,
+		CurrentCount:    currentCount,
+		Limit:           rule.Limit,
+		RuleName:        ruleName,
+		TokensRemaining: -1, // N/A for sliding window
 	}
 
 	if currentCount > rule.Limit {

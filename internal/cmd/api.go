@@ -62,6 +62,7 @@ func newApiServer(
 		if metricsManager != nil {
 			apiCfg.Metrics = metricsManager
 		}
+		apiCfg.StaticConfig = cfg
 		apiServer, err = api.NewServer(apiCfg)
 		if err != nil {
 			log.Error("failed to create internal API server", "error", err)

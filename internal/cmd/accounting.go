@@ -3,13 +3,34 @@ package cmd
 import (
 	"log/slog"
 	"os"
+	"strings"
 
 	"github.com/cespare/xxhash/v2"
 	"github.com/gchiesa/drl/internal/accounting"
 	"github.com/gchiesa/drl/internal/cache"
 	"github.com/gchiesa/drl/internal/config"
 	"github.com/gchiesa/drl/internal/metrics"
+	"github.com/gchiesa/drl/internal/ratelimit"
 )
+
+// newRateLimiter constructs the RateLimiter implementation selected by the
+// accounting settings. Defaults to SlidingWindow when the algorithm is unknown.
+func newRateLimiter(cfg *config.Config, log *slog.Logger) ratelimit.RateLimiter {
+	switch strings.ToLower(cfg.Accounting.Settings.Algorithm) {
+	case "token-bucket":
+		log.Info("rate limiter: token-bucket",
+			"capacity", cfg.Accounting.Settings.Capacity,
+			"refill_rate", cfg.Accounting.Settings.RefillRate,
+		)
+		return ratelimit.NewTokenBucket(
+			float64(cfg.Accounting.Settings.Capacity),
+			cfg.Accounting.Settings.RefillRate,
+		)
+	default:
+		log.Info("rate limiter: sliding-window")
+		return ratelimit.NewSlidingWindow()
+	}
+}
 
 // newAccountingEngine initializes and returns a new accounting.Engine based on the provided configuration and dependencies.
 // It sets up the accounting flusher and applies the accounting rules. If initialization fails, the application exits.
@@ -45,16 +66,22 @@ func newAccountingEngine(
 		}
 		log.Info("accounting flusher started")
 
+		limiter := newRateLimiter(cfg, log)
+
 		engine = accounting.NewEngine(accounting.EngineConfig{
 			Rules:       cfg.Accounting.Rules,
 			Accounting:  cacheManager.Accounting,
 			Flusher:     flusher,
 			Logger:      log,
 			Metrics:     metricsManager,
+			Limiter:     limiter,
 			Blocklist:   blocklist,
 			Broadcaster: broadcaster,
 		})
-		log.Info("accounting engine initialized", "rules", len(cfg.Accounting.Rules))
+		log.Info("accounting engine initialized",
+			"rules", len(cfg.Accounting.Rules),
+			"algorithm", cfg.Accounting.Settings.Algorithm,
+		)
 	}
 	return engine
 }
