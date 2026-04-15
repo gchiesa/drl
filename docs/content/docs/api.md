@@ -1,34 +1,24 @@
 ---
 title: gRPC Rate Limit API
-description: Envoy ratelimit.v3 gRPC service implementation in DRL.
+description: Envoy ext_authz v3 gRPC service implementation in DRL.
 weight: 6
 ---
 
-The `internal/api` package implements the Envoy `ratelimit.v3` gRPC service, which is the primary interface
-between Envoy and DRL. Envoy calls `ShouldRateLimit` for every request it processes; DRL responds with
-`OK` or `OVER_LIMIT`.
+The `internal/grpc` package implements the Envoy **External Authorization** (`ext_authz.v3`) gRPC service.
+Envoy calls `Check` for every request it processes; DRL responds with `OK` or `PERMISSION_DENIED` (429).
 
 ## Interface
 
-DRL implements the standard Envoy rate-limit proto:
+DRL implements the standard Envoy ext_authz proto:
 
 ```protobuf
-service RateLimitService {
-  rpc ShouldRateLimit(RateLimitRequest) returns (RateLimitResponse);
+service Authorization {
+  rpc Check(CheckRequest) returns (CheckResponse);
 }
 ```
 
-The server is created with references to the cache, accounting engine, and membership ring:
-
-```go
-func NewRateLimitServer(
-    cfg      *config.Config,
-    blocklist *cache.BlocklistCache,
-    accounting *accounting.AccountingCache,
-    ring      *membership.Ring,
-    peers     *membership.PeerClient,
-) *RateLimitServer
-```
+The server is registered with `authv3.RegisterAuthorizationServer` from
+`github.com/envoyproxy/go-control-plane/envoy/service/auth/v3`.
 
 ## Request processing flow
 
@@ -39,43 +29,78 @@ sequenceDiagram
     participant B as BlocklistCache
     participant A as Accounting Engine
 
-    E->>D: ShouldRateLimit(domain, descriptors)
-    D->>D: Extract IP + path + headers from descriptors
-    D->>B: Contains(entityKey)?
+    E->>D: Check(CheckRequest{attributes})
+    D->>D: Extract IP from attributes.source.address
+    D->>D: Extract path + headers from attributes.request.http
+    D->>B: IsBlockedWithExpiration(entityKey)?
     alt Entity is blocked
-        B-->>D: true
-        D-->>E: OVER_LIMIT (code 429)
+        B-->>D: true, expiresAt
+        D-->>E: PERMISSION_DENIED (429) + Retry-After header
     else Not blocked
         B-->>D: false
-        D-->>E: OK (code 200)
-        D-)A: Increment(entityKey) [async goroutine]
+        D-->>E: OK (200)
+        D-)A: Process(ip, path, headers) [async goroutine]
     end
 {{< /mermaid >}}
 
 The response is returned to Envoy **before** the accounting goroutine completes. This is the core of the
 shadow accounting model — no counter write ever sits on the Envoy request path.
 
+## Entity extraction
+
+DRL extracts rate-limiting entity components from the `CheckRequest.Attributes` fields:
+
+| `CheckRequest` field | Mapped to |
+|---|---|
+| `attributes.source.address.socket_address.address` | Source IP |
+| `attributes.request.http.path` | URI path |
+| `attributes.request.http.headers` | Header map (filtered per rule) |
+
+The entity key is built by the accounting engine using rule-based header filtering (only headers named in
+the matching `AccountingRule.Headers` list are included). The key is then hashed with xxHash64 and looked
+up in the blocklist. See [Accounting]({{< ref "accounting" >}}) for details.
+
 ## Envoy configuration
 
-Envoy must be configured to use the external rate-limit service. Relevant snippet for `envoy.yaml`:
+Envoy must use the `ext_authz` HTTP filter pointed at DRL. The filter type is
+`envoy.extensions.filters.http.ext_authz.v3.ExtAuthz`.
+
+### HTTP filter
 
 ```yaml
 http_filters:
-  - name: envoy.filters.http.ratelimit
+  - name: envoy.filters.http.ext_authz
     typed_config:
-      "@type": type.googleapis.com/envoy.extensions.filters.http.ratelimit.v3.RateLimit
-      domain: drl
-      request_type: external
-      rate_limit_service:
-        grpc_service:
-          envoy_grpc:
-            cluster_name: drl_cluster
-        transport_api_version: V3
+      "@type": type.googleapis.com/envoy.extensions.filters.http.ext_authz.v3.ExtAuthz
+      grpc_service:
+        envoy_grpc:
+          cluster_name: drl_cluster
+        timeout: 0.25s
+      transport_api_version: V3
+      failure_mode_allow: false
+  - name: envoy.filters.http.router
+    typed_config:
+      "@type": type.googleapis.com/envoy.extensions.filters.http.router.v3.Router
+```
 
+`failure_mode_allow: false` ensures that if DRL is unreachable, requests are denied rather than passed
+through. Set to `true` if you prefer fail-open behaviour.
+
+### DRL cluster
+
+The cluster must be configured with HTTP/2 (`http2_protocol_options`) because gRPC requires it:
+
+```yaml
 clusters:
   - name: drl_cluster
+    connect_timeout: 0.25s
     type: STRICT_DNS
     lb_policy: ROUND_ROBIN
+    typed_extension_protocol_options:
+      envoy.extensions.upstreams.http.v3.HttpProtocolOptions:
+        "@type": type.googleapis.com/envoy.extensions.upstreams.http.v3.HttpProtocolOptions
+        explicit_http_config:
+          http2_protocol_options: {}
     load_assignment:
       cluster_name: drl_cluster
       endpoints:
@@ -83,13 +108,69 @@ clusters:
             - endpoint:
                 address:
                   socket_address:
-                    address: drl         # service DNS name
-                    port_value: 8081     # DRL gRPC port
-    typed_extension_protocol_options:
-      envoy.extensions.upstreams.http.v3.HttpProtocolOptions:
-        "@type": type.googleapis.com/envoy.extensions.upstreams.http.v3.HttpProtocolOptions
-        explicit_http_config:
-          http2_protocol_options: {}
+                    address: drl      # DNS name of the DRL service / pod
+                    port_value: 8081  # DRL gRPC port
+```
+
+### Complete `envoy.yaml` example
+
+```yaml
+static_resources:
+  listeners:
+    - name: listener_0
+      address:
+        socket_address:
+          address: 0.0.0.0
+          port_value: 10000
+      filter_chains:
+        - filters:
+            - name: envoy.filters.network.http_connection_manager
+              typed_config:
+                "@type": type.googleapis.com/envoy.extensions.filters.network.http_connection_manager.v3.HttpConnectionManager
+                stat_prefix: ingress_http
+                http_filters:
+                  - name: envoy.filters.http.ext_authz
+                    typed_config:
+                      "@type": type.googleapis.com/envoy.extensions.filters.http.ext_authz.v3.ExtAuthz
+                      grpc_service:
+                        envoy_grpc:
+                          cluster_name: drl_cluster
+                        timeout: 0.25s
+                      transport_api_version: V3
+                      failure_mode_allow: false
+                  - name: envoy.filters.http.router
+                    typed_config:
+                      "@type": type.googleapis.com/envoy.extensions.filters.http.router.v3.Router
+                route_config:
+                  name: local_route
+                  virtual_hosts:
+                    - name: backend
+                      domains: ["*"]
+                      routes:
+                        - match:
+                            prefix: "/"
+                          route:
+                            cluster: echo-server
+
+  clusters:
+    - name: drl_cluster
+      connect_timeout: 0.25s
+      type: STRICT_DNS
+      lb_policy: ROUND_ROBIN
+      typed_extension_protocol_options:
+        envoy.extensions.upstreams.http.v3.HttpProtocolOptions:
+          "@type": type.googleapis.com/envoy.extensions.upstreams.http.v3.HttpProtocolOptions
+          explicit_http_config:
+            http2_protocol_options: {}
+      load_assignment:
+        cluster_name: drl_cluster
+        endpoints:
+          - lb_endpoints:
+              - endpoint:
+                  address:
+                    socket_address:
+                      address: drl
+                      port_value: 8081
 ```
 
 ## gRPC server address
@@ -102,18 +183,14 @@ listen {
 
 Environment variable: `DRL_LISTEN_GRPC`
 
-## Entity extraction
+## Responses
 
-DRL extracts rate-limiting entity components from the Envoy `RateLimitDescriptor` entries:
+| Scenario | gRPC status code | HTTP status | Extra headers |
+|---|---|---|---|
+| Entity not blocked | `OK` (0) | 200 | — |
+| Entity blocked | `PERMISSION_DENIED` (7) | 429 | `Retry-After: <seconds>` |
 
-| Descriptor key | Mapped to |
-|---------------|-----------|
-| `remote_address` | Source IP |
-| `path` | URI path |
-| Any other key | Header value (if the key matches a configured header name) |
-
-The entity key is then hashed with xxHash64 and looked up in the blocklist. See [Accounting]({{< ref "accounting" >}})
-for details on how header matching works in accounting rules.
+The `Retry-After` value is the number of seconds until the blocklist entry expires for the entity.
 
 ## Max hops
 
