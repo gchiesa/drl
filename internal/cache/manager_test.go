@@ -91,7 +91,7 @@ func TestManager_MetricsCallbacks(t *testing.T) {
 
 	// Test blocklist callbacks
 	m.Blocklist.IsBlocked("192.168.1.1") // miss
-	m.Blocklist.Block("192.168.1.1", nil, time.Second)
+	m.Blocklist.Block("192.168.1.1", time.Second, nil)
 	m.Blocklist.IsBlocked("192.168.1.1") // hit
 
 	assert.Equal(t, 1, blocklistHits)
@@ -135,7 +135,7 @@ func TestManager_Integration(t *testing.T) {
 	// One more request exceeds limit - block the IP
 	count = m.Accounting.Increment(ip, 1)
 	if count > rateLimit {
-		m.Blocklist.Block(ip, nil, time.Minute)
+		m.Blocklist.Block(ip, time.Minute, nil)
 	}
 
 	// IP should now be blocked

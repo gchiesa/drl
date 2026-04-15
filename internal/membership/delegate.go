@@ -181,9 +181,9 @@ func (d *StateDelegate) handleBlockEvent(evt *drlproto.BlockEvent) {
 	}
 
 	if entity != nil {
-		d.blocklist.BlockWithMeta(evt.Key, ttl, entity)
+		d.blocklist.Block(evt.Key, ttl, entity)
 	} else {
-		d.blocklist.Block(evt.Key, nil, ttl)
+		d.blocklist.Block(evt.Key, ttl, nil)
 	}
 
 	if d.logger != nil {

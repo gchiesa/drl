@@ -153,7 +153,7 @@ func (s *Server) handleBlockEntityAdd(c *fiber.Ctx) error {
 	key := entity.Key()
 
 	if s.blocklist != nil {
-		s.blocklist.BlockWithMeta(key, ttl, &entity)
+		s.blocklist.Block(key, ttl, &entity)
 	}
 
 	if s.broadcaster != nil {

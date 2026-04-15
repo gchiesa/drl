@@ -17,7 +17,7 @@ DRL maintains two in-memory caches per node. Both are backed by
 
 | Cache | Contents | Replication | Configured via |
 |-------|----------|-------------|----------------|
-| **Blocklist** | Banned entity hashes + optional metadata | **Fully replicated** on every node | `blocklist.max_size_mb` |
+| **Blocklist** | Banned entity hashes + entity metadata | **Fully replicated** on every node | `blocklist.max_size_mb` |
 | **Accounting** | Per-entity request counters (`*atomic.Int64`) | **Sharded** by consistent hash ring | `accounting.max_size_mb` |
 
 Because the blocklist is fully replicated, adding more DRL instances does **not** reduce per-node blocklist
@@ -33,23 +33,33 @@ of data), regardless of how long the original IP, path, or headers are.
 ### Blocklist
 
 Each blocklist value is a `*blocklistEntryData`, a heap-allocated struct holding a `time.Time` expiration
-and an optional `*model.Entity` pointer. The entity pointer is `nil` for automatic rate-limiter blocks
-(the common case) and non-nil only for admin-API blocks that need human-readable listing.
+and an optional `*model.Entity` pointer.
 
-| Component | Automatic block | Admin block (no headers) | Admin block (2 headers) |
-|-----------|:--------------:|:------------------------:|:-----------------------:|
+**When is the entity pointer non-nil?** Both the accounting engine (rate-limiter threshold blocks) and the
+admin API store the full `model.Entity` struct — IP, URI path, and any matched headers — alongside the block
+entry. This allows `ListEntries` to reconstruct human-readable metadata for inspection endpoints and ensures
+gossip events carry entity context to peers. The entity pointer is `nil` only in the rare case where a
+gossip-propagated block event arrives from a peer that itself had no entity attached (for example, a block
+originating from a very old code path or a manual low-level event injection).
+
+| Component | No-entity block (gossip edge-case) | Entity block, no headers | Entity block, 2 headers |
+|-----------|:----------------------------------:|:------------------------:|:-----------------------:|
 | Cache key (`string` — 16-char hex) | 32 B | 32 B | 32 B |
 | Otter v2 node overhead (S3-FIFO metadata) | ~64 B | ~64 B | ~64 B |
 | `*blocklistEntryData` heap (`time.Time` + pointer) | 32 B | 32 B | 32 B |
 | `*model.Entity` pointer | — | 8 B | 8 B |
 | `Entity.IP` string (IPv4) | — | ~31 B | ~31 B |
-| `Entity.Path` string (~20 chars) | — | ~36 B | ~36 B |
-| `Entity.Headers` (nil map vs 2-pair map) | 8 B | 8 B | ~400 B |
-| **Total per entry** | **~136 B** | **~211 B** | **~603 B** |
+| `Entity.URIPath` string (~20 chars) | — | ~36 B | ~36 B |
+| `Entity.Headers` (nil map vs 2-pair map) | — | 8 B | ~400 B |
+| **Total per entry** | **~128 B** | **~211 B** | **~603 B** |
 
-> **Note:** The otter weigher assigns a fixed cost of 100 per entry. Actual heap usage is 1.4×–6× higher
-> depending on whether entity metadata is stored. For operational sizing, use the actual figures in the
-> table above, not the configured `max_size_mb` value directly.
+> **Note:** The otter weigher assigns a fixed cost of 100 per entry. Actual heap usage varies from 1.7×–6×
+> the configured `max_size_mb` depending on entity complexity. For operational sizing, use the actual figures
+> in the table above, not the configured `max_size_mb` value directly.
+
+The **entity block, no headers** profile (~211 B) is the **common production case**: the rate-limiter and
+admin API both store the full `model.Entity` struct alongside every block entry. The no-entity profile is a
+rare edge-case limited to gossip propagation from peers that had no entity context.
 
 ### Accounting
 
@@ -64,23 +74,22 @@ Go's atomic no-copy contract and introduce data races.
 
 | RAM budget | Entry profile | Est. bytes/entry | Max entries |
 |:----------:|---------------|:----------------:|:-----------:|
-| **64 MB** | Automatic blocks (no entity meta) | ~136 B | ~496 k |
-| **64 MB** | Admin blocks, no headers | ~211 B | ~319 k |
-| **64 MB** | Admin blocks + 2 header pairs | ~603 B | ~112 k |
-| **128 MB** | Automatic blocks | ~136 B | ~993 k (~1 M) |
-| **128 MB** | Admin blocks, no headers | ~211 B | ~638 k |
-| **128 MB** | Admin blocks + 2 header pairs | ~603 B | ~224 k |
-| **256 MB** | Automatic blocks | ~136 B | ~1.99 M |
-| **256 MB** | Admin blocks, no headers | ~211 B | ~1.28 M |
-| **256 MB** | Admin blocks + 2 header pairs | ~603 B | ~449 k |
-| **1 GB** | Automatic blocks | ~136 B | ~7.90 M |
-| **1 GB** | Admin blocks, no headers | ~211 B | ~5.09 M |
-| **1 GB** | Admin blocks + 2 header pairs | ~603 B | ~1.78 M |
+| **64 MB** | Entity block, no headers *(common)* | ~211 B | ~319 k |
+| **64 MB** | Entity block, 2 header pairs | ~603 B | ~112 k |
+| **64 MB** | No-entity block (gossip edge-case) | ~128 B | ~524 k |
+| **128 MB** | Entity block, no headers *(common)* | ~211 B | ~638 k |
+| **128 MB** | Entity block, 2 header pairs | ~603 B | ~224 k |
+| **128 MB** | No-entity block (gossip edge-case) | ~128 B | ~1.05 M |
+| **256 MB** | Entity block, no headers *(common)* | ~211 B | ~1.28 M |
+| **256 MB** | Entity block, 2 header pairs | ~603 B | ~449 k |
+| **256 MB** | No-entity block (gossip edge-case) | ~128 B | ~2.10 M |
+| **1 GB** | Entity block, no headers *(common)* | ~211 B | ~5.09 M |
+| **1 GB** | Entity block, 2 header pairs | ~603 B | ~1.78 M |
+| **1 GB** | No-entity block (gossip edge-case) | ~128 B | ~8.39 M |
 
-The **automatic blocks** profile is the common production case: the rate-limiter fires a block event
-storing only the 64-bit entity hash as the key, with no original IP/path/headers retained in the value.
-Admin-API blocks optionally carry the full entity struct for human-readable listing via the management
-endpoints.
+Use the **entity block, no headers** figures for capacity planning unless your rules match on headers, in
+which case use the 2-header row as a conservative estimate. Mix-and-match if your ruleset includes both
+header-based and path-only rules.
 
 ## Accounting cache capacity by RAM budget
 
@@ -97,15 +106,16 @@ requirement scales with `total_unique_entities / N` for an N-node cluster.
 ## Real-world deployment recommendations
 
 The table below uses publicly documented traffic figures. Attack scenarios assume a volumetric DDoS with a
-distributed botnet of unique source IPs, which drives the worst-case blocklist size.
+distributed botnet of unique source IPs, which drives the worst-case blocklist size. Blocklist RAM figures
+are based on the **entity block, no headers** profile (~211 B/entry), which is the common production case.
 
 | Site (scale reference) | Public traffic data | Peak blocked entities (attack) | Recommended blocklist RAM | Recommended instances | Notes |
 |------------------------|--------------------|---------------------------------|:-------------------------:|:---------------------:|-------|
 | **Stack Overflow / Stack Exchange** (~55 M page views/month, ~200 req/s peak — Stack Exchange blog) | ~20 req/s avg | ~5 k–20 k | 16 MB | 3 | Typical enterprise-grade API service; 64 MB is already 3× overkill |
-| **Wikipedia / Wikimedia** (~15 B page views/month, ~6 k req/s avg — Wikimedia Stats) | ~6 k req/s | ~50 k–200 k | 64 MB | 3–5 | Block events propagate via gossip in < 1 s; 64 MB holds ~496 k automatic blocks |
-| **Reddit** (~1.7 B page views/month, ~700 req/s API avg — Reddit Transparency) | ~700 req/s | ~200 k–1 M | 256 MB | 5 | Aggressive scraping bots drive large blocklists; accounting sharding across 5 nodes keeps per-node counter pressure manageable |
-| **Twitter / X** (~200 M daily active users, ~500 M tweets/day — SEC filings) | ~100 k req/s | ~1 M–10 M | 1 GB | 10 | Fully replicated 1 GB blocklist on 10 nodes; accounting sharded to ~1/10th per node |
-| **Netflix** (~220 M subscribers, ~15 % of peak US internet — Sandvine reports) | ~1 M+ req/s | ~5 M–50 M | 4 GB | 20 | Multiple independent DRL clusters per region recommended; 4 GB holds ~7.9 M automatic blocks per node |
+| **Wikipedia / Wikimedia** (~15 B page views/month, ~6 k req/s avg — Wikimedia Stats) | ~6 k req/s | ~50 k–200 k | 64 MB | 3–5 | Block events propagate via gossip in < 1 s; 64 MB holds ~319 k entity blocks (no-header profile) |
+| **Reddit** (~1.7 B page views/month, ~700 req/s API avg — Reddit Transparency) | ~700 req/s | ~200 k–1 M | 256 MB | 5 | Aggressive scraping bots drive large blocklists; 256 MB holds ~1.28 M entity blocks; accounting sharding across 5 nodes keeps per-node counter pressure manageable |
+| **Twitter / X** (~200 M daily active users, ~500 M tweets/day — SEC filings) | ~100 k req/s | ~1 M–10 M | 1 GB | 10 | Fully replicated 1 GB blocklist on 10 nodes holds ~5 M entity blocks; accounting sharded to ~1/10th per node |
+| **Netflix** (~220 M subscribers, ~15 % of peak US internet — Sandvine reports) | ~1 M+ req/s | ~5 M–50 M | 4 GB | 20 | Multiple independent DRL clusters per region recommended; 4 GB holds ~20 M entity blocks (no-header profile) per node |
 
 ## Configuration recipe
 
@@ -113,6 +123,8 @@ distributed botnet of unique source IPs, which drives the worst-case blocklist s
 cache {
     // Blocklist: fully replicated. Size it for the peak attack blocklist across
     // ALL nodes (every node holds the full set).
+    // Common case: ~211 B/entry (entity with IP + path, no headers).
+    // Header-based rules: ~603 B/entry (entity with 2 header pairs).
     blocklist_max_size_mb 256
 
     // Accounting: sharded. Size it for total_unique_entities / num_nodes.
