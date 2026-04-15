@@ -1880,7 +1880,7 @@ derived from publicly documented traffic figures for well-known web services.&lt
 &lt;tbody&gt;
 &lt;tr&gt;
 &lt;td&gt;&lt;strong&gt;Blocklist&lt;/strong&gt;&lt;/td&gt;
-&lt;td&gt;Banned entity hashes + optional metadata&lt;/td&gt;
+&lt;td&gt;Banned entity hashes + entity metadata&lt;/td&gt;
 &lt;td&gt;&lt;strong&gt;Fully replicated&lt;/strong&gt; on every node&lt;/td&gt;
 &lt;td&gt;&lt;code&gt;blocklist.max_size_mb&lt;/code&gt;&lt;/td&gt;
 &lt;/tr&gt;
@@ -1901,15 +1901,20 @@ form (&lt;code&gt;IP|Path[|Header:Value]...&lt;/code&gt;). The key length is &lt
 of data), regardless of how long the original IP, path, or headers are.&lt;/p&gt;
 &lt;h3&gt;Blocklist&lt;span class="hx:absolute hx:-mt-20" id="blocklist"&gt;&lt;/span&gt;
 &lt;a href="#blocklist" class="subheading-anchor" aria-label="Permalink for this section"&gt;&lt;/a&gt;&lt;/h3&gt;&lt;p&gt;Each blocklist value is a &lt;code&gt;*blocklistEntryData&lt;/code&gt;, a heap-allocated struct holding a &lt;code&gt;time.Time&lt;/code&gt; expiration
-and an optional &lt;code&gt;*model.Entity&lt;/code&gt; pointer. The entity pointer is &lt;code&gt;nil&lt;/code&gt; for automatic rate-limiter blocks
-(the common case) and non-nil only for admin-API blocks that need human-readable listing.&lt;/p&gt;
+and an optional &lt;code&gt;*model.Entity&lt;/code&gt; pointer.&lt;/p&gt;
+&lt;p&gt;&lt;strong&gt;When is the entity pointer non-nil?&lt;/strong&gt; Both the accounting engine (rate-limiter threshold blocks) and the
+admin API store the full &lt;code&gt;model.Entity&lt;/code&gt; struct — IP, URI path, and any matched headers — alongside the block
+entry. This allows &lt;code&gt;ListEntries&lt;/code&gt; to reconstruct human-readable metadata for inspection endpoints and ensures
+gossip events carry entity context to peers. The entity pointer is &lt;code&gt;nil&lt;/code&gt; only in the rare case where a
+gossip-propagated block event arrives from a peer that itself had no entity attached (for example, a block
+originating from a very old code path or a manual low-level event injection).&lt;/p&gt;
 &lt;table&gt;
 &lt;thead&gt;
 &lt;tr&gt;
 &lt;th&gt;Component&lt;/th&gt;
-&lt;th style="text-align: center"&gt;Automatic block&lt;/th&gt;
-&lt;th style="text-align: center"&gt;Admin block (no headers)&lt;/th&gt;
-&lt;th style="text-align: center"&gt;Admin block (2 headers)&lt;/th&gt;
+&lt;th style="text-align: center"&gt;No-entity block (gossip edge-case)&lt;/th&gt;
+&lt;th style="text-align: center"&gt;Entity block, no headers&lt;/th&gt;
+&lt;th style="text-align: center"&gt;Entity block, 2 headers&lt;/th&gt;
 &lt;/tr&gt;
 &lt;/thead&gt;
 &lt;tbody&gt;
@@ -1944,30 +1949,33 @@ and an optional &lt;code&gt;*model.Entity&lt;/code&gt; pointer. The entity point
 &lt;td style="text-align: center"&gt;~31 B&lt;/td&gt;
 &lt;/tr&gt;
 &lt;tr&gt;
-&lt;td&gt;&lt;code&gt;Entity.Path&lt;/code&gt; string (~20 chars)&lt;/td&gt;
+&lt;td&gt;&lt;code&gt;Entity.URIPath&lt;/code&gt; string (~20 chars)&lt;/td&gt;
 &lt;td style="text-align: center"&gt;—&lt;/td&gt;
 &lt;td style="text-align: center"&gt;~36 B&lt;/td&gt;
 &lt;td style="text-align: center"&gt;~36 B&lt;/td&gt;
 &lt;/tr&gt;
 &lt;tr&gt;
 &lt;td&gt;&lt;code&gt;Entity.Headers&lt;/code&gt; (nil map vs 2-pair map)&lt;/td&gt;
-&lt;td style="text-align: center"&gt;8 B&lt;/td&gt;
+&lt;td style="text-align: center"&gt;—&lt;/td&gt;
 &lt;td style="text-align: center"&gt;8 B&lt;/td&gt;
 &lt;td style="text-align: center"&gt;~400 B&lt;/td&gt;
 &lt;/tr&gt;
 &lt;tr&gt;
 &lt;td&gt;&lt;strong&gt;Total per entry&lt;/strong&gt;&lt;/td&gt;
-&lt;td style="text-align: center"&gt;&lt;strong&gt;~136 B&lt;/strong&gt;&lt;/td&gt;
+&lt;td style="text-align: center"&gt;&lt;strong&gt;~128 B&lt;/strong&gt;&lt;/td&gt;
 &lt;td style="text-align: center"&gt;&lt;strong&gt;~211 B&lt;/strong&gt;&lt;/td&gt;
 &lt;td style="text-align: center"&gt;&lt;strong&gt;~603 B&lt;/strong&gt;&lt;/td&gt;
 &lt;/tr&gt;
 &lt;/tbody&gt;
 &lt;/table&gt;
 &lt;blockquote&gt;
-&lt;p&gt;&lt;strong&gt;Note:&lt;/strong&gt; The otter weigher assigns a fixed cost of 100 per entry. Actual heap usage is 1.4×–6× higher
-depending on whether entity metadata is stored. For operational sizing, use the actual figures in the
-table above, not the configured &lt;code&gt;max_size_mb&lt;/code&gt; value directly.&lt;/p&gt;
+&lt;p&gt;&lt;strong&gt;Note:&lt;/strong&gt; The otter weigher assigns a fixed cost of 100 per entry. Actual heap usage varies from 1.7×–6×
+the configured &lt;code&gt;max_size_mb&lt;/code&gt; depending on entity complexity. For operational sizing, use the actual figures
+in the table above, not the configured &lt;code&gt;max_size_mb&lt;/code&gt; value directly.&lt;/p&gt;
 &lt;/blockquote&gt;
+&lt;p&gt;The &lt;strong&gt;entity block, no headers&lt;/strong&gt; profile (~211 B) is the &lt;strong&gt;common production case&lt;/strong&gt;: the rate-limiter and
+admin API both store the full &lt;code&gt;model.Entity&lt;/code&gt; struct alongside every block entry. The no-entity profile is a
+rare edge-case limited to gossip propagation from peers that had no entity context.&lt;/p&gt;
 &lt;h3&gt;Accounting&lt;span class="hx:absolute hx:-mt-20" id="accounting"&gt;&lt;/span&gt;
 &lt;a href="#accounting" class="subheading-anchor" aria-label="Permalink for this section"&gt;&lt;/a&gt;&lt;/h3&gt;&lt;p&gt;Accounting entries are simpler: the key is the same 16-char hex and the value is a &lt;code&gt;*atomic.Int64&lt;/code&gt; — a
 pointer to a heap-allocated 64-bit atomic counter. The pointer indirection is required because
@@ -1987,82 +1995,81 @@ Go&amp;rsquo;s atomic no-copy contract and introduce data races.&lt;/p&gt;
 &lt;tbody&gt;
 &lt;tr&gt;
 &lt;td style="text-align: center"&gt;&lt;strong&gt;64 MB&lt;/strong&gt;&lt;/td&gt;
-&lt;td&gt;Automatic blocks (no entity meta)&lt;/td&gt;
-&lt;td style="text-align: center"&gt;~136 B&lt;/td&gt;
-&lt;td style="text-align: center"&gt;~496 k&lt;/td&gt;
-&lt;/tr&gt;
-&lt;tr&gt;
-&lt;td style="text-align: center"&gt;&lt;strong&gt;64 MB&lt;/strong&gt;&lt;/td&gt;
-&lt;td&gt;Admin blocks, no headers&lt;/td&gt;
+&lt;td&gt;Entity block, no headers &lt;em&gt;(common)&lt;/em&gt;&lt;/td&gt;
 &lt;td style="text-align: center"&gt;~211 B&lt;/td&gt;
 &lt;td style="text-align: center"&gt;~319 k&lt;/td&gt;
 &lt;/tr&gt;
 &lt;tr&gt;
 &lt;td style="text-align: center"&gt;&lt;strong&gt;64 MB&lt;/strong&gt;&lt;/td&gt;
-&lt;td&gt;Admin blocks + 2 header pairs&lt;/td&gt;
+&lt;td&gt;Entity block, 2 header pairs&lt;/td&gt;
 &lt;td style="text-align: center"&gt;~603 B&lt;/td&gt;
 &lt;td style="text-align: center"&gt;~112 k&lt;/td&gt;
 &lt;/tr&gt;
 &lt;tr&gt;
-&lt;td style="text-align: center"&gt;&lt;strong&gt;128 MB&lt;/strong&gt;&lt;/td&gt;
-&lt;td&gt;Automatic blocks&lt;/td&gt;
-&lt;td style="text-align: center"&gt;~136 B&lt;/td&gt;
-&lt;td style="text-align: center"&gt;~993 k (~1 M)&lt;/td&gt;
+&lt;td style="text-align: center"&gt;&lt;strong&gt;64 MB&lt;/strong&gt;&lt;/td&gt;
+&lt;td&gt;No-entity block (gossip edge-case)&lt;/td&gt;
+&lt;td style="text-align: center"&gt;~128 B&lt;/td&gt;
+&lt;td style="text-align: center"&gt;~524 k&lt;/td&gt;
 &lt;/tr&gt;
 &lt;tr&gt;
 &lt;td style="text-align: center"&gt;&lt;strong&gt;128 MB&lt;/strong&gt;&lt;/td&gt;
-&lt;td&gt;Admin blocks, no headers&lt;/td&gt;
+&lt;td&gt;Entity block, no headers &lt;em&gt;(common)&lt;/em&gt;&lt;/td&gt;
 &lt;td style="text-align: center"&gt;~211 B&lt;/td&gt;
 &lt;td style="text-align: center"&gt;~638 k&lt;/td&gt;
 &lt;/tr&gt;
 &lt;tr&gt;
 &lt;td style="text-align: center"&gt;&lt;strong&gt;128 MB&lt;/strong&gt;&lt;/td&gt;
-&lt;td&gt;Admin blocks + 2 header pairs&lt;/td&gt;
+&lt;td&gt;Entity block, 2 header pairs&lt;/td&gt;
 &lt;td style="text-align: center"&gt;~603 B&lt;/td&gt;
 &lt;td style="text-align: center"&gt;~224 k&lt;/td&gt;
 &lt;/tr&gt;
 &lt;tr&gt;
-&lt;td style="text-align: center"&gt;&lt;strong&gt;256 MB&lt;/strong&gt;&lt;/td&gt;
-&lt;td&gt;Automatic blocks&lt;/td&gt;
-&lt;td style="text-align: center"&gt;~136 B&lt;/td&gt;
-&lt;td style="text-align: center"&gt;~1.99 M&lt;/td&gt;
+&lt;td style="text-align: center"&gt;&lt;strong&gt;128 MB&lt;/strong&gt;&lt;/td&gt;
+&lt;td&gt;No-entity block (gossip edge-case)&lt;/td&gt;
+&lt;td style="text-align: center"&gt;~128 B&lt;/td&gt;
+&lt;td style="text-align: center"&gt;~1.05 M&lt;/td&gt;
 &lt;/tr&gt;
 &lt;tr&gt;
 &lt;td style="text-align: center"&gt;&lt;strong&gt;256 MB&lt;/strong&gt;&lt;/td&gt;
-&lt;td&gt;Admin blocks, no headers&lt;/td&gt;
+&lt;td&gt;Entity block, no headers &lt;em&gt;(common)&lt;/em&gt;&lt;/td&gt;
 &lt;td style="text-align: center"&gt;~211 B&lt;/td&gt;
 &lt;td style="text-align: center"&gt;~1.28 M&lt;/td&gt;
 &lt;/tr&gt;
 &lt;tr&gt;
 &lt;td style="text-align: center"&gt;&lt;strong&gt;256 MB&lt;/strong&gt;&lt;/td&gt;
-&lt;td&gt;Admin blocks + 2 header pairs&lt;/td&gt;
+&lt;td&gt;Entity block, 2 header pairs&lt;/td&gt;
 &lt;td style="text-align: center"&gt;~603 B&lt;/td&gt;
 &lt;td style="text-align: center"&gt;~449 k&lt;/td&gt;
 &lt;/tr&gt;
 &lt;tr&gt;
-&lt;td style="text-align: center"&gt;&lt;strong&gt;1 GB&lt;/strong&gt;&lt;/td&gt;
-&lt;td&gt;Automatic blocks&lt;/td&gt;
-&lt;td style="text-align: center"&gt;~136 B&lt;/td&gt;
-&lt;td style="text-align: center"&gt;~7.90 M&lt;/td&gt;
+&lt;td style="text-align: center"&gt;&lt;strong&gt;256 MB&lt;/strong&gt;&lt;/td&gt;
+&lt;td&gt;No-entity block (gossip edge-case)&lt;/td&gt;
+&lt;td style="text-align: center"&gt;~128 B&lt;/td&gt;
+&lt;td style="text-align: center"&gt;~2.10 M&lt;/td&gt;
 &lt;/tr&gt;
 &lt;tr&gt;
 &lt;td style="text-align: center"&gt;&lt;strong&gt;1 GB&lt;/strong&gt;&lt;/td&gt;
-&lt;td&gt;Admin blocks, no headers&lt;/td&gt;
+&lt;td&gt;Entity block, no headers &lt;em&gt;(common)&lt;/em&gt;&lt;/td&gt;
 &lt;td style="text-align: center"&gt;~211 B&lt;/td&gt;
 &lt;td style="text-align: center"&gt;~5.09 M&lt;/td&gt;
 &lt;/tr&gt;
 &lt;tr&gt;
 &lt;td style="text-align: center"&gt;&lt;strong&gt;1 GB&lt;/strong&gt;&lt;/td&gt;
-&lt;td&gt;Admin blocks + 2 header pairs&lt;/td&gt;
+&lt;td&gt;Entity block, 2 header pairs&lt;/td&gt;
 &lt;td style="text-align: center"&gt;~603 B&lt;/td&gt;
 &lt;td style="text-align: center"&gt;~1.78 M&lt;/td&gt;
 &lt;/tr&gt;
+&lt;tr&gt;
+&lt;td style="text-align: center"&gt;&lt;strong&gt;1 GB&lt;/strong&gt;&lt;/td&gt;
+&lt;td&gt;No-entity block (gossip edge-case)&lt;/td&gt;
+&lt;td style="text-align: center"&gt;~128 B&lt;/td&gt;
+&lt;td style="text-align: center"&gt;~8.39 M&lt;/td&gt;
+&lt;/tr&gt;
 &lt;/tbody&gt;
 &lt;/table&gt;
-&lt;p&gt;The &lt;strong&gt;automatic blocks&lt;/strong&gt; profile is the common production case: the rate-limiter fires a block event
-storing only the 64-bit entity hash as the key, with no original IP/path/headers retained in the value.
-Admin-API blocks optionally carry the full entity struct for human-readable listing via the management
-endpoints.&lt;/p&gt;
+&lt;p&gt;Use the &lt;strong&gt;entity block, no headers&lt;/strong&gt; figures for capacity planning unless your rules match on headers, in
+which case use the 2-header row as a conservative estimate. Mix-and-match if your ruleset includes both
+header-based and path-only rules.&lt;/p&gt;
 &lt;h2&gt;Accounting cache capacity by RAM budget&lt;span class="hx:absolute hx:-mt-20" id="accounting-cache-capacity-by-ram-budget"&gt;&lt;/span&gt;
 &lt;a href="#accounting-cache-capacity-by-ram-budget" class="subheading-anchor" aria-label="Permalink for this section"&gt;&lt;/a&gt;&lt;/h2&gt;&lt;p&gt;Accounting entries are always ~128 B each. Because the accounting cache is sharded, the per-node memory
 requirement scales with &lt;code&gt;total_unique_entities / N&lt;/code&gt; for an N-node cluster.&lt;/p&gt;
@@ -2109,7 +2116,8 @@ requirement scales with &lt;code&gt;total_unique_entities / N&lt;/code&gt; for a
 &lt;/table&gt;
 &lt;h2&gt;Real-world deployment recommendations&lt;span class="hx:absolute hx:-mt-20" id="real-world-deployment-recommendations"&gt;&lt;/span&gt;
 &lt;a href="#real-world-deployment-recommendations" class="subheading-anchor" aria-label="Permalink for this section"&gt;&lt;/a&gt;&lt;/h2&gt;&lt;p&gt;The table below uses publicly documented traffic figures. Attack scenarios assume a volumetric DDoS with a
-distributed botnet of unique source IPs, which drives the worst-case blocklist size.&lt;/p&gt;
+distributed botnet of unique source IPs, which drives the worst-case blocklist size. Blocklist RAM figures
+are based on the &lt;strong&gt;entity block, no headers&lt;/strong&gt; profile (~211 B/entry), which is the common production case.&lt;/p&gt;
 &lt;table&gt;
 &lt;thead&gt;
 &lt;tr&gt;
@@ -2136,7 +2144,7 @@ distributed botnet of unique source IPs, which drives the worst-case blocklist s
 &lt;td&gt;~50 k–200 k&lt;/td&gt;
 &lt;td style="text-align: center"&gt;64 MB&lt;/td&gt;
 &lt;td style="text-align: center"&gt;3–5&lt;/td&gt;
-&lt;td&gt;Block events propagate via gossip in &amp;lt; 1 s; 64 MB holds ~496 k automatic blocks&lt;/td&gt;
+&lt;td&gt;Block events propagate via gossip in &amp;lt; 1 s; 64 MB holds ~319 k entity blocks (no-header profile)&lt;/td&gt;
 &lt;/tr&gt;
 &lt;tr&gt;
 &lt;td&gt;&lt;strong&gt;Reddit&lt;/strong&gt; (~1.7 B page views/month, ~700 req/s API avg — Reddit Transparency)&lt;/td&gt;
@@ -2144,7 +2152,7 @@ distributed botnet of unique source IPs, which drives the worst-case blocklist s
 &lt;td&gt;~200 k–1 M&lt;/td&gt;
 &lt;td style="text-align: center"&gt;256 MB&lt;/td&gt;
 &lt;td style="text-align: center"&gt;5&lt;/td&gt;
-&lt;td&gt;Aggressive scraping bots drive large blocklists; accounting sharding across 5 nodes keeps per-node counter pressure manageable&lt;/td&gt;
+&lt;td&gt;Aggressive scraping bots drive large blocklists; 256 MB holds ~1.28 M entity blocks; accounting sharding across 5 nodes keeps per-node counter pressure manageable&lt;/td&gt;
 &lt;/tr&gt;
 &lt;tr&gt;
 &lt;td&gt;&lt;strong&gt;Twitter / X&lt;/strong&gt; (~200 M daily active users, ~500 M tweets/day — SEC filings)&lt;/td&gt;
@@ -2152,7 +2160,7 @@ distributed botnet of unique source IPs, which drives the worst-case blocklist s
 &lt;td&gt;~1 M–10 M&lt;/td&gt;
 &lt;td style="text-align: center"&gt;1 GB&lt;/td&gt;
 &lt;td style="text-align: center"&gt;10&lt;/td&gt;
-&lt;td&gt;Fully replicated 1 GB blocklist on 10 nodes; accounting sharded to ~1/10th per node&lt;/td&gt;
+&lt;td&gt;Fully replicated 1 GB blocklist on 10 nodes holds ~5 M entity blocks; accounting sharded to ~1/10th per node&lt;/td&gt;
 &lt;/tr&gt;
 &lt;tr&gt;
 &lt;td&gt;&lt;strong&gt;Netflix&lt;/strong&gt; (~220 M subscribers, ~15 % of peak US internet — Sandvine reports)&lt;/td&gt;
@@ -2160,7 +2168,7 @@ distributed botnet of unique source IPs, which drives the worst-case blocklist s
 &lt;td&gt;~5 M–50 M&lt;/td&gt;
 &lt;td style="text-align: center"&gt;4 GB&lt;/td&gt;
 &lt;td style="text-align: center"&gt;20&lt;/td&gt;
-&lt;td&gt;Multiple independent DRL clusters per region recommended; 4 GB holds ~7.9 M automatic blocks per node&lt;/td&gt;
+&lt;td&gt;Multiple independent DRL clusters per region recommended; 4 GB holds ~20 M entity blocks (no-header profile) per node&lt;/td&gt;
 &lt;/tr&gt;
 &lt;/tbody&gt;
 &lt;/table&gt;
@@ -2169,6 +2177,8 @@ distributed botnet of unique source IPs, which drives the worst-case blocklist s
 &lt;div&gt;&lt;div class="highlight"&gt;&lt;pre tabindex="0" class="chroma"&gt;&lt;code class="language-kdl" data-lang="kdl"&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;&lt;span class="nl"&gt;cache&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="o"&gt;{&lt;/span&gt;&lt;span class="w"&gt;
 &lt;/span&gt;&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="c1"&gt;// Blocklist: fully replicated. Size it for the peak attack blocklist across
 &lt;/span&gt;&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="c1"&gt;// ALL nodes (every node holds the full set).
+&lt;/span&gt;&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="c1"&gt;// Common case: ~211 B/entry (entity with IP + path, no headers).
+&lt;/span&gt;&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="c1"&gt;// Header-based rules: ~603 B/entry (entity with 2 header pairs).
 &lt;/span&gt;&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;&lt;span class="nl"&gt; blocklist_max_size_mb&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="m"&gt;256&lt;/span&gt;&lt;span class="w"&gt;
 &lt;/span&gt;&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;&lt;span class="w"&gt;
 &lt;/span&gt;&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="c1"&gt;// Accounting: sharded. Size it for total_unique_entities / num_nodes.
