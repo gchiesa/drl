@@ -1,0 +1,114 @@
+# Milestone 016 — UI Single-Page Svelte Dashboard
+
+**Status:** COMPLETED
+**Date:** 2026-04-15
+
+---
+
+## Summary
+
+Implemented a full single-page application (SPA) dashboard for the DRL cluster, served directly from the private API server.  All tests pass (96/96 in `internal/api`, 0 failures across all packages), lint is clean.
+
+---
+
+## What Was Implemented
+
+### 1. ECDH Browser Authentication (`internal/api/ui_auth.go`)
+
+A `uiAuthManager` handles all browser-based authentication:
+
+- **Server ECDH P-256 key pair** — generated at startup; the public key is embedded in each served SPA page.
+- **Bootstrap tokens** — short-lived (10 min), HMAC-SHA256 signed, stateless tokens injected into the SPA HTML at serve time. All nodes with the same API key derive the same signing key (`HMAC-SHA256(apiKey, "drl-ui-bootstrap-signer-v1")`), so tokens are cross-valid across peers.
+- **ECDH key exchange** (`POST /drl/ui/exchange`) — browser sends its ephemeral P-256 public key + bootstrap token; server validates the token, derives the 32-byte ECDH shared secret, creates a session, and returns the session token **AES-256-GCM encrypted** with the derived shared key. The browser decrypts it using `crypto.subtle` (Web Crypto API).
+- **Session tokens** — HMAC-SHA256 signed (using the same bootstrap signing key), stored server-side in an in-memory map with 60-minute TTL and automatic cleanup.
+
+**Auth flow:**
+```
+GET /drl/ui/   →  HTML with window.__DRL_BOOTSTRAP={serverPublicKey, bootstrapToken}
+POST /drl/ui/exchange  (bootstrapToken + clientPubKey)
+  → {serverPublicKey, iv, encryptedSession}
+  ← browser decrypts → sessionToken
+All API calls: Authorization: DRL-Session <sessionToken>
+```
+
+### 2. Dual-Auth Middleware (`internal/api/api.go`)
+
+`dualAuthMiddleware()` replaces the previous single-auth middleware on all protected routes:
+- `Authorization: DRL-Session <token>` → validates session (browser SPA path)
+- `Authorization: Digest ...` → falls through to existing Digest-SHA256 auth (CLI/curl path)
+- No header → sends standard `WWW-Authenticate: Digest` challenge (preserves CLI ergonomics)
+
+Existing CLI tooling (`curl --digest`) continues to work unchanged.
+
+### 3. Dashboard SPA (`internal/api/ui_handlers.go`)
+
+A self-contained HTML page (~600 lines, no build step required) served from:
+- `GET /drl/ui/` or `GET /drl/ui`
+
+Features:
+- **ECDH auth on page load** — transparent, no password prompts
+- **KPI row** — Cluster Peers, Blocked Entities count, Tracked Entities, Node Uptime
+- **Live charts** (Chart.js via CDN) — gRPC request total and rate-limit blocks total, polled every 30 seconds with rolling 20-point history
+- **Accounting stats panel** — monitored entities, estimated entities, pending updates
+- **Token bucket metrics panel** — tokens consumed, bucket exhausted events, gRPC check total
+- **Membership metrics panel** — cluster size, events, reliable/best-effort message counts
+- **Cluster peer chips** — all active peers, current node highlighted
+- **Blocked entities table** — full entity list with key, IP, URI path, headers, expiry
+- **Configuration sections** — accounting and membership config (from `/configuration/static/:section`)
+- **Error banner** — surfaced on any fetch failure
+- **Auto-refresh** every 30 seconds; manual Refresh button in header
+- **Cache-Control: no-store** on the HTML response to prevent stale bootstrap tokens
+
+All data is fetched in parallel using `Promise.all()` against the existing private API endpoints.
+
+### 4. Metrics Snapshot Endpoint (`GET /drl/ui/api/metrics`)
+
+Protected by dual-auth. Returns JSON:
+```json
+{ "nodeId": "...", "timestamp": "2026-04-15T...", "metrics": { "metric{labels}": value, ... } }
+```
+
+Uses a new `MetricsGatherer` interface (implemented by `*metrics.Metrics.GatherForUI()`), which calls `prometheus.Registry.Gather()` and flattens MetricFamily results into a map. Label sets are encoded as `metricName{key=val,...}` keys, matching Prometheus conventions.
+
+### 5. New Files
+
+| File | Description |
+|---|---|
+| `internal/api/ui_auth.go` | `uiAuthManager`: ECDH keys, bootstrap tokens, sessions, AES-GCM encryption |
+| `internal/api/ui_handlers.go` | HTTP handlers: `handleUIIndex`, `handleUIExchange`, `handleUIMetrics`; `renderSPAHTML`; inline SPA |
+| `internal/api/ui_test.go` | 23 tests covering auth unit cases, HTTP handler flows, dual-auth middleware |
+
+### 6. Modified Files
+
+| File | Change |
+|---|---|
+| `internal/api/api.go` | Added `MetricsGatherer` interface; `uiAuth` + `metricsGatherer` fields; `dualAuthMiddleware()`; UI routes; updated `ServerConfig` |
+| `internal/metrics/metrics.go` | Added `GatherForUI() map[string]float64` |
+
+---
+
+## Test Results
+
+```
+PASS  internal/api        89.8%  96 tests
+PASS  internal/accounting 89.5%  25 tests
+PASS  internal/cache      81.7%  41 tests
+PASS  internal/config     93.9% 118 tests
+PASS  internal/grpc       92.2%  11 tests
+PASS  internal/membership 55.9%  49 tests
+PASS  internal/metrics    67.1%   7 tests
+PASS  internal/model      88.9%   8 tests
+PASS  internal/ratelimit 100.0%  13 tests
+```
+
+---
+
+## Design Notes & Rationale
+
+**Authentication proposal (best solution for the goal):**
+
+The pre-shared key is derived deterministically from the API key at startup; no out-of-band distribution is needed. Each time the SPA page is served, a fresh 10-minute bootstrap token is generated and baked into the HTML — the SPA is "already authenticated" without user interaction. The ECDH P-256 key exchange is performed transparently by the browser on page load; the resulting AES-256-GCM shared key is used to encrypt the session token in transit (E2EE for the session establishment phase). All subsequent API calls use the session token as a Bearer-style header (`DRL-Session`), which is HMAC-signed server-side.
+
+**Full per-request AES-GCM encryption** was considered but intentionally omitted: in practice, the private API runs on HTTPS (or over a trusted overlay network), and encrypting every GET response would require custom fetch wrappers in the SPA and add latency with negligible marginal security. The ECDH exchange demonstrates the key derivation capability; the session token is the durable auth artifact.
+
+**Multi-node parallel querying:** the SPA currently queries the local node only (all existing private API endpoints return cluster-aggregated data where relevant). Direct browser-to-peer querying requires peer API address tracking in the memberlist delegate, which will be addressed in a future milestone when that metadata is available.

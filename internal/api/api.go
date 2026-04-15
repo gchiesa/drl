@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"strings"
 	"time"
 
 	"github.com/gofiber/fiber/v2"
@@ -16,6 +17,14 @@ type ClusterInfo interface {
 	IsReady() bool
 	NumMembers() int
 	MemberNames() []string
+	// MemberAddrs returns the raw IP addresses of all cluster members
+	// (including this node). Used to derive peer API addresses for
+	// cross-node aggregation.
+	MemberAddrs() []string
+	// LocalAddr returns the IP address of this node. Used to exclude the
+	// current node from the peer API address list so the SPA does not
+	// double-fetch its own metrics via the proxy.
+	LocalAddr() string
 }
 
 // BlocklistOperator allows the API to add and remove entities from the local
@@ -61,12 +70,20 @@ type StaticConfigProvider interface {
 	GetConfigSection(section string) (any, bool)
 }
 
+// MetricsGatherer gathers current Prometheus metric values for the UI dashboard.
+// Implementations return a flat map of metric name (plus label suffix) to value.
+type MetricsGatherer interface {
+	GatherForUI() map[string]float64
+}
+
 // Server represents the internal API server
 type Server struct {
 	app             *fiber.App
 	auth            *DigestAuthenticator
+	uiAuth          *uiAuthManager
 	logger          *slog.Logger
 	address         string
+	apiPort         string // port portion of address (e.g. "8082")
 	clusterName     string
 	nodeID          string
 	cluster         ClusterInfo
@@ -78,6 +95,7 @@ type Server struct {
 	bulkLoader      AccountingBulkLoader
 	metrics         BulkLoadMetricsRecorder
 	staticConfig    StaticConfigProvider
+	metricsGatherer MetricsGatherer
 }
 
 // ServerConfig holds configuration for the API server
@@ -104,6 +122,9 @@ type ServerConfig struct {
 	Metrics BulkLoadMetricsRecorder
 	// StaticConfig is optional; when set, the GET /configuration/static/:section endpoint is active.
 	StaticConfig StaticConfigProvider
+	// MetricsGatherer is optional; when set, the GET /drl/ui/api/metrics endpoint returns
+	// a JSON snapshot of current Prometheus metric values for the dashboard.
+	MetricsGatherer MetricsGatherer
 }
 
 // NewServer creates a new internal API server
@@ -112,6 +133,12 @@ func NewServer(cfg ServerConfig) (*Server, error) {
 	auth, err := NewDigestAuthenticator(cfg.APIKey)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create authenticator: %w", err)
+	}
+
+	// Create UI auth manager (ECDH + session management)
+	uiAuth, err := newUIAuthManager(cfg.APIKey)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create UI auth manager: %w", err)
 	}
 
 	// Create Fiber app
@@ -125,11 +152,19 @@ func NewServer(cfg ServerConfig) (*Server, error) {
 		defaultTTL = 24 * time.Hour
 	}
 
+	// Extract port from address (e.g. ":8082" → "8082")
+	apiPort := cfg.Address
+	if idx := strings.LastIndex(apiPort, ":"); idx >= 0 {
+		apiPort = apiPort[idx+1:]
+	}
+
 	server := &Server{
 		app:             app,
 		auth:            auth,
+		uiAuth:          uiAuth,
 		logger:          cfg.Logger,
 		address:         cfg.Address,
+		apiPort:         apiPort,
 		clusterName:     cfg.ClusterName,
 		nodeID:          cfg.NodeID,
 		cluster:         cfg.Cluster,
@@ -141,6 +176,7 @@ func NewServer(cfg ServerConfig) (*Server, error) {
 		bulkLoader:      cfg.BulkLoader,
 		metrics:         cfg.Metrics,
 		staticConfig:    cfg.StaticConfig,
+		metricsGatherer: cfg.MetricsGatherer,
 	}
 
 	// Setup routes
@@ -149,10 +185,58 @@ func NewServer(cfg ServerConfig) (*Server, error) {
 	return server, nil
 }
 
+// dualAuthMiddleware returns a Fiber handler that accepts:
+//   - "Authorization: DRL-Session <token>" — browser SPA sessions (ECDH-derived)
+//   - "Authorization: Bearer <token>"      — same as DRL-Session, alternative prefix
+//   - HTTP Digest authentication            — CLI tools (curl, scripts)
+//
+// When neither is present the client receives a standard Digest challenge,
+// matching the existing CLI behaviour.
+func (s *Server) dualAuthMiddleware() fiber.Handler {
+	digestMW := s.auth.Middleware()
+	return func(c *fiber.Ctx) error {
+		auth := c.Get("Authorization")
+		var sessionToken string
+		switch {
+		case strings.HasPrefix(auth, "DRL-Session "):
+			sessionToken = strings.TrimPrefix(auth, "DRL-Session ")
+		case strings.HasPrefix(auth, "Bearer "):
+			sessionToken = strings.TrimPrefix(auth, "Bearer ")
+		}
+		if sessionToken != "" {
+			if s.uiAuth != nil && s.uiAuth.ValidateSession(sessionToken) {
+				return c.Next()
+			}
+			return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{
+				"error": "invalid or expired DRL session",
+			})
+		}
+		// Fall through to Digest auth (CLI path).
+		return digestMW(c)
+	}
+}
+
 // setupRoutes configures the API routes
 func (s *Server) setupRoutes() {
-	authMW := s.auth.Middleware()
+	authMW := s.dualAuthMiddleware()
 
+	// ── UI routes ─────────────────────────────────────────────────────────────
+	// Serve the Svelte SPA (no auth — bootstrap token is injected into HTML).
+	s.app.Get("/drl/ui", s.handleUIIndex)
+	s.app.Get("/drl/ui/", s.handleUIIndex)
+
+	// ECDH key exchange (protected only by the bootstrap token in the request body).
+	s.app.Post("/drl/ui/exchange", s.handleUIExchange)
+
+	// Metrics snapshot for the dashboard (dual-auth).
+	s.app.Get("/drl/ui/api/metrics", authMW, s.handleUIMetrics)
+
+	// Cross-node proxy: GET /drl/ui/proxy/:nodeAddr/*endpoint
+	// :nodeAddr — URL-encoded "host:port" of the peer's private API
+	// *endpoint — the API path to forward
+	s.app.Get("/drl/ui/proxy/:nodeAddr/*", authMW, s.handleUIProxy)
+
+	// ── Existing admin API routes (now dual-auth aware) ────────────────────────
 	// Cluster status
 	s.app.Get("/status", authMW, s.handleStatus)
 

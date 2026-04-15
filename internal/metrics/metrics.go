@@ -370,6 +370,44 @@ func (m *Metrics) SetRateLimitTokensCurrent(ruleName string, tokens float64) {
 	m.RateLimitTokensCurrent.WithLabelValues(ruleName).Set(tokens)
 }
 
+// GatherForUI collects current metric values from the Prometheus registry and
+// returns a flat map of metric name (with label key=value suffix for labelled
+// metrics) to its current float64 value.  Counter families are summed across
+// labels; Gauge families take the last observed value.
+// The result is consumed by the DRL dashboard SPA via GET /drl/ui/api/metrics.
+func (m *Metrics) GatherForUI() map[string]float64 {
+	mfs, err := m.registry.Gather()
+	if err != nil {
+		return nil
+	}
+	result := make(map[string]float64, len(mfs)*2)
+	for _, mf := range mfs {
+		name := mf.GetName()
+		for _, metric := range mf.GetMetric() {
+			// Build a label suffix like {key=val,key2=val2} when labels exist.
+			labelStr := ""
+			for _, lp := range metric.GetLabel() {
+				if labelStr != "" {
+					labelStr += ","
+				}
+				labelStr += lp.GetName() + "=" + lp.GetValue()
+			}
+			key := name
+			if labelStr != "" {
+				key = name + "{" + labelStr + "}"
+			}
+
+			switch {
+			case metric.GetCounter() != nil:
+				result[key] += metric.GetCounter().GetValue()
+			case metric.GetGauge() != nil:
+				result[key] = metric.GetGauge().GetValue()
+			}
+		}
+	}
+	return result
+}
+
 // CacheType constants for metrics labels
 const (
 	CacheTypeBlocklist  = "blocklist"

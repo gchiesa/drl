@@ -22,6 +22,7 @@ import (
 type mockCluster struct {
 	ready   bool
 	members []string
+	addrs   []string
 }
 
 func (m *mockCluster) IsReady() bool {
@@ -34,6 +35,14 @@ func (m *mockCluster) NumMembers() int {
 
 func (m *mockCluster) MemberNames() []string {
 	return m.members
+}
+
+func (m *mockCluster) MemberAddrs() []string {
+	return m.addrs
+}
+
+func (m *mockCluster) LocalAddr() string {
+	return ""
 }
 
 func TestNewServer(t *testing.T) {
