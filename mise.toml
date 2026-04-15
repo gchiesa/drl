@@ -3,6 +3,7 @@ go = "1.25.6"
 golangci-lint = "2.8"
 protoc = "29.6"
 hugo = "0.160.1"
+node = "22"
 
 [tasks.build]
 description = "Build the DRL binary"

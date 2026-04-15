@@ -1,0 +1,31 @@
+# Milestone 016v2 — Completed
+
+Date: 2026-04-15
+
+## Summary
+
+Converted the single-page UI from a Go-template HTML file to a full Svelte 4 SPA built with Vite and vite-plugin-singlefile. All CSS/JS is inlined into a single `index.html` embedded in the Go binary via `embed.FS`.
+
+## Svelte SPA (`ui/`)
+
+- **`package.json`** — Svelte 4 + Vite + `vite-plugin-singlefile` + Chart.js (bundle: **90.89 KB gzip**, well under the 200 KB target)
+- **`vite.config.js`** — Single-file build config; all CSS/JS inlined into `index.html`
+- **`src/lib/auth.js`** — Svelte store encapsulating the full ECDH P-256 handshake: key generation → `POST /drl/ui/exchange` → shared secret derivation → AES-256-GCM session token decryption → `apiFetch()` wrapper
+- **Components**: `StatusDot`, `ThemeToggle`, `NodeCard`, `MetricsGraph` (Chart.js), `BlocklistTable` (filterable, fixed-height), `RuleTable` (filterable flat table)
+- **Views**: `ClusterOverview` (KPIs, charts aggregated across all cluster nodes, peer list sorted, blocklist), `Configuration` (config KV + rate-limit rules separated)
+- **`App.svelte`** — Shell with auth overlay, tabbed nav, configurable auto-refresh (1/2/5/10/15/30s default), light/dark mode toggle
+
+## Go Backend Updates
+
+- **`ui_handlers.go`** — Replaced Go template embed with `resources/index.html` embed; bootstrap data injected as `<meta name="drl-bootstrap" content='{JSON}'>` before `</head>`; new `handleUIProxy` handler for cross-node aggregation with SSRF guard
+- **`ui_auth.go`** — Sessions now store the ECDH shared key; `CreateSession(sharedKey)` updated; `ActiveSessions()` count added
+- **`api.go`** — `ClusterInfo` extended with `MemberAddrs()`; `dualAuthMiddleware` supports `Bearer` token prefix; proxy route registered at `GET /drl/ui/proxy/:nodeAddr/*`
+- **`handlers.go`** — `/status` now returns `active_peer_addresses` for cross-node aggregation
+- **`build.sh`** — Runs `npm install && npm run build`, copies `ui/dist/index.html` to the embed path, then builds the Go binary
+- **`mise.toml`** — Added `node = "22"`
+
+## Test Results
+
+- All Go tests pass: `go test ./...` — 0 failures
+- Linter: `mise run lint` — 0 issues
+- Svelte build: `npm run build` — succeeds, 90.89 KB gzipped

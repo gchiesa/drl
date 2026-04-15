@@ -54,6 +54,7 @@ func newApiServer(
 			Blocklist:       cacheManager.Blocklist,
 			Broadcaster:     clusterManager.GetStateDelegate(),
 			DefaultBlockTTL: time.Duration(cfg.Cache.BlocklistDefaultTTLSeconds) * time.Second,
+			MetricsGatherer: metricsManager,
 		}
 		if accountingEngine != nil {
 			apiCfg.AccountingStats = accountingEngine
