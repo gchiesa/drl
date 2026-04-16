@@ -94,6 +94,19 @@ For the overwhelming majority of rate-limiting use cases — API abuse preventio
 quota enforcement — a sub-second enforcement window is operationally indistinguishable from strong
 consistency, while the latency and reliability properties are dramatically better.
 
+## Control Plane UI
+
+DRL ships a built-in web dashboard for real-time cluster monitoring — no external tools required.
+
+![DRL Control Plane UI](docs/content/docs/assets/drl-ui-01.png)
+
+The dashboard is served directly from the DRL binary at `http://<node>:8082/drl/ui/`. Access is
+zero-touch: the browser performs an automatic ECDH key exchange on page load, establishing an encrypted
+session without any manual login. Metrics from all cluster nodes are aggregated in real time.
+
+See the [UI documentation](https://drl.gchiesa.dev/docs/ui/) for access instructions, authentication
+details, and deployment examples.
+
 ## Documentation
 
 | Topic | Description |
@@ -105,6 +118,7 @@ consistency, while the latency and reliability properties are dramatically bette
 | [Accounting](https://drl.gchiesa.dev/docs/accounting/) | Shadow accounting, entity hashing, batched flushing |
 | [gRPC API](https://drl.gchiesa.dev/docs/api/) | Envoy `ratelimit.v3` service implementation |
 | [Internal HTTP API](https://drl.gchiesa.dev/docs/internal-api/) | Management endpoints and digest authentication |
+| [Control Plane UI](https://drl.gchiesa.dev/docs/ui/) | Built-in web dashboard: access, authentication, and cross-node metrics aggregation |
 | [Metrics](https://drl.gchiesa.dev/docs/metrics/) | Prometheus metrics reference, label definitions, and Grafana panel queries |
 | [Sizing Guide](https://drl.gchiesa.dev/docs/sizing/) | Memory footprint, capacity tables, and deployment recommendations |
 | [Deployment Models](https://drl.gchiesa.dev/docs/deployments/) | Docker Compose, ECS Fargate, Kubernetes sidecar/fleet, and Istio configurations |
