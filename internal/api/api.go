@@ -2,6 +2,7 @@ package api
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"log/slog"
 	"strings"
@@ -185,6 +186,81 @@ func NewServer(cfg ServerConfig) (*Server, error) {
 	return server, nil
 }
 
+// encryptedResponseMiddleware wraps all DRL-Session responses with AES-256-GCM
+// using the session's ECDH-derived shared key, providing E2EE between the
+// browser and the node without requiring TLS.
+//
+// The encrypted body is returned as:
+//
+//	{"iv":"<base64-nonce>","data":"<base64-ciphertext>"}
+//
+// The browser's apiFetch() transparently decrypts this wrapper before passing
+// the plain JSON to Svelte components.
+//
+// Plaintext pass-through occurs when:
+//   - The request uses Digest auth (CLI / curl — no shared key is available)
+//   - The session's shared key is not in the local map (e.g. a request
+//     forwarded by the proxy to a peer node that did not originate the session)
+//   - The response body is empty or status is not 2xx
+func (s *Server) encryptedResponseMiddleware() fiber.Handler {
+	return func(c *fiber.Ctx) error {
+		if err := c.Next(); err != nil {
+			return err
+		}
+
+		// Only encrypt DRL-Session responses (not Digest auth / CLI path).
+		auth := c.Get("Authorization")
+		if !strings.HasPrefix(auth, "DRL-Session ") && !strings.HasPrefix(auth, "Bearer ") {
+			return nil
+		}
+
+		// Only encrypt 2xx responses — error bodies stay readable.
+		if c.Response().StatusCode() < 200 || c.Response().StatusCode() >= 300 {
+			return nil
+		}
+
+		if s.uiAuth == nil {
+			return nil
+		}
+
+		var sessionToken string
+		switch {
+		case strings.HasPrefix(auth, "DRL-Session "):
+			sessionToken = strings.TrimPrefix(auth, "DRL-Session ")
+		case strings.HasPrefix(auth, "Bearer "):
+			sessionToken = strings.TrimPrefix(auth, "Bearer ")
+		}
+
+		sharedKey, ok := s.uiAuth.GetSessionSharedKey(sessionToken)
+		if !ok {
+			// Session key not local (peer node path): return plaintext.
+			return nil
+		}
+
+		// Copy body before modifying the response.
+		rawBody := c.Response().Body()
+		if len(rawBody) == 0 {
+			return nil
+		}
+		body := make([]byte, len(rawBody))
+		copy(body, rawBody)
+
+		iv, ciphertext, err := encryptWithSharedKey(sharedKey, body)
+		if err != nil {
+			s.logger.Error("e2ee response encryption failed", "error", err)
+			return nil // Fail open: return plaintext rather than breaking the response
+		}
+
+		encPayload, err := json.Marshal(map[string]string{"iv": iv, "data": ciphertext})
+		if err != nil {
+			return nil
+		}
+		c.Response().SetBody(encPayload)
+		c.Set("Content-Type", "application/json")
+		return nil
+	}
+}
+
 // dualAuthMiddleware returns a Fiber handler that accepts:
 //   - "Authorization: DRL-Session <token>" — browser SPA sessions (ECDH-derived)
 //   - "Authorization: Bearer <token>"      — same as DRL-Session, alternative prefix
@@ -219,45 +295,43 @@ func (s *Server) dualAuthMiddleware() fiber.Handler {
 // setupRoutes configures the API routes
 func (s *Server) setupRoutes() {
 	authMW := s.dualAuthMiddleware()
+	// encMW encrypts 2xx response bodies for DRL-Session requests (E2EE layer).
+	// It must be listed BEFORE authMW so it runs as a post-processing wrapper:
+	// encMW calls c.Next() → authMW calls c.Next() → handler runs → encMW encrypts.
+	encMW := s.encryptedResponseMiddleware()
 
 	// ── UI routes ─────────────────────────────────────────────────────────────
-	// Serve the Svelte SPA (no auth — bootstrap token is injected into HTML).
+	// Serve the Svelte SPA (no auth — non-sensitive metadata only in HTML).
 	s.app.Get("/drl/ui", s.handleUIIndex)
 	s.app.Get("/drl/ui/", s.handleUIIndex)
+
+	// Token issuance: Digest auth only, returns a short-lived bootstrap token.
+	s.app.Get("/drl/ui/get-token", s.auth.Middleware(), s.handleUIGetToken)
 
 	// ECDH key exchange (protected only by the bootstrap token in the request body).
 	s.app.Post("/drl/ui/exchange", s.handleUIExchange)
 
-	// Metrics snapshot for the dashboard (dual-auth).
-	s.app.Get("/drl/ui/api/metrics", authMW, s.handleUIMetrics)
+	// Metrics snapshot for the dashboard — E2EE encrypted for browser sessions.
+	s.app.Get("/drl/ui/api/metrics", encMW, authMW, s.handleUIMetrics)
 
-	// Cross-node proxy: GET /drl/ui/proxy/:nodeAddr/*endpoint
-	// :nodeAddr — URL-encoded "host:port" of the peer's private API
-	// *endpoint — the API path to forward
-	s.app.Get("/drl/ui/proxy/:nodeAddr/*", authMW, s.handleUIProxy)
+	// Cross-node proxy — response is re-encrypted by encMW for the browser.
+	// Peer nodes return plaintext (no local shared key) which encMW then wraps.
+	s.app.Get("/drl/ui/proxy/:nodeAddr/*", encMW, authMW, s.handleUIProxy)
 
-	// ── Existing admin API routes (now dual-auth aware) ────────────────────────
-	// Cluster status
-	s.app.Get("/status", authMW, s.handleStatus)
+	// ── Admin API routes (dual-auth + E2EE for browser sessions) ──────────────
+	s.app.Get("/status", encMW, authMW, s.handleStatus)
 
-	// Admin blocklist management.
-	s.app.Get("/blocked-entity", authMW, s.handleBlockEntityList)
+	s.app.Get("/blocked-entity", encMW, authMW, s.handleBlockEntityList)
+	s.app.Post("/blocked-entity/:ip/_path/*", encMW, authMW, s.handleBlockEntityAdd)
+	s.app.Delete("/blocked-entity/:ip/_path/*", encMW, authMW, s.handleBlockEntityDelete)
 
-	// :ip captures the client IP, then the greedy wildcard captures the full
-	// URI path and optional /_headers/<key:val,...> suffix.
-	s.app.Post("/blocked-entity/:ip/_path/*", authMW, s.handleBlockEntityAdd)
-	s.app.Delete("/blocked-entity/:ip/_path/*", authMW, s.handleBlockEntityDelete)
+	s.app.Get("/accounting/stats", encMW, authMW, s.handleAccountingStats)
 
-	// Accounting stats
-	s.app.Get("/accounting/stats", authMW, s.handleAccountingStats)
-
-	// Bulk-load accounting (testing endpoint, milestone 014)
 	if s.bulkLoader != nil {
-		s.app.Post("/accounting/load", authMW, s.handleAccountingLoad)
+		s.app.Post("/accounting/load", encMW, authMW, s.handleAccountingLoad)
 	}
 
-	// Static configuration introspection
-	s.app.Get("/configuration/static/:section", authMW, s.handleGetStaticConfig)
+	s.app.Get("/configuration/static/:section", encMW, authMW, s.handleGetStaticConfig)
 }
 
 // Start starts the internal API server

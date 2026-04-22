@@ -2,6 +2,8 @@ package api
 
 import (
 	"bytes"
+	"crypto/aes"
+	"crypto/cipher"
 	"encoding/base64"
 	"encoding/json"
 	"io"
@@ -246,10 +248,9 @@ func TestHandleUIIndex_ServesHTML(t *testing.T) {
 	body, _ := io.ReadAll(resp.Body)
 	html := string(body)
 
-	// Must contain the bootstrap meta tag with required fields.
+	// Must contain the bootstrap meta tag with non-sensitive fields.
 	for _, want := range []string{
 		`name="drl-bootstrap"`,
-		`"bootstrapToken"`,
 		`"serverPublicKey"`,
 		`"clusterName"`,
 		`"nodeId"`,
@@ -257,6 +258,11 @@ func TestHandleUIIndex_ServesHTML(t *testing.T) {
 		if !strings.Contains(html, want) {
 			t.Errorf("HTML missing expected string %q", want)
 		}
+	}
+
+	// Must NOT contain the bootstrap token in the HTML (security requirement).
+	if strings.Contains(html, `"bootstrapToken"`) {
+		t.Error("HTML must not contain bootstrapToken — token must be retrieved out-of-band")
 	}
 }
 
@@ -320,15 +326,10 @@ func TestHandleUIExchange_InvalidBootstrapToken(t *testing.T) {
 func TestHandleUIExchange_FullFlow(t *testing.T) {
 	s := newTestServer(t)
 
-	// Get the SPA HTML to extract the bootstrap token.
-	htmlReq := httptest.NewRequest("GET", "/drl/ui/", nil)
-	htmlResp, _ := s.app.Test(htmlReq)
-	htmlBody, _ := io.ReadAll(htmlResp.Body)
-	html := string(htmlBody)
-
-	bootstrapToken := extractBootstrapToken(t, html)
+	// Retrieve the bootstrap token from the dedicated endpoint (requires Digest auth).
+	bootstrapToken := fetchBootstrapTokenViaDigest(t, s)
 	if bootstrapToken == "" {
-		t.Fatal("could not extract bootstrap token from HTML")
+		t.Fatal("could not retrieve bootstrap token from /drl/ui/get-token")
 	}
 
 	// Generate a fake client public key using a second uiAuthManager (same P-256 curve).
@@ -450,7 +451,8 @@ func TestDualAuthMiddleware_DigestStillWorks(t *testing.T) {
 
 func TestHandleUIMetrics_WithSession(t *testing.T) {
 	s := newTestServer(t)
-	sessionToken, _ := s.uiAuth.CreateSession(make([]byte, 32))
+	sharedKey := make([]byte, 32) // all-zeros key for deterministic test decryption
+	sessionToken, _ := s.uiAuth.CreateSession(sharedKey)
 
 	req := httptest.NewRequest("GET", "/drl/ui/api/metrics", nil)
 	req.Header.Set("Authorization", "DRL-Session "+sessionToken)
@@ -462,8 +464,11 @@ func TestHandleUIMetrics_WithSession(t *testing.T) {
 		t.Fatalf("expected 200, got %d", resp.StatusCode)
 	}
 
+	// Response is E2EE encrypted — decrypt before decoding.
+	plain := decryptTestResponse(t, resp.Body, sharedKey)
+
 	var result uiMetricsResponse
-	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+	if err := json.Unmarshal(plain, &result); err != nil {
 		t.Fatalf("decoding metrics response: %v", err)
 	}
 	if result.NodeID != "test-node-1" {
@@ -477,37 +482,220 @@ func TestHandleUIMetrics_WithSession(t *testing.T) {
 	}
 }
 
-// ─── helpers ─────────────────────────────────────────────────────────────────
+func TestEncryptedResponseMiddleware_DigestPassthrough(t *testing.T) {
+	// Digest-authenticated requests must receive plaintext (CLI compatibility).
+	s := newTestServer(t)
+	apiKey := "thisIsAVerySecureAPIKey123"
 
-// extractBootstrapToken pulls the bootstrapToken value out of the rendered HTML.
-// The new format uses a <meta name="drl-bootstrap" content='{"bootstrapToken":"..."}'>
-// tag instead of a JavaScript global.
-func extractBootstrapToken(t *testing.T, html string) string {
-	t.Helper()
-	const openTag = `name="drl-bootstrap" content='`
-	idx := strings.Index(html, openTag)
-	if idx < 0 {
-		t.Logf("HTML snippet: %s", html[:min(len(html), 500)])
-		return ""
-	}
-	rest := html[idx+len(openTag):]
-	end := strings.Index(rest, "'")
-	if end < 0 {
-		return ""
-	}
-	content := rest[:end]
+	req1 := httptest.NewRequest("GET", "/status", nil)
+	resp1, _ := s.app.Test(req1)
+	nonce := extractNonceFromHeader(resp1.Header.Get("WWW-Authenticate"))
 
-	var meta bootstrapMeta
-	if err := json.Unmarshal([]byte(content), &meta); err != nil {
-		t.Logf("JSON parse error: %v, content: %q", err, content)
-		return ""
+	digestAuth := buildDigestAuthForTest(digestUsername, apiKey, nonce, "/status", "GET")
+	req2 := httptest.NewRequest("GET", "/status", nil)
+	req2.Header.Set("Authorization", digestAuth)
+	resp2, err := s.app.Test(req2)
+	if err != nil {
+		t.Fatalf("app.Test: %v", err)
 	}
-	return meta.BootstrapToken
+	if resp2.StatusCode != fiber.StatusOK {
+		t.Fatalf("expected 200, got %d", resp2.StatusCode)
+	}
+
+	// Response must be plain JSON (not encrypted) for Digest auth.
+	body, _ := io.ReadAll(resp2.Body)
+	var v map[string]any
+	if err := json.Unmarshal(body, &v); err != nil {
+		t.Fatalf("expected plain JSON for Digest auth, got parse error: %v", err)
+	}
+	if _, ok := v["iv"]; ok {
+		t.Error("Digest auth response must NOT be encrypted — found 'iv' field")
+	}
 }
 
-func min(a, b int) int {
-	if a < b {
-		return a
+func TestEncryptedResponseMiddleware_SessionEncrypts(t *testing.T) {
+	// DRL-Session requests must receive encrypted bodies.
+	s := newTestServer(t)
+	sharedKey := make([]byte, 32)
+	sessionToken, _ := s.uiAuth.CreateSession(sharedKey)
+
+	req := httptest.NewRequest("GET", "/status", nil)
+	req.Header.Set("Authorization", "DRL-Session "+sessionToken)
+	resp, err := s.app.Test(req)
+	if err != nil {
+		t.Fatalf("app.Test: %v", err)
 	}
-	return b
+	if resp.StatusCode != fiber.StatusOK {
+		t.Fatalf("expected 200, got %d", resp.StatusCode)
+	}
+
+	body, _ := io.ReadAll(resp.Body)
+	var wrapper map[string]string
+	if err := json.Unmarshal(body, &wrapper); err != nil {
+		t.Fatalf("expected encrypted JSON wrapper, got parse error: %v", err)
+	}
+	if wrapper["iv"] == "" || wrapper["data"] == "" {
+		t.Fatalf("expected non-empty 'iv' and 'data' fields, got: %v", wrapper)
+	}
+
+	// Decrypt and verify it's valid JSON.
+	plain := decryptTestResponse(t, bytes.NewReader(body), sharedKey)
+	var status map[string]any
+	if err := json.Unmarshal(plain, &status); err != nil {
+		t.Fatalf("decrypted body is not valid JSON: %v", err)
+	}
+}
+
+// ─── GET /drl/ui/get-token tests ─────────────────────────────────────────────
+
+func TestHandleUIGetToken_Unauthenticated(t *testing.T) {
+	s := newTestServer(t)
+
+	req := httptest.NewRequest("GET", "/drl/ui/get-token", nil)
+	resp, err := s.app.Test(req)
+	if err != nil {
+		t.Fatalf("app.Test: %v", err)
+	}
+	if resp.StatusCode != fiber.StatusUnauthorized {
+		t.Errorf("expected 401 without credentials, got %d", resp.StatusCode)
+	}
+	if resp.Header.Get("WWW-Authenticate") == "" {
+		t.Error("expected WWW-Authenticate challenge header")
+	}
+}
+
+func TestHandleUIGetToken_WithDigestAuth(t *testing.T) {
+	s := newTestServer(t)
+	apiKey := "thisIsAVerySecureAPIKey123"
+
+	// Step 1: obtain Digest challenge.
+	req1 := httptest.NewRequest("GET", "/drl/ui/get-token", nil)
+	resp1, err := s.app.Test(req1)
+	if err != nil {
+		t.Fatalf("app.Test (challenge): %v", err)
+	}
+	if resp1.StatusCode != fiber.StatusUnauthorized {
+		t.Fatalf("expected 401 challenge, got %d", resp1.StatusCode)
+	}
+	nonce := extractNonceFromHeader(resp1.Header.Get("WWW-Authenticate"))
+
+	// Step 2: authenticated request.
+	digestAuth := buildDigestAuthForTest(digestUsername, apiKey, nonce, "/drl/ui/get-token", "GET")
+	req2 := httptest.NewRequest("GET", "/drl/ui/get-token", nil)
+	req2.Header.Set("Authorization", digestAuth)
+	resp2, err := s.app.Test(req2)
+	if err != nil {
+		t.Fatalf("app.Test (authed): %v", err)
+	}
+	if resp2.StatusCode != fiber.StatusOK {
+		body, _ := io.ReadAll(resp2.Body)
+		t.Fatalf("expected 200, got %d: %s", resp2.StatusCode, body)
+	}
+
+	var result getTokenResponse
+	if err := json.NewDecoder(resp2.Body).Decode(&result); err != nil {
+		t.Fatalf("decoding response: %v", err)
+	}
+	if result.BootstrapToken == "" {
+		t.Error("expected non-empty bootstrap_token in response")
+	}
+	// The returned token must be immediately valid.
+	if !s.uiAuth.ValidateBootstrapToken(result.BootstrapToken) {
+		t.Error("returned bootstrap_token failed validation")
+	}
+}
+
+func TestHandleUIGetToken_SessionNotAccepted(t *testing.T) {
+	s := newTestServer(t)
+
+	// A DRL-Session token must NOT be accepted on the get-token endpoint —
+	// it is protected by Digest auth only.
+	sessionToken, _ := s.uiAuth.CreateSession(make([]byte, 32))
+	req := httptest.NewRequest("GET", "/drl/ui/get-token", nil)
+	req.Header.Set("Authorization", "DRL-Session "+sessionToken)
+	resp, err := s.app.Test(req)
+	if err != nil {
+		t.Fatalf("app.Test: %v", err)
+	}
+	if resp.StatusCode != fiber.StatusUnauthorized {
+		t.Errorf("expected 401 for DRL-Session on get-token endpoint, got %d", resp.StatusCode)
+	}
+}
+
+// ─── helpers ─────────────────────────────────────────────────────────────────
+
+// fetchBootstrapTokenViaDigest retrieves the bootstrap token from
+// GET /drl/ui/get-token using the test server's Digest credentials.
+func fetchBootstrapTokenViaDigest(t *testing.T, s *Server) string {
+	t.Helper()
+	apiKey := "thisIsAVerySecureAPIKey123"
+
+	req1 := httptest.NewRequest("GET", "/drl/ui/get-token", nil)
+	resp1, err := s.app.Test(req1)
+	if err != nil {
+		t.Fatalf("get-token challenge: %v", err)
+	}
+	nonce := extractNonceFromHeader(resp1.Header.Get("WWW-Authenticate"))
+
+	digestAuth := buildDigestAuthForTest(digestUsername, apiKey, nonce, "/drl/ui/get-token", "GET")
+	req2 := httptest.NewRequest("GET", "/drl/ui/get-token", nil)
+	req2.Header.Set("Authorization", digestAuth)
+	resp2, err := s.app.Test(req2)
+	if err != nil {
+		t.Fatalf("get-token authed: %v", err)
+	}
+	if resp2.StatusCode != fiber.StatusOK {
+		body, _ := io.ReadAll(resp2.Body)
+		t.Fatalf("get-token returned %d: %s", resp2.StatusCode, body)
+	}
+
+	var result getTokenResponse
+	if err := json.NewDecoder(resp2.Body).Decode(&result); err != nil {
+		t.Fatalf("decoding get-token response: %v", err)
+	}
+	return result.BootstrapToken
+}
+
+// decryptTestResponse reads an encrypted API response body ({"iv":"...","data":"..."})
+// and decrypts it with the given AES-256-GCM key, returning the plaintext bytes.
+func decryptTestResponse(t *testing.T, r io.Reader, key []byte) []byte {
+	t.Helper()
+	body, err := io.ReadAll(r)
+	if err != nil {
+		t.Fatalf("reading response body: %v", err)
+	}
+
+	var wrapper struct {
+		IV   string `json:"iv"`
+		Data string `json:"data"`
+	}
+	if err := json.Unmarshal(body, &wrapper); err != nil {
+		t.Fatalf("response is not an encrypted wrapper: %v\nbody: %s", err, body)
+	}
+	if wrapper.IV == "" || wrapper.Data == "" {
+		t.Fatalf("encrypted wrapper missing iv or data fields: %s", body)
+	}
+
+	ivBytes, err := base64.StdEncoding.DecodeString(wrapper.IV)
+	if err != nil {
+		t.Fatalf("decoding iv: %v", err)
+	}
+	ctBytes, err := base64.StdEncoding.DecodeString(wrapper.Data)
+	if err != nil {
+		t.Fatalf("decoding ciphertext: %v", err)
+	}
+
+	block, err := aes.NewCipher(key)
+	if err != nil {
+		t.Fatalf("creating AES cipher: %v", err)
+	}
+	gcm, err := cipher.NewGCM(block)
+	if err != nil {
+		t.Fatalf("creating GCM: %v", err)
+	}
+	plain, err := gcm.Open(nil, ivBytes, ctBytes, nil)
+	if err != nil {
+		t.Fatalf("AES-GCM decryption failed: %v", err)
+	}
+	return plain
 }

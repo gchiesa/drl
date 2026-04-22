@@ -17,12 +17,18 @@ import (
 //go:embed resources/index.html
 var uiIndexHTML []byte
 
-// bootstrapMeta holds the values injected into the SPA as a <meta> tag.
+// bootstrapMeta holds the non-sensitive values injected into the SPA as a <meta> tag.
+// The bootstrap token is no longer embedded here; it must be retrieved out-of-band
+// via GET /drl/ui/get-token (Digest-authenticated).
 type bootstrapMeta struct {
-	BootstrapToken string `json:"bootstrapToken"`
-	ServerPubKey   string `json:"serverPublicKey"`
-	ClusterName    string `json:"clusterName"`
-	NodeID         string `json:"nodeId"`
+	ServerPubKey string `json:"serverPublicKey"`
+	ClusterName  string `json:"clusterName"`
+	NodeID       string `json:"nodeId"`
+}
+
+// getTokenResponse is returned by GET /drl/ui/get-token.
+type getTokenResponse struct {
+	BootstrapToken string `json:"bootstrap_token"`
 }
 
 // keyExchangeRequest is the body of POST /drl/ui/exchange.
@@ -62,10 +68,10 @@ type uiMetricsResponse struct {
 
 // handleUIIndex serves the Svelte single-page application.
 //
-// The built index.html is embedded at compile time. A short-lived bootstrap
-// token (plus the server's ECDH public key) is injected just before </head>
-// as a <meta name="drl-bootstrap"> tag so the SPA can perform the ECDH key
-// exchange without user interaction.
+// The built index.html is embedded at compile time. Non-sensitive metadata
+// (server public key, cluster name, node ID) is injected just before </head>
+// as a <meta name="drl-bootstrap"> tag. The bootstrap token is intentionally
+// omitted; the SPA must retrieve it out-of-band via GET /drl/ui/get-token.
 func (s *Server) handleUIIndex(c *fiber.Ctx) error {
 	if s.uiAuth == nil {
 		return c.Status(fiber.StatusServiceUnavailable).
@@ -73,10 +79,9 @@ func (s *Server) handleUIIndex(c *fiber.Ctx) error {
 	}
 
 	meta := bootstrapMeta{
-		BootstrapToken: s.uiAuth.GenerateBootstrapToken(),
-		ServerPubKey:   s.uiAuth.ServerPublicKeyBase64(),
-		ClusterName:    s.clusterName,
-		NodeID:         s.nodeID,
+		ServerPubKey: s.uiAuth.ServerPublicKeyBase64(),
+		ClusterName:  s.clusterName,
+		NodeID:       s.nodeID,
 	}
 	metaJSON, err := json.Marshal(meta)
 	if err != nil {
@@ -94,6 +99,27 @@ func (s *Server) handleUIIndex(c *fiber.Ctx) error {
 	c.Set("Content-Security-Policy",
 		"default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; connect-src 'self'; img-src 'self' data:")
 	return c.Send(html)
+}
+
+// handleUIGetToken handles GET /drl/ui/get-token.
+//
+// Protected by Digest authentication. Returns a short-lived bootstrap token
+// that the browser SPA can use to initiate the ECDH key exchange. The caller
+// must obtain this token out-of-band (e.g. via curl) and paste it into the
+// token modal presented by the SPA on first load.
+//
+// Example:
+//
+//	curl --digest -u "admin:$DRL_PRIVATE_API_KEY" http://localhost:8082/drl/ui/get-token
+func (s *Server) handleUIGetToken(c *fiber.Ctx) error {
+	if s.uiAuth == nil {
+		return c.Status(fiber.StatusServiceUnavailable).JSON(fiber.Map{
+			"error": "UI authentication not configured",
+		})
+	}
+	return c.JSON(getTokenResponse{
+		BootstrapToken: s.uiAuth.GenerateBootstrapToken(),
+	})
 }
 
 // handleUIExchange handles POST /drl/ui/exchange.

@@ -218,6 +218,48 @@ func (m *uiAuthManager) ValidateSession(token string) bool {
 	return time.Now().Unix() < expiry
 }
 
+// GetSessionSharedKey validates the session token and returns the AES-256
+// shared key that was stored when the session was created by this node.
+//
+// A peer node can verify the HMAC (stateless) but cannot return the shared key
+// because the session entry lives only on the node that performed the ECDH
+// exchange. This is intentional: response encryption only applies to the
+// browser ↔ originating-node leg; the originating node re-encrypts peer
+// responses before forwarding them to the browser.
+//
+// Returns (nil, false) when the token is invalid, expired, or not found in the
+// local session map.
+func (m *uiAuthManager) GetSessionSharedKey(token string) ([]byte, bool) {
+	if !m.ValidateSession(token) {
+		return nil, false
+	}
+
+	parts := strings.SplitN(token, ".", 2)
+	if len(parts) != 2 {
+		return nil, false
+	}
+	payloadBytes, err := base64.URLEncoding.DecodeString(parts[0])
+	if err != nil {
+		return nil, false
+	}
+	payload := string(payloadBytes)
+	// payload = sessionID:expiry_unix
+	idx := strings.LastIndex(payload, ":")
+	if idx < 0 {
+		return nil, false
+	}
+	sessionID := payload[:idx]
+
+	m.mu.RLock()
+	info, ok := m.sessions[sessionID]
+	m.mu.RUnlock()
+
+	if !ok || time.Now().After(info.expiresAt) {
+		return nil, false
+	}
+	return info.sharedKey, true
+}
+
 // ActiveSessions returns the count of currently active (non-expired) sessions.
 func (m *uiAuthManager) ActiveSessions() int {
 	now := time.Now()

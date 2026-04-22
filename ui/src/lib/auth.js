@@ -2,24 +2,39 @@
  * auth.js — Svelte store encapsulating the ECDH P-256 key exchange and session
  * management for the DRL UI.
  *
- * Flow:
- *  1. Read bootstrap data from <meta name="drl-bootstrap"> injected by Go server.
- *  2. Generate ephemeral ECDH P-256 key pair in the browser.
- *  3. POST /drl/ui/exchange with clientPublicKey + bootstrapToken.
- *  4. Derive shared secret; decrypt the AES-256-GCM encrypted session token.
- *  5. Store session token; provide apiFetch() wrapper that adds Authorization header.
+ * Flow (v2 — out-of-band token):
+ *  1. Read non-sensitive bootstrap data from <meta name="drl-bootstrap"> (serverPublicKey,
+ *     clusterName, nodeId — no bootstrap token is embedded in the HTML).
+ *  2. If no bootstrap token is in memory, set authStatus to 'awaiting_token' so the SPA
+ *     renders the token modal.
+ *  3. Operator retrieves the bootstrap token out-of-band:
+ *       curl --digest -u "admin:$DRL_PRIVATE_API_KEY" http://localhost:8082/drl/ui/get-token
+ *  4. User pastes the token into the modal; setBootstrapToken() stores it in session memory
+ *     and resumes the handshake.
+ *  5. Generate ephemeral ECDH P-256 key pair in the browser.
+ *  6. POST /drl/ui/exchange with clientPublicKey + bootstrapToken.
+ *  7. Derive shared secret; decrypt the AES-256-GCM encrypted session token.
+ *  8. Store session token in module scope (never localStorage); provide apiFetch() wrapper.
  */
 
 import { writable, get } from 'svelte/store';
 
 // ── Public stores ────────────────────────────────────────────────────────────
-/** 'loading' | 'authenticating' | 'ready' | 'error' */
+/** 'loading' | 'awaiting_token' | 'authenticating' | 'ready' | 'error' */
 export const authStatus = writable('loading');
 export const authError = writable(null);
 export const bootstrapInfo = writable(null);
 
 // Session token stored in module scope (not a store — not needed in templates).
 let _sessionToken = null;
+
+// AES-256-GCM CryptoKey derived from the ECDH handshake.
+// Used to transparently decrypt every API response body.
+// Never written to localStorage; cleared when the session expires.
+let _aesKey = null;
+
+// Bootstrap token stored in session memory only (cleared on page reload).
+let _bootstrapToken = null;
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 function b64ToBuffer(b64) {
@@ -35,20 +50,43 @@ function getBootstrapData() {
   return JSON.parse(meta.getAttribute('content'));
 }
 
+// ── setBootstrapToken ────────────────────────────────────────────────────────
+/**
+ * Store the bootstrap token provided by the user and proceed with the ECDH
+ * handshake. Called by the token modal in App.svelte.
+ *
+ * @param {string} token  The bootstrap token obtained from GET /drl/ui/get-token
+ */
+export async function setBootstrapToken(token) {
+  _bootstrapToken = token;
+  await authenticate();
+}
+
 // ── authenticate ─────────────────────────────────────────────────────────────
 /**
- * Perform the ECDH handshake with the server. Called once on page load and
- * again on refresh (each page load generates a fresh key pair and bootstrap
- * token is re-embedded by the server).
+ * Initiate or resume authentication.
+ *
+ * If no bootstrap token is in memory the function sets authStatus to
+ * 'awaiting_token' and returns — the SPA will render the token modal.
+ * Once the user supplies the token via setBootstrapToken(), this function
+ * is called again and proceeds with the ECDH handshake.
  */
 export async function authenticate() {
-  authStatus.set('authenticating');
+  authStatus.set('loading');
   authError.set(null);
   _sessionToken = null;
 
   try {
     const bootstrap = getBootstrapData();
     bootstrapInfo.set(bootstrap);
+
+    if (!_bootstrapToken) {
+      authStatus.set('awaiting_token');
+      return;
+    }
+
+    authStatus.set('authenticating');
+    _aesKey = null;
 
     // Step 1 — generate ephemeral ECDH P-256 key pair
     const keyPair = await crypto.subtle.generateKey(
@@ -65,9 +103,13 @@ export async function authenticate() {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         clientPublicKey: clientPubB64,
-        bootstrapToken: bootstrap.bootstrapToken,
+        bootstrapToken: _bootstrapToken,
       }),
     });
+
+    // Clear bootstrap token from memory regardless of outcome.
+    _bootstrapToken = null;
+
     if (!exchResp.ok) {
       const txt = await exchResp.text().catch(() => '');
       throw new Error(`Key exchange failed (${exchResp.status}): ${txt}`);
@@ -101,8 +143,14 @@ export async function authenticate() {
     const plain = await crypto.subtle.decrypt({ name: 'AES-GCM', iv }, aesKey, ct);
     _sessionToken = new TextDecoder().decode(plain);
 
+    // Store the AES key for E2EE decryption of all subsequent API responses.
+    // The server encrypts every 2xx response body with this same key.
+    _aesKey = aesKey;
+
     authStatus.set('ready');
   } catch (err) {
+    _bootstrapToken = null;
+    _aesKey = null;
     authError.set(err.message || String(err));
     authStatus.set('error');
   }
@@ -111,7 +159,8 @@ export async function authenticate() {
 // ── apiFetch ─────────────────────────────────────────────────────────────────
 /**
  * Authenticated fetch wrapper. Adds Authorization: DRL-Session <token>.
- * On 401, attempts one re-authentication before propagating the error.
+ * On 401, clears the session and transitions back to 'awaiting_token' so the
+ * user is prompted for a new bootstrap token.
  *
  * @param {string} url
  * @param {RequestInit} [options]
@@ -128,13 +177,28 @@ export async function apiFetch(url, options = {}, _retry = true) {
 
   const resp = await fetch(url, { ...options, headers });
   if (resp.status === 401 && _retry) {
-    // Session expired; re-authenticate once and retry.
-    await authenticate();
-    return apiFetch(url, options, false);
+    // Session expired; reset to awaiting_token so the user can supply a fresh bootstrap token.
+    _sessionToken = null;
+    _aesKey = null;
+    authStatus.set('awaiting_token');
+    throw new Error('Session expired — please enter a new access token');
   }
   if (!resp.ok) {
     const txt = await resp.text().catch(() => resp.statusText);
     throw new Error(`API ${resp.status}: ${txt}`);
   }
-  return resp.json();
+
+  const json = await resp.json();
+
+  // Transparent E2EE decryption: the server wraps every 2xx response as
+  // {"iv":"<base64>","data":"<base64>"} when a DRL-Session is active.
+  // Decrypt here so all components always receive plain JSON objects.
+  if (_aesKey && json && typeof json.iv === 'string' && typeof json.data === 'string') {
+    const ivBuf = b64ToBuffer(json.iv);
+    const ctBuf = b64ToBuffer(json.data);
+    const plainBuf = await crypto.subtle.decrypt({ name: 'AES-GCM', iv: ivBuf }, _aesKey, ctBuf);
+    return JSON.parse(new TextDecoder().decode(plainBuf));
+  }
+
+  return json;
 }

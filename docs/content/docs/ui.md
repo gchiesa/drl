@@ -24,19 +24,41 @@ regardless of which node you connect to.
 
 ## Authentication and encryption
 
-Authentication is **zero-touch** — there is no login form, no credentials to enter, and no manual
-token to copy. The browser handles everything automatically on page load through a cryptographic
-handshake.
+Access to the UI follows a **high-security, two-step flow**: the bootstrap token is never embedded
+in the HTML. An operator must retrieve it out-of-band using Digest authentication and paste it into
+the token modal that appears on first load.
+
+### Retrieving the access token
+
+Before opening the UI, obtain the bootstrap token using `curl` with Digest credentials:
+
+```bash
+curl --digest -u "admin:$DRL_PRIVATE_API_KEY" http://localhost:8082/drl/ui/get-token
+```
+
+The response is a JSON object:
+
+```json
+{"bootstrap_token": "<short-lived-token>"}
+```
+
+The token is valid for **10 minutes** and can only be used once (for the ECDH key exchange).
+Retrieve a fresh one each time you open the dashboard.
 
 ### How it works
 
 {{< mermaid >}}
 sequenceDiagram
+    participant O  as Operator (curl)
     participant B  as Browser (SPA)
     participant S  as DRL node
 
-    S->>B: GET /drl/ui/ → HTML with &lt;meta name="drl-bootstrap"&gt;
-    note over B: Page load: extract short-lived<br/>bootstrap token from meta tag
+    O->>S: GET /drl/ui/get-token (Digest auth)
+    S-->>O: {"bootstrap_token": "..."}
+    note over O: Copy token to clipboard
+
+    B->>S: GET /drl/ui/ → HTML with &lt;meta name="drl-bootstrap"&gt; (no token)
+    note over B: Token modal appears — user pastes token
     B->>B: Generate ephemeral ECDH P-256 key pair
     B->>S: POST /drl/ui/exchange {clientPublicKey, bootstrapToken}
     S->>S: Validate bootstrap token (HMAC-SHA256, 10 min TTL)
@@ -52,27 +74,31 @@ sequenceDiagram
 
 ### Step by step
 
-1. **Bootstrap token** — when the browser requests `GET /drl/ui/`, the server generates a
-   short-lived token (HMAC-SHA256, 10-minute TTL) and injects it into the HTML as a
-   `<meta name="drl-bootstrap">` tag. No credentials are visible in the URL or stored in cookies.
+1. **Token retrieval** — the operator calls `GET /drl/ui/get-token` with HTTP Digest credentials.
+   The server generates a short-lived bootstrap token (HMAC-SHA256, 10-minute TTL) and returns it
+   as JSON. The token is never embedded in the HTML, so it cannot be intercepted by passive
+   network observers or cached by proxies.
 
-2. **ECDH key exchange** — the SPA generates an ephemeral **ECDH P-256** key pair in the browser
+2. **Token modal** — when the browser opens the UI, a non-dismissible modal prompts the operator
+   to paste the token retrieved in step 1.
+
+3. **ECDH key exchange** — the SPA generates an ephemeral **ECDH P-256** key pair in the browser
    via the Web Crypto API. It posts the public key along with the bootstrap token to
    `POST /drl/ui/exchange`.
 
-3. **Shared secret derivation** — both sides independently derive the same 256-bit shared secret
+4. **Shared secret derivation** — both sides independently derive the same 256-bit shared secret
    using Diffie-Hellman. Neither side ever transmits the secret itself.
 
-4. **Session token delivery** — the server creates a signed session token and encrypts it with
+5. **Session token delivery** — the server creates a signed session token and encrypts it with
    **AES-256-GCM** using the shared secret before sending it back. Only the browser, which holds
    the private key, can derive the decryption key.
 
-5. **Authenticated requests** — the SPA decrypts the session token and uses it as
+6. **Authenticated requests** — the SPA decrypts the session token and uses it as
    `Authorization: DRL-Session <token>` on all subsequent API calls. The token is held in
    JavaScript memory only — it is never written to `localStorage` or cookies, so it disappears
-   on page refresh, triggering a fresh handshake.
+   when the tab is closed, requiring a fresh token on the next visit.
 
-6. **Cross-node validation** — because all DRL nodes share the same API key, they derive the
+7. **Cross-node validation** — because all DRL nodes share the same API key, they derive the
    same HMAC signing key. A session token issued by any node is cryptographically valid on all
    peers, which is what makes the proxy feature work.
 
