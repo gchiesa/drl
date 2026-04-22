@@ -1,0 +1,52 @@
+completed: 2026-04-22
+
+## Summary
+
+Implemented milestone 016v3: separate authentication / get-token flow for the DRL UI.
+
+### Backend changes
+
+- `internal/api/ui_handlers.go`
+  - Removed `BootstrapToken` from `bootstrapMeta` (no longer embedded in HTML).
+  - Added `getTokenResponse` struct (`bootstrap_token` JSON field).
+  - Added `handleUIGetToken` handler: Digest-auth-protected, generates and returns a fresh bootstrap token.
+  - Updated `handleUIIndex` comment to reflect the new security model.
+
+- `internal/api/api.go`
+  - Registered `GET /drl/ui/get-token` route protected by `s.auth.Middleware()` (Digest auth only).
+
+### Frontend changes
+
+- `ui/src/lib/auth.js`
+  - Added `'awaiting_token'` auth state.
+  - Module-level `_bootstrapToken` variable (session memory only, never localStorage).
+  - `authenticate()` now reads only non-sensitive meta (serverPublicKey, clusterName, nodeId); transitions to `awaiting_token` when no bootstrap token is available.
+  - New export `setBootstrapToken(token)`: stores the token in session memory and resumes the ECDH handshake.
+  - `apiFetch()` 401 handler now transitions back to `awaiting_token` instead of silently re-authenticating.
+
+- `ui/src/App.svelte`
+  - Imported `setBootstrapToken` from auth.js.
+  - Added `awaiting_token` branch to the auth overlay: non-dismissible modal with instructions, `curl` hint, and a token input form.
+  - Added CSS for new modal elements (`.token-icon`, `.token-hint`, `.token-form`, `.token-input`).
+
+### Test changes
+
+- `internal/api/ui_test.go`
+  - `TestHandleUIIndex_ServesHTML`: removed `"bootstrapToken"` check; added assertion that the HTML must NOT contain `"bootstrapToken"`.
+  - `TestHandleUIExchange_FullFlow`: updated to retrieve bootstrap token via `fetchBootstrapTokenViaDigest()` helper instead of parsing HTML.
+  - Added `TestHandleUIGetToken_Unauthenticated`: expects 401 + WWW-Authenticate challenge.
+  - Added `TestHandleUIGetToken_WithDigestAuth`: expects 200 with valid, immediately usable `bootstrap_token`.
+  - Added `TestHandleUIGetToken_SessionNotAccepted`: ensures DRL-Session tokens are rejected on this endpoint.
+  - Removed stale `extractBootstrapToken` and `min` helpers (no longer needed).
+
+### Documentation
+
+- `docs/content/docs/ui.md`
+  - Replaced "zero-touch" authentication description with the new out-of-band token flow.
+  - Added `curl --digest` example for `GET /drl/ui/get-token`.
+  - Updated Mermaid sequence diagram to include the operator/curl step.
+  - Updated step-by-step explanation to reflect the new security model.
+
+### Validation
+
+All tests in `internal/api` pass (101 tests, 0 failures).

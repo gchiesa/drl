@@ -1,6 +1,6 @@
 <script>
     import {onDestroy, onMount} from 'svelte';
-    import {apiFetch, authenticate, authError, authStatus, bootstrapInfo} from './lib/auth.js';
+    import {apiFetch, authenticate, authError, authStatus, bootstrapInfo, setBootstrapToken} from './lib/auth.js';
     import ThemeToggle from './components/ThemeToggle.svelte';
     import StatusDot from './components/StatusDot.svelte';
     import ClusterOverview from './views/ClusterOverview.svelte';
@@ -18,6 +18,22 @@
     // ── Config ─────────────────────────────────────────────────────────────────
     let cfgAccounting = null;
     let cfgMembership = null;
+
+    // ── Token modal ────────────────────────────────────────────────────────────
+    let tokenInput = '';
+    let tokenSubmitting = false;
+
+    async function handleTokenSubmit() {
+        if (!tokenInput.trim()) return;
+        tokenSubmitting = true;
+        await setBootstrapToken(tokenInput.trim());
+        tokenInput = '';
+        tokenSubmitting = false;
+        if ($authStatus === 'ready') {
+            await loadData();
+            loadConfig();
+        }
+    }
 
     // ── Auto-refresh ───────────────────────────────────────────────────────────
     const REFRESH_OPTIONS = [1, 2, 5, 10, 15, 30];
@@ -75,6 +91,7 @@
                     }
                 }
                 for (const r of peerAccountingStats) {
+                    if (r.status !== 'fulfilled' || !r.value) continue;
                     // Filter the response object to include only numeric properties
                     const filteredMetrics = Object.entries(r.value).reduce((acc, [key, val]) => {
                         if (typeof val === 'number') {
@@ -145,8 +162,29 @@
 {#if $authStatus !== 'ready'}
     <div id="auth-overlay">
         <div class="auth-card">
-            {#if $authStatus === 'error'}
-                <div class="spinner error-icon">✕</div>
+            {#if $authStatus === 'awaiting_token'}
+                <div class="token-icon">&#128273;</div>
+                <h2>Access Token Required</h2>
+                <p>
+                    Retrieve your access token out-of-band using Digest authentication, then paste it below:
+                </p>
+                <code class="token-hint">curl --digest -u "admin:$DRL_PRIVATE_API_KEY" \<br>&nbsp;&nbsp;http://&lt;node&gt;:8082/drl/ui/get-token</code>
+                <form class="token-form" on:submit|preventDefault={handleTokenSubmit}>
+                    <input
+                        class="token-input"
+                        type="text"
+                        placeholder="Paste access token here…"
+                        bind:value={tokenInput}
+                        disabled={tokenSubmitting}
+                        autocomplete="off"
+                        spellcheck="false"
+                    />
+                    <button class="btn" type="submit" disabled={tokenSubmitting || !tokenInput.trim()}>
+                        {tokenSubmitting ? 'Connecting…' : 'Connect'}
+                    </button>
+                </form>
+            {:else if $authStatus === 'error'}
+                <div class="spinner error-icon">&#10005;</div>
                 <h2>Authentication Failed</h2>
                 <p>{$authError ?? 'Unknown error'}</p>
                 <button class="btn" on:click={authenticate}>Retry</button>
@@ -324,6 +362,47 @@
         animation: none;
         line-height: 32px;
         font-size: 18px;
+    }
+
+    .token-icon {
+        font-size: 32px;
+        line-height: 1;
+    }
+
+    .token-hint {
+        display: block;
+        background: var(--bg3);
+        border: 1px solid var(--border);
+        border-radius: 6px;
+        padding: 8px 12px;
+        font-size: 11px;
+        color: var(--text2);
+        text-align: left;
+        word-break: break-all;
+        width: 100%;
+    }
+
+    .token-form {
+        display: flex;
+        flex-direction: column;
+        gap: 8px;
+        width: 100%;
+    }
+
+    .token-input {
+        background: var(--bg3);
+        border: 1px solid var(--border);
+        border-radius: 6px;
+        padding: 8px 12px;
+        color: var(--text);
+        font-size: 13px;
+        font-family: monospace;
+        width: 100%;
+        outline: none;
+    }
+
+    .token-input:focus {
+        border-color: var(--accent);
     }
 
     @keyframes spin {
