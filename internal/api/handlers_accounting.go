@@ -71,13 +71,6 @@ type accountingStatsResponse struct {
 // to support load-testing the cache and warming nodes; it must never trigger
 // blocking behaviour.
 func (s *Server) handleAccountingLoad(c *fiber.Ctx) error {
-	if s.bulkLoader == nil {
-		return c.Status(fiber.StatusServiceUnavailable).JSON(bulkLoadResponse{
-			ID:     generateOperationID(),
-			Errors: []string{"bulk loader not configured"},
-		})
-	}
-
 	distributionEnabled := false
 	switch c.Query("distributionEnabled") {
 	case "true", "1":
@@ -109,9 +102,7 @@ func (s *Server) handleAccountingLoad(c *fiber.Ctx) error {
 		if err := json.Unmarshal(raw, &rec); err != nil {
 			resp.Total++
 			resp.Invalid++
-			if s.metrics != nil {
-				s.metrics.IncAccountingBulkLoad(bulkLoadResultInvalid)
-			}
+			s.metrics.IncAccountingBulkLoad(bulkLoadResultInvalid)
 			if len(resp.Errors) < maxBulkLoadParseErrors {
 				resp.Errors = append(resp.Errors,
 					fmt.Sprintf("line %d: %v", lineNo, err))
@@ -122,9 +113,7 @@ func (s *Server) handleAccountingLoad(c *fiber.Ctx) error {
 		if rec.SourceIP == "" || rec.Path == "" {
 			resp.Total++
 			resp.Invalid++
-			if s.metrics != nil {
-				s.metrics.IncAccountingBulkLoad(bulkLoadResultInvalid)
-			}
+			s.metrics.IncAccountingBulkLoad(bulkLoadResultInvalid)
 			if len(resp.Errors) < maxBulkLoadParseErrors {
 				resp.Errors = append(resp.Errors,
 					fmt.Sprintf("line %d: sourceIP and path are required", lineNo))
@@ -184,12 +173,9 @@ func (s *Server) handleAccountingStats(c *fiber.Ctx) error {
 	resp := accountingStatsResponse{
 		LocalNodeID: s.nodeID,
 	}
-
-	if s.accountingStats != nil {
-		resp.MonitoredEntitiesCount = s.accountingStats.TrackedEntities()
-		resp.BatchedUpdatesPending = s.accountingStats.PendingUpdates()
-		resp.EstimatedEntitiesCount = s.accountingStats.EstimatedEntities()
-	}
+	resp.MonitoredEntitiesCount = s.accountingStats.TrackedEntities()
+	resp.BatchedUpdatesPending = s.accountingStats.PendingUpdates()
+	resp.EstimatedEntitiesCount = s.accountingStats.EstimatedEntities()
 
 	return c.JSON(resp)
 }

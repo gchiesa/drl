@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"fmt"
 	"log/slog"
 	"os"
 	"time"
@@ -30,11 +31,26 @@ func newApiServer(
 	accountingEngine *accounting.Engine,
 	metricsManager *metrics.Metrics,
 	log *slog.Logger,
-) *api.Server {
+) (*api.Server, error) {
 
 	var apiServer *api.Server
 	var err error
 
+	if clusterManager == nil {
+		return nil, fmt.Errorf("cluster manager must be provided")
+	}
+	if cacheManager == nil {
+		return nil, fmt.Errorf("cache manager must be provided")
+	}
+	if accountingEngine == nil {
+		return nil, fmt.Errorf("accounting engine must be provided")
+	}
+	if metricsManager == nil {
+		return nil, fmt.Errorf("metrics manager must be provided")
+	}
+	if log == nil {
+		return nil, fmt.Errorf("logger must be provided")
+	}
 	if cfg.InternalAPI.Enabled {
 		// Validate API key
 		if err := config.ValidatePrivateAPIKey(); err != nil {
@@ -55,15 +71,12 @@ func newApiServer(
 			Broadcaster:     clusterManager.GetStateDelegate(),
 			DefaultBlockTTL: time.Duration(cfg.Cache.BlocklistDefaultTTLSeconds) * time.Second,
 			MetricsGatherer: metricsManager,
+			AccountingStats: accountingEngine,
+			BulkLoader:      accountingEngine,
+			Metrics:         metricsManager,
+			StaticConfig:    cfg,
 		}
-		if accountingEngine != nil {
-			apiCfg.AccountingStats = accountingEngine
-			apiCfg.BulkLoader = accountingEngine
-		}
-		if metricsManager != nil {
-			apiCfg.Metrics = metricsManager
-		}
-		apiCfg.StaticConfig = cfg
+
 		apiServer, err = api.NewServer(apiCfg)
 		if err != nil {
 			log.Error("failed to create internal API server", "error", err)
@@ -78,5 +91,5 @@ func newApiServer(
 		}
 		log.Info("internal API server started", "address", cfg.InternalAPI.Address)
 	}
-	return apiServer
+	return apiServer, nil
 }

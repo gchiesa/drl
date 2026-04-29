@@ -102,49 +102,41 @@ func (s *Server) Check(_ context.Context, req *authv3.CheckRequest) (*authv3.Che
 
 	// Check blocklist before accounting — use the engine to build the key
 	// with the same rule-based header filtering that Process uses.
-	if s.blocklist != nil && s.engine != nil {
-		key := s.engine.BuildEntityKey(sourceIP, path, headers)
-		expiresAt, blocked := s.blocklist.IsBlockedWithExpiration(key)
-		if key != "" && blocked {
-			s.logger.Debug("entity blocked",
-				"key", key,
-				"source_ip", sourceIP,
-				"path", path,
-			)
-			if s.metrics != nil {
-				s.metrics.IncGRPCResponseCode("DENIED")
-			}
-			return &authv3.CheckResponse{
-				Status: &status.Status{
-					Code:    int32(codes.PermissionDenied),
-					Message: "rate limit exceeded",
-				},
-				HttpResponse: &authv3.CheckResponse_DeniedResponse{
-					DeniedResponse: &authv3.DeniedHttpResponse{
-						Status: &typev3.HttpStatus{
-							Code: typev3.StatusCode_TooManyRequests,
-						},
-						Headers: []*corev3.HeaderValueOption{
-							{
-								Header: &corev3.HeaderValue{
-									Key:   "Retry-After",
-									Value: fmt.Sprintf("%d", retryAfterSeconds(expiresAt, time.Now())),
-								},
+	key := s.engine.BuildEntityKey(sourceIP, path, headers)
+	expiresAt, blocked := s.blocklist.IsBlockedWithExpiration(key)
+	if key != "" && blocked {
+		s.logger.Debug("entity blocked",
+			"key", key,
+			"source_ip", sourceIP,
+			"path", path,
+		)
+		s.metrics.IncGRPCResponseCode("DENIED")
+		return &authv3.CheckResponse{
+			Status: &status.Status{
+				Code:    int32(codes.PermissionDenied),
+				Message: "rate limit exceeded",
+			},
+			HttpResponse: &authv3.CheckResponse_DeniedResponse{
+				DeniedResponse: &authv3.DeniedHttpResponse{
+					Status: &typev3.HttpStatus{
+						Code: typev3.StatusCode_TooManyRequests,
+					},
+					Headers: []*corev3.HeaderValueOption{
+						{
+							Header: &corev3.HeaderValue{
+								Key:   "Retry-After",
+								Value: fmt.Sprintf("%d", retryAfterSeconds(expiresAt, time.Now())),
 							},
 						},
 					},
 				},
-			}, nil
-		}
+			},
+		}, nil
 	}
+	// process async
+	go s.engine.Process(sourceIP, path, headers)
 
-	if s.engine != nil {
-		go s.engine.Process(sourceIP, path, headers)
-	}
-
-	if s.metrics != nil {
-		s.metrics.IncGRPCResponseCode("OK")
-	}
+	s.metrics.IncGRPCResponseCode("OK")
 
 	return &authv3.CheckResponse{
 		Status: &status.Status{

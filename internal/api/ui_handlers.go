@@ -73,11 +73,6 @@ type uiMetricsResponse struct {
 // as a <meta name="drl-bootstrap"> tag. The bootstrap token is intentionally
 // omitted; the SPA must retrieve it out-of-band via GET /drl/ui/get-token.
 func (s *Server) handleUIIndex(c *fiber.Ctx) error {
-	if s.uiAuth == nil {
-		return c.Status(fiber.StatusServiceUnavailable).
-			SendString("UI authentication not configured")
-	}
-
 	meta := bootstrapMeta{
 		ServerPubKey: s.uiAuth.ServerPublicKeyBase64(),
 		ClusterName:  s.clusterName,
@@ -112,11 +107,6 @@ func (s *Server) handleUIIndex(c *fiber.Ctx) error {
 //
 //	curl --digest -u "admin:$DRL_PRIVATE_API_KEY" http://localhost:8082/drl/ui/get-token
 func (s *Server) handleUIGetToken(c *fiber.Ctx) error {
-	if s.uiAuth == nil {
-		return c.Status(fiber.StatusServiceUnavailable).JSON(fiber.Map{
-			"error": "UI authentication not configured",
-		})
-	}
 	return c.JSON(getTokenResponse{
 		BootstrapToken: s.uiAuth.GenerateBootstrapToken(),
 	})
@@ -132,12 +122,6 @@ func (s *Server) handleUIGetToken(c *fiber.Ctx) error {
 //  4. Encrypts the session token with AES-256-GCM using the shared secret.
 //  5. Returns the encrypted session token and server public key.
 func (s *Server) handleUIExchange(c *fiber.Ctx) error {
-	if s.uiAuth == nil {
-		return c.Status(fiber.StatusServiceUnavailable).JSON(fiber.Map{
-			"error": "UI authentication not configured",
-		})
-	}
-
 	var req keyExchangeRequest
 	if err := c.BodyParser(&req); err != nil {
 		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
@@ -194,10 +178,7 @@ func (s *Server) handleUIMetrics(c *fiber.Ctx) error {
 		Timestamp: time.Now().UTC().Format(time.RFC3339),
 		Metrics:   make(map[string]float64),
 	}
-
-	if s.metricsGatherer != nil {
-		resp.Metrics = s.metricsGatherer.GatherForUI()
-	}
+	resp.Metrics = s.metricsGatherer.GatherForUI()
 
 	return c.JSON(resp)
 }

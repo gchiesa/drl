@@ -252,17 +252,17 @@ func TestServerStartStop(t *testing.T) {
 	}
 }
 
-func TestStatusEndpoint_NilCluster(t *testing.T) {
+func TestStatusEndpoint_EmptyCluster(t *testing.T) {
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
 	apiKey := "thisIsAVerySecureAPIKey123"
 
-	// Create server with nil cluster
+	// Create server with an empty cluster (no members)
 	server, err := NewServer(ServerConfig{
 		Address:     ":8082",
 		APIKey:      apiKey,
 		ClusterName: "test-cluster",
 		NodeID:      "node-1",
-		Cluster:     nil,
+		Cluster:     &mockCluster{},
 		Logger:      logger,
 	})
 	if err != nil {
@@ -281,16 +281,16 @@ func TestStatusEndpoint_NilCluster(t *testing.T) {
 	resp2, _ := server.app.Test(req2)
 
 	if resp2.StatusCode != http.StatusOK {
-		t.Errorf("Expected 200 OK even with nil cluster, got %d", resp2.StatusCode)
+		t.Errorf("Expected 200 OK with empty cluster, got %d", resp2.StatusCode)
 	}
 
 	body, _ := io.ReadAll(resp2.Body)
 	var status map[string]any
 	_ = json.Unmarshal(body, &status)
 
-	// active_peers should be nil or empty when cluster is nil
+	// active_peers should be nil or empty when cluster has no members
 	if status["active_peers"] != nil {
-		t.Errorf("Expected active_peers to be nil when cluster is nil")
+		t.Errorf("Expected active_peers to be nil when cluster has no members")
 	}
 }
 

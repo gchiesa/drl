@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"fmt"
 	"log/slog"
 	"os"
 	"time"
@@ -11,7 +12,14 @@ import (
 )
 
 // newCache initializes and returns a cache manager instance based on the given config, metrics, and logger.
-func newCache(cfg *config.Config, localIP string, metric *metrics.Metrics, log *slog.Logger) *cache.Manager {
+func newCache(cfg *config.Config, localIP string, metric *metrics.Metrics, log *slog.Logger) (*cache.Manager, error) {
+	if metric == nil {
+		return nil, fmt.Errorf("metrics must be provided")
+	}
+	if log == nil {
+		return nil, fmt.Errorf("logger must be provided")
+	}
+
 	cacheManager, err := cache.NewManager(cache.ManagerConfig{
 		BlocklistSizeMB:  cfg.Cache.BlocklistSizeMB,
 		AccountingSizeMB: cfg.Cache.AccountingSizeMB,
@@ -46,5 +54,5 @@ func newCache(cfg *config.Config, localIP string, metric *metrics.Metrics, log *
 		"blocklist_size_mb", cfg.Cache.BlocklistSizeMB,
 		"accounting_size_mb", cfg.Cache.AccountingSizeMB,
 	)
-	return cacheManager
+	return cacheManager, nil
 }

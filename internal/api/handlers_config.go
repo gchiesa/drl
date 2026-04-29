@@ -23,12 +23,6 @@ func (s *Server) handleGetStaticConfig(c *fiber.Ctx) error {
 		})
 	}
 
-	if s.staticConfig == nil {
-		return c.Status(fiber.StatusServiceUnavailable).JSON(fiber.Map{
-			"error": "static config provider not available",
-		})
-	}
-
 	data, ok := s.staticConfig.GetConfigSection(section)
 	if !ok {
 		return c.Status(fiber.StatusNotFound).JSON(fiber.Map{

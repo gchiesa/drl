@@ -13,19 +13,17 @@ func (s *Server) handleStatus(c *fiber.Ctx) error {
 
 	var activePeers []string
 	var peerAPIAddresses []string
-	if s.cluster != nil {
-		activePeers = s.cluster.MemberNames()
-		// Build peer API addresses: combine member IP addresses with this node's API port.
-		// The current node's own address is excluded so the SPA does not proxy back to
-		// itself and double-count metrics it already fetched directly.
-		if s.apiPort != "" {
-			ownIP := s.cluster.LocalAddr()
-			for _, addr := range s.cluster.MemberAddrs() {
-				if addr == ownIP {
-					continue // skip self
-				}
-				peerAPIAddresses = append(peerAPIAddresses, fmt.Sprintf("%s:%s", addr, s.apiPort))
+	activePeers = s.cluster.MemberNames()
+	// Build peer API addresses: combine member IP addresses with this node's API port.
+	// The current node's own address is excluded so the SPA does not proxy back to
+	// itself and double-count metrics it already fetched directly.
+	if s.apiPort != "" {
+		ownIP := s.cluster.LocalAddr()
+		for _, addr := range s.cluster.MemberAddrs() {
+			if addr == ownIP {
+				continue // skip self
 			}
+			peerAPIAddresses = append(peerAPIAddresses, fmt.Sprintf("%s:%s", addr, s.apiPort))
 		}
 	}
 

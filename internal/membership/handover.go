@@ -55,7 +55,7 @@ type HandoverConfig struct {
 }
 
 // NewHandover creates a new Handover instance.
-func NewHandover(cfg HandoverConfig) *Handover {
+func NewHandover(cfg HandoverConfig) (*Handover, error) {
 	settling := cfg.Settling
 	if settling == 0 {
 		settling = DefaultSettlingPeriod
@@ -63,6 +63,18 @@ func NewHandover(cfg HandoverConfig) *Handover {
 	timeout := cfg.Timeout
 	if timeout == 0 {
 		timeout = DefaultHandoverTimeout
+	}
+	if cfg.Accounting == nil {
+		return nil, fmt.Errorf("handover: accounting cache is required")
+	}
+	if cfg.Cluster == nil {
+		return nil, fmt.Errorf("handover: cluster is required")
+	}
+	if cfg.Metrics == nil {
+		return nil, fmt.Errorf("handover: metrics are required")
+	}
+	if cfg.Logger == nil {
+		return nil, fmt.Errorf("handover: logger is required")
 	}
 	return &Handover{
 		cluster:    cfg.Cluster,
@@ -85,7 +97,7 @@ func NewHandover(cfg HandoverConfig) *Handover {
 				return dec
 			},
 		},
-	}
+	}, nil
 }
 
 // IsShuttingDown returns true if this node is in the process of shutting down.

@@ -77,6 +77,19 @@ type MetricsGatherer interface {
 	GatherForUI() map[string]float64
 }
 
+// noopAccountingStats returns zeros for all metrics; used when no real
+// AccountingStats provider is configured.
+type noopAccountingStats struct{}
+
+func (noopAccountingStats) PendingUpdates() int64    { return 0 }
+func (noopAccountingStats) TrackedEntities() int64   { return 0 }
+func (noopAccountingStats) EstimatedEntities() int64 { return 0 }
+
+// noopMetricsGatherer returns an empty map; used when no real MetricsGatherer is configured.
+type noopMetricsGatherer struct{}
+
+func (noopMetricsGatherer) GatherForUI() map[string]float64 { return map[string]float64{} }
+
 // Server represents the internal API server
 type Server struct {
 	app             *fiber.App
@@ -173,17 +186,31 @@ func NewServer(cfg ServerConfig) (*Server, error) {
 		blocklist:       cfg.Blocklist,
 		broadcaster:     cfg.Broadcaster,
 		defaultBlockTTL: defaultTTL,
-		accountingStats: cfg.AccountingStats,
+		accountingStats: accountingStatsOrNoop(cfg.AccountingStats),
 		bulkLoader:      cfg.BulkLoader,
 		metrics:         cfg.Metrics,
 		staticConfig:    cfg.StaticConfig,
-		metricsGatherer: cfg.MetricsGatherer,
+		metricsGatherer: metricsGathererOrNoop(cfg.MetricsGatherer),
 	}
 
 	// Setup routes
 	server.setupRoutes()
 
 	return server, nil
+}
+
+func accountingStatsOrNoop(s AccountingStatsProvider) AccountingStatsProvider {
+	if s == nil {
+		return noopAccountingStats{}
+	}
+	return s
+}
+
+func metricsGathererOrNoop(g MetricsGatherer) MetricsGatherer {
+	if g == nil {
+		return noopMetricsGatherer{}
+	}
+	return g
 }
 
 // encryptedResponseMiddleware wraps all DRL-Session responses with AES-256-GCM
@@ -326,7 +353,6 @@ func (s *Server) setupRoutes() {
 	s.app.Delete("/blocked-entity/:ip/_path/*", encMW, authMW, s.handleBlockEntityDelete)
 
 	s.app.Get("/accounting/stats", encMW, authMW, s.handleAccountingStats)
-
 	if s.bulkLoader != nil {
 		s.app.Post("/accounting/load", encMW, authMW, s.handleAccountingLoad)
 	}

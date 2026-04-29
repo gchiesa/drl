@@ -21,6 +21,18 @@ func testHandoverLogger() *slog.Logger {
 	return slog.New(slog.NewTextHandler(io.Discard, nil))
 }
 
+func testAccountingCache(t *testing.T, localNode string) *cache.AccountingCache {
+	t.Helper()
+	ac, err := cache.NewAccountingCache(cache.AccountingConfig{
+		MaxSizeMB:  1,
+		LocalNode:  localNode,
+		WindowSize: time.Minute,
+	})
+	require.NoError(t, err)
+	t.Cleanup(ac.Close)
+	return ac
+}
+
 // mockFlusher records enqueue calls.
 type mockFlusher struct {
 	mu       sync.Mutex
@@ -40,9 +52,13 @@ func (f *mockFlusher) Enqueue(ownerAddr string, entityHash uint64, hits uint64) 
 }
 
 func TestHandover_ZstdRoundTrip(t *testing.T) {
-	h := NewHandover(HandoverConfig{
-		Logger: testHandoverLogger(),
+	h, err := NewHandover(HandoverConfig{
+		Cluster:    &Cluster{localIP: "local-node"},
+		Accounting: testAccountingCache(t, "local-node"),
+		Metrics:    metrics.NewMetrics(),
+		Logger:     testHandoverLogger(),
 	})
+	require.NoError(t, err)
 
 	original := []byte("test data for compression round-trip with zstd")
 	compressed := h.compressZstd(original)
@@ -52,24 +68,18 @@ func TestHandover_ZstdRoundTrip(t *testing.T) {
 }
 
 func TestHandover_HandleIncoming_MergesState(t *testing.T) {
-	ac, err := cache.NewAccountingCache(cache.AccountingConfig{
-		MaxSizeMB:  1,
-		LocalNode:  "local-node",
-		WindowSize: time.Minute,
-	})
-	require.NoError(t, err)
-	defer ac.Close()
-
-	m := metrics.NewMetrics()
+	ac := testAccountingCache(t, "local-node")
 	flusher := &mockFlusher{}
 
-	h := NewHandover(HandoverConfig{
+	h, err := NewHandover(HandoverConfig{
+		Cluster:    &Cluster{localIP: "local-node"},
 		Accounting: ac,
 		Flusher:    flusher,
-		Metrics:    m,
+		Metrics:    metrics.NewMetrics(),
 		Logger:     testHandoverLogger(),
 		Settling:   10 * time.Millisecond, // short settling for tests
 	})
+	require.NoError(t, err)
 
 	// Build a HandoverPayload with entries
 	batch := &drlproto.CounterBatch{
@@ -105,19 +115,16 @@ func TestHandover_HandleIncoming_MergesState(t *testing.T) {
 }
 
 func TestHandover_HandleIncoming_RejectsWhenShuttingDown(t *testing.T) {
-	ac, err := cache.NewAccountingCache(cache.AccountingConfig{
-		MaxSizeMB:  1,
-		LocalNode:  "local-node",
-		WindowSize: time.Minute,
-	})
-	require.NoError(t, err)
-	defer ac.Close()
+	ac := testAccountingCache(t, "local-node")
 
-	h := NewHandover(HandoverConfig{
+	h, err := NewHandover(HandoverConfig{
+		Cluster:    &Cluster{localIP: "local-node"},
 		Accounting: ac,
+		Metrics:    metrics.NewMetrics(),
 		Logger:     testHandoverLogger(),
 		Settling:   10 * time.Millisecond,
 	})
+	require.NoError(t, err)
 
 	// Mark as shutting down
 	close(h.shutdownCh)
@@ -138,27 +145,22 @@ func TestHandover_HandleIncoming_RejectsWhenShuttingDown(t *testing.T) {
 }
 
 func TestHandover_HandleIncoming_RedistributesToCorrectOwners(t *testing.T) {
-	ac, err := cache.NewAccountingCache(cache.AccountingConfig{
-		MaxSizeMB:  1,
-		LocalNode:  "local-node",
-		WindowSize: time.Minute,
-	})
-	require.NoError(t, err)
-	defer ac.Close()
+	ac := testAccountingCache(t, "local-node")
 
 	// Add a remote node so some keys will be remote
 	ac.AddNode("remote-node")
 
 	flusher := &mockFlusher{}
-	m := metrics.NewMetrics()
 
-	h := NewHandover(HandoverConfig{
+	h, err := NewHandover(HandoverConfig{
+		Cluster:    &Cluster{localIP: "local-node"},
 		Accounting: ac,
 		Flusher:    flusher,
-		Metrics:    m,
+		Metrics:    metrics.NewMetrics(),
 		Logger:     testHandoverLogger(),
 		Settling:   10 * time.Millisecond,
 	})
+	require.NoError(t, err)
 
 	// Build entries — some will hash to local, some to remote
 	entries := make([]*drlproto.CounterEntry, 20)
@@ -199,9 +201,13 @@ func TestHandover_HandleIncoming_RedistributesToCorrectOwners(t *testing.T) {
 }
 
 func TestHandover_IsShuttingDown(t *testing.T) {
-	h := NewHandover(HandoverConfig{
-		Logger: testHandoverLogger(),
+	h, err := NewHandover(HandoverConfig{
+		Cluster:    &Cluster{localIP: "local-node"},
+		Accounting: testAccountingCache(t, "local-node"),
+		Metrics:    metrics.NewMetrics(),
+		Logger:     testHandoverLogger(),
 	})
+	require.NoError(t, err)
 
 	assert.False(t, h.IsShuttingDown())
 	close(h.shutdownCh)
@@ -209,19 +215,15 @@ func TestHandover_IsShuttingDown(t *testing.T) {
 }
 
 func TestHandover_Evacuate_NoEntries(t *testing.T) {
-	ac, err := cache.NewAccountingCache(cache.AccountingConfig{
-		MaxSizeMB:  1,
-		LocalNode:  "local-node",
-		WindowSize: time.Minute,
-	})
-	require.NoError(t, err)
-	defer ac.Close()
+	ac := testAccountingCache(t, "local-node")
 
-	h := NewHandover(HandoverConfig{
+	h, err := NewHandover(HandoverConfig{
 		Cluster:    &Cluster{localIP: "local-node"},
 		Accounting: ac,
+		Metrics:    metrics.NewMetrics(),
 		Logger:     testHandoverLogger(),
 	})
+	require.NoError(t, err)
 
 	// Empty cache — should return nil without error
 	err = h.Evacuate()

@@ -2,6 +2,7 @@ package cache
 
 import (
 	"fmt"
+	"io"
 	"log/slog"
 	"sync"
 	"sync/atomic"
@@ -79,16 +80,40 @@ func NewAccountingCache(cfg AccountingConfig) (*AccountingCache, error) {
 		windowSize = time.Minute
 	}
 
+	logger := cfg.Logger
+	if logger == nil {
+		logger = slog.New(slog.NewTextHandler(io.Discard, nil))
+	}
+
+	noop := func() {}
+	noopCost := func(int64) {}
+	onHit := cfg.OnHit
+	if onHit == nil {
+		onHit = noop
+	}
+	onMiss := cfg.OnMiss
+	if onMiss == nil {
+		onMiss = noop
+	}
+	onEvict := cfg.OnEvict
+	if onEvict == nil {
+		onEvict = noop
+	}
+	onSetCost := cfg.OnSetCost
+	if onSetCost == nil {
+		onSetCost = noopCost
+	}
+
 	ac := &AccountingCache{
 		localNode:    cfg.LocalNode,
-		logger:       cfg.Logger,
+		logger:       logger,
 		maxCost:      maxCost,
 		windowSize:   windowSize,
 		transferable: make(map[string]Transferable),
-		onHit:        cfg.OnHit,
-		onMiss:       cfg.OnMiss,
-		onEvict:      cfg.OnEvict,
-		onSetCost:    cfg.OnSetCost,
+		onHit:        onHit,
+		onMiss:       onMiss,
+		onEvict:      onEvict,
+		onSetCost:    onSetCost,
 	}
 
 	cache, err := otter.New[string, *atomic.Int64](&otter.Options[string, *atomic.Int64]{
@@ -99,8 +124,8 @@ func NewAccountingCache(cfg AccountingConfig) (*AccountingCache, error) {
 		},
 		ExpiryCalculator: otter.ExpiryCreating[string, *atomic.Int64](windowSize),
 		OnDeletion: func(e otter.DeletionEvent[string, *atomic.Int64]) {
-			if e.WasEvicted() && cfg.OnEvict != nil {
-				cfg.OnEvict()
+			if e.WasEvicted() {
+				onEvict()
 			}
 		},
 	})
@@ -161,15 +186,11 @@ func (a *AccountingCache) GetOwner(key string) string {
 func (a *AccountingCache) Increment(key string, delta int64) int64 {
 	counter, found := a.cache.GetIfPresent(key)
 	if found {
-		if a.onHit != nil {
-			a.onHit()
-		}
+		a.onHit()
 		return counter.Add(delta)
 	}
 
-	if a.onMiss != nil {
-		a.onMiss()
-	}
+	a.onMiss()
 
 	// Create new counter
 	newCounter := &atomic.Int64{}
@@ -183,15 +204,10 @@ func (a *AccountingCache) Increment(key string, delta int64) int64 {
 func (a *AccountingCache) Get(key string) int64 {
 	counter, found := a.cache.GetIfPresent(key)
 	if !found {
-		if a.onMiss != nil {
-			a.onMiss()
-		}
+		a.onMiss()
 		return 0
 	}
-
-	if a.onHit != nil {
-		a.onHit()
-	}
+	a.onHit()
 	return counter.Load()
 }
 
@@ -216,18 +232,13 @@ func (a *AccountingCache) AddNode(node string) {
 		otherNodes = append(otherNodes, n.String())
 	}
 	tMetrics := a.updateTransferableLocked(otherNodes)
-	if a.logger != nil {
-		a.logger.Debug("updated transferable entities", "total_entities_to_transfer", fmt.Sprintf("%v", lo.MapValues(tMetrics, func(m int64, k string) string {
-			return fmt.Sprintf("[%d]", m)
-		})))
-	}
-
-	if a.logger != nil {
-		a.logger.Debug("node added to hash ring",
-			"node", node,
-			"total_members", len(a.ring.GetMembers()),
-		)
-	}
+	a.logger.Debug("updated transferable entities", "total_entities_to_transfer", fmt.Sprintf("%v", lo.MapValues(tMetrics, func(m int64, k string) string {
+		return fmt.Sprintf("[%d]", m)
+	})))
+	a.logger.Debug("node added to hash ring",
+		"node", node,
+		"total_members", len(a.ring.GetMembers()),
+	)
 }
 
 // RemoveNode removes a node from the consistent hash ring
@@ -246,18 +257,13 @@ func (a *AccountingCache) RemoveNode(node string) {
 		otherNodes = append(otherNodes, n.String())
 	}
 	tMetrics := a.updateTransferableLocked(otherNodes)
-	if a.logger != nil {
-		a.logger.Debug("updated transferable entities", "total_entities_to_transfer", fmt.Sprintf("%v", lo.MapValues(tMetrics, func(m int64, k string) string {
-			return fmt.Sprintf("[%d]", m)
-		})))
-	}
-
-	if a.logger != nil {
-		a.logger.Debug("node removed from hash ring",
-			"node", node,
-			"total_members", len(a.ring.GetMembers()),
-		)
-	}
+	a.logger.Debug("updated transferable entities", "total_entities_to_transfer", fmt.Sprintf("%v", lo.MapValues(tMetrics, func(m int64, k string) string {
+		return fmt.Sprintf("[%d]", m)
+	})))
+	a.logger.Debug("node removed from hash ring",
+		"node", node,
+		"total_members", len(a.ring.GetMembers()),
+	)
 }
 
 // UpdateNodes updates the hash ring with the given list of nodes
@@ -300,14 +306,12 @@ func (a *AccountingCache) UpdateNodes(nodes []string) {
 		otherNodes = append(otherNodes, n.String())
 	}
 	tMetrics := a.updateTransferableLocked(otherNodes)
-	if a.logger != nil {
-		a.logger.Debug("updated transferable entities", "total_entities_to_transfer", fmt.Sprintf("%v", lo.MapValues(tMetrics, func(m int64, k string) string {
-			return fmt.Sprintf("[%d]", m)
-		})))
-		a.logger.Debug("hash ring updated",
-			"total_members", len(a.ring.GetMembers()),
-		)
-	}
+	a.logger.Debug("updated transferable entities", "total_entities_to_transfer", fmt.Sprintf("%v", lo.MapValues(tMetrics, func(m int64, k string) string {
+		return fmt.Sprintf("[%d]", m)
+	})))
+	a.logger.Debug("hash ring updated",
+		"total_members", len(a.ring.GetMembers()),
+	)
 }
 
 // updateTransferableLocked updates the transferable entities for the given

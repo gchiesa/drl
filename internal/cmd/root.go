@@ -10,8 +10,13 @@ import (
 	"time"
 
 	"github.com/alexflint/go-arg"
+	"github.com/gchiesa/drl/internal/accounting"
+	"github.com/gchiesa/drl/internal/api"
+	"github.com/gchiesa/drl/internal/cache"
 	"github.com/gchiesa/drl/internal/config"
+	"github.com/gchiesa/drl/internal/grpc"
 	"github.com/gchiesa/drl/internal/membership"
+	"github.com/gchiesa/drl/internal/metrics"
 	"github.com/gchiesa/drl/internal/utils"
 )
 
@@ -27,6 +32,7 @@ var log *slog.Logger
 // It handles configuration loading, logger initialization, and startup of core components such as metrics, cache, and gRPC server.
 // The function facilitates graceful shutdown on receiving termination signals.
 func Execute(version string) {
+	var err error
 	// Parse command line flags
 	arg.MustParse(&args)
 
@@ -72,36 +78,63 @@ func Execute(version string) {
 	)
 
 	// Initialize metricsManager
-	metricsManager := newMetrics(cfg, log)
+	var metricsManager *metrics.Metrics
+	if metricsManager, err = newMetrics(cfg, log); err != nil {
+		fmt.Println("metrics-manager: >" + err.Error() + "<")
+		os.Exit(1)
+	}
 
 	// Initialize cache manager
-	cacheManager := newCache(cfg, localIP, metricsManager, log)
+	var cacheManager *cache.Manager
+	if cacheManager, err = newCache(cfg, localIP, metricsManager, log); err != nil {
+		fmt.Println("cache-manager: >" + err.Error() + "<")
+		os.Exit(1)
+	}
 
 	// Initialize cluster manager
-	clusterManager := newCluster(cfg, localIP, cacheManager, metricsManager, log)
+	var clusterManager *membership.Cluster
+	if clusterManager, err = newCluster(cfg, localIP, cacheManager, metricsManager, log); err != nil {
+		fmt.Println("cluster-manager: >" + err.Error() + "<")
+		os.Exit(1)
+	}
 
 	// Initialize Accounting Engine
-	accountingEngine := newAccountingEngine(cfg, localIP, cacheManager, metricsManager, cacheManager.Blocklist, clusterManager.GetStateDelegate(), clusterManager, log)
+	var accountingEngine *accounting.Engine
+	if accountingEngine, err = newAccountingEngine(cfg, localIP, cacheManager, metricsManager, cacheManager.Blocklist, clusterManager.GetStateDelegate(), clusterManager, log); err != nil {
+		fmt.Println("accounting-engine: >" + err.Error() + "<")
+		os.Exit(1)
+	}
 
 	// Initialize Handover for graceful state evacuation on shutdown
-	var handover *membership.Handover
+	var handoverManager *membership.Handover
 	if accountingEngine != nil && accountingEngine.GetFlusher() != nil {
-		handover = membership.NewHandover(membership.HandoverConfig{
+		if handoverManager, err = membership.NewHandover(membership.HandoverConfig{
 			Cluster:    clusterManager,
 			Accounting: cacheManager.Accounting,
 			Flusher:    accountingEngine.GetFlusher(),
 			Metrics:    metricsManager,
 			Logger:     log,
-		})
-		clusterManager.GetStateDelegate().SetHandover(handover)
+		}); err != nil {
+			fmt.Println("handover-manager: >" + err.Error() + "<")
+			os.Exit(1)
+		}
+		clusterManager.GetStateDelegate().SetHandover(handoverManager)
 		log.Info("handover manager initialized")
 	}
 
 	// Initialize internal API if enabled
-	apiServer := newApiServer(cfg, localIP, cacheManager, clusterManager, accountingEngine, metricsManager, log)
+	var apiServer *api.Server
+	if apiServer, err = newApiServer(cfg, localIP, cacheManager, clusterManager, accountingEngine, metricsManager, log); err != nil {
+		fmt.Println("api-server: >" + err.Error() + "<")
+		os.Exit(1)
+	}
 
 	// Initialize gRPC ext_authz server for Envoy
-	grpcServer := newGRPCServer(cfg, cacheManager, accountingEngine, apiServer, metricsManager, log)
+	var grpcServer *grpc.Server
+	if grpcServer, err = newGRPCServer(cfg, cacheManager, accountingEngine, apiServer, metricsManager, log); err != nil {
+		fmt.Println("grpc-server: >" + err.Error() + "<")
+		os.Exit(1)
+	}
 
 	log.Info("DRL is running")
 
@@ -132,8 +165,8 @@ func Execute(version string) {
 	}
 
 	// Evacuate accounting state to an adopter node before leaving
-	if handover != nil {
-		if err := handover.Evacuate(); err != nil {
+	if handoverManager != nil {
+		if err := handoverManager.Evacuate(); err != nil {
 			log.Error("handover failed", "error", err)
 		}
 	}

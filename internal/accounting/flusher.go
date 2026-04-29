@@ -137,11 +137,9 @@ func (f *Flusher) Enqueue(ownerAddr string, entityHash uint64, hits uint64) {
 	// the new entry, but at the same time we recalculate what is now owned by
 	// ownerAddr and we enqueue also those entries in buf.entries and we assume they
 	// will be successfully transmitted, so that they can be remove from local accounting.
-	if f.accounting != nil {
-		if entities, exist := f.accounting.ConsumeTransferable(ownerAddr); exist {
-			for k, v := range entities {
-				buf.entries[k] += v
-			}
+	if entities, exist := f.accounting.ConsumeTransferable(ownerAddr); exist {
+		for k, v := range entities {
+			buf.entries[k] += v
 		}
 	}
 
@@ -226,19 +224,19 @@ func (f *Flusher) flushNode(addr string, buf *nodeBuffer) {
 	batch.Entries = batch.Entries[:0]
 	f.batchPool.Put(batch)
 
-	if f.sender != nil {
-		if err := f.sender.SendAccountingMsg(addr, data); err != nil {
-			f.logger.Error("failed to send counter batch", "error", err, "addr", addr)
-		} else {
-			if f.metrics != nil {
-				f.metrics.IncAccountingFlush()
-				f.metrics.IncMembershipBestEffort()
-			}
-			f.logger.Debug("flushed counter batch",
-				"addr", addr,
-				"entries", len(buf.entries),
-			)
-		}
+	if f.sender == nil {
+		buf.entries = make(map[uint64]uint64)
+		return
+	}
+	if err := f.sender.SendAccountingMsg(addr, data); err != nil {
+		f.logger.Error("failed to send counter batch", "error", err, "addr", addr)
+	} else {
+		f.metrics.IncAccountingFlush()
+		f.metrics.IncMembershipBestEffort()
+		f.logger.Debug("flushed counter batch",
+			"addr", addr,
+			"entries", len(buf.entries),
+		)
 	}
 
 	buf.entries = make(map[uint64]uint64)
