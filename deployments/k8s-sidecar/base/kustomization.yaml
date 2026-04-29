@@ -4,14 +4,13 @@ kind: Kustomization
 namespace: drl
 
 resources:
-  - namespace.yaml
   - configmap.yaml
   - deployment.yaml
   - service.yaml
 
 # Replace with your actual DRL image
 images:
-  - name: ghcr.io/your-org/drl
+  - name: ghcr.io/gchiesa/drl
     newTag: latest
 
 # Generate the DRL secrets from a local .env file (for local dev only).
