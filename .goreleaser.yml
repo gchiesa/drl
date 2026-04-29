@@ -1,0 +1,96 @@
+# yaml-language-server: $schema=https://goreleaser.com/static/schema.json
+version: 2
+
+project_name: drl
+
+before:
+  hooks:
+  - go mod tidy
+  # Build the Svelte UI so it is embedded into the Go binary
+  - sh -c "cd ui && npm ci --prefer-offline && npm run build && cp dist/index.html ../internal/api/resources/index.html"
+
+builds:
+- env:
+  - CGO_ENABLED=0
+  flags:
+  # Remove all host filesystem paths from the binary: reproducible builds,
+  # smaller output, and no path disclosure in stack traces.
+  - -trimpath
+  # Goreleaser injects version via ldflags; skip embedding VCS metadata to
+  # avoid dirty-state failures in CI and prevent double-embedding.
+  - -buildvcs=false
+  goos:
+  - linux
+  goarch:
+  - amd64
+  - arm64
+  - arm
+  goarm:
+  - "7"
+  # Target x86-64 v3 (AVX2/BMI2, Intel Haswell / AMD Excavator, ~2013+).
+  # Universal in modern datacenters; enables better-vectorised codegen on
+  # the hot rate-limit path without requiring specialised CPU features.
+  goamd64:
+  - v3
+  ldflags:
+  - -s -w -X main.version={{.Version}}
+
+# Build multi-arch Docker images and push to GHCR.
+# Each arch gets its own image tag, then a manifest list combines them.
+dockers:
+- image_templates:
+  - "ghcr.io/gchiesa/drl:{{ .Tag }}-amd64"
+  - "ghcr.io/gchiesa/drl:latest-amd64"
+  dockerfile: Dockerfile
+  use: buildx
+  build_flag_templates:
+  - "--platform=linux/amd64"
+
+- image_templates:
+  - "ghcr.io/gchiesa/drl:{{ .Tag }}-arm64"
+  - "ghcr.io/gchiesa/drl:latest-arm64"
+  dockerfile: Dockerfile
+  use: buildx
+  build_flag_templates:
+  - "--platform=linux/arm64"
+
+- image_templates:
+  - "ghcr.io/gchiesa/drl:{{ .Tag }}-armv7"
+  - "ghcr.io/gchiesa/drl:latest-armv7"
+  dockerfile: Dockerfile
+  use: buildx
+  build_flag_templates:
+  - "--platform=linux/arm/v7"
+
+docker_manifests:
+- name_template: "ghcr.io/gchiesa/drl:{{ .Tag }}"
+  image_templates:
+  - "ghcr.io/gchiesa/drl:{{ .Tag }}-amd64"
+  - "ghcr.io/gchiesa/drl:{{ .Tag }}-arm64"
+  - "ghcr.io/gchiesa/drl:{{ .Tag }}-armv7"
+
+- name_template: "ghcr.io/gchiesa/drl:latest"
+  image_templates:
+  - "ghcr.io/gchiesa/drl:latest-amd64"
+  - "ghcr.io/gchiesa/drl:latest-arm64"
+  - "ghcr.io/gchiesa/drl:latest-armv7"
+
+archives:
+- wrap_in_directory: true
+  name_template: "{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}{{ if .Arm }}v{{ .Arm }}{{ end }}"
+
+sboms:
+- artifacts: archive
+  args: ["$artifact", "--output", "spdx-json=$document"]
+
+checksum:
+  name_template: checksums.txt
+
+release:
+  prerelease: auto
+
+snapshot:
+  name_template: "{{ .Tag }}-next"
+
+changelog:
+  disable: true

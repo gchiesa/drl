@@ -1,0 +1,51 @@
+---
+name: Semantic PR Validation
+
+on:
+  pull_request_target:
+    types:
+    - opened
+    - edited
+    - synchronize
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: read
+    steps:
+    - name: Validate Pull Request
+      # amannn/action-semantic-pull-request v5
+      uses: amannn/action-semantic-pull-request@c3cd5d1ea3580753008872425915e343e351ab54
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      with:
+        types: |
+          feat
+          fix
+          build
+          chore
+          ci
+          docs
+          perf
+          refactor
+          revert
+          style
+          test
+          deps
+        scopes: |
+          deps
+        requireScope: false
+        # Validate single-commit PRs when squash-merging
+        validateSingleCommit: true
+        # Subject must not start with an uppercase character
+        subjectPattern: ^(?![A-Z]).+$
+        subjectPatternError: |-
+          The subject "{subject}" found in the pull request title "{title}"
+          didn't match the configured pattern. Please ensure that the subject
+          doesn't start with an uppercase character.
