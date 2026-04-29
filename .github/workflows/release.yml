@@ -1,0 +1,103 @@
+---
+name: Release
+
+on:
+  push:
+    branches:
+    - main
+    - '[0-9]+.[0-9]+.x'
+  workflow_dispatch:
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  release-please:
+    permissions:
+      contents: write
+      pull-requests: write
+    runs-on: ubuntu-latest
+    outputs:
+      releases_created: ${{ steps.release.outputs.releases_created }}
+      tag_name: ${{ steps.release.outputs.tag_name }}
+    steps:
+    - name: Checkout
+      # actions/checkout v4
+      uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
+
+    - uses: google-github-actions/release-please-action@ee9822ec2c397e8a364d634464339ac43a06e042
+      id: release
+      with:
+        command: manifest
+        token: ${{ secrets.GITHUB_TOKEN }}
+        default-branch: main
+
+  goreleaser:
+    if: needs.release-please.outputs.releases_created == 'true'
+    permissions:
+      contents: write
+      packages: write  # required to push to GHCR
+    needs:
+    - release-please
+    runs-on: ubuntu-latest
+    steps:
+    - name: Checkout
+      # actions/checkout v4
+      uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
+      with:
+        fetch-depth: 0
+
+    # mise installs Go, Node and all other project tools declared in mise.toml.
+    - name: Install mise and project tools
+      # jdx/mise-action v2
+      uses: jdx/mise-action@c37c93293d6b742fc901e1406b8f764f6fb19dac
+
+    - name: Cache Go module and build cache
+      # actions/cache v4
+      uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830
+      with:
+        path: |
+          ~/go/pkg/mod
+          ~/.cache/go-build
+        key: gomod-${{ runner.os }}-${{ hashFiles('go.sum') }}
+        restore-keys: gomod-${{ runner.os }}-
+
+    - name: Cache Node modules
+      # actions/cache v4
+      uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830
+      with:
+        path: ui/node_modules
+        key: node-modules-${{ runner.os }}-${{ hashFiles('ui/package-lock.json') }}
+        restore-keys: node-modules-${{ runner.os }}-
+
+    # Set up QEMU so buildx can cross-compile Docker images for arm64/arm.
+    - name: Set up QEMU
+      # docker/setup-qemu-action v3
+      uses: docker/setup-qemu-action@29109295f81e9208d7d86ff9c45d9e7c10a59619
+
+    - name: Set up Docker Buildx
+      # docker/setup-buildx-action v3
+      uses: docker/setup-buildx-action@b5ca514318bd6ebac0fb2aedd5d36ec1b5c232a2
+
+    - name: Log in to GitHub Container Registry
+      # docker/login-action v3
+      uses: docker/login-action@74a5d142397b4f367a81961eba4e8cd7edddf772
+      with:
+        registry: ghcr.io
+        username: ${{ github.actor }}
+        password: ${{ secrets.GITHUB_TOKEN }}
+
+    - name: Download Syft (for SBOM generation)
+      # anchore/sbom-action v0
+      uses: anchore/sbom-action/download-syft@422cb34a0f8b599678c41b21163ea6088edb2624
+
+    - name: Run GoReleaser
+      # goreleaser/goreleaser-action v6
+      uses: goreleaser/goreleaser-action@v6
+      with:
+        distribution: goreleaser
+        version: latest
+        args: release --clean
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
