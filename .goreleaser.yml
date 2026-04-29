@@ -36,29 +36,43 @@ builds:
   - -s -w -X main.version={{.Version}}
 
 # Build multi-arch Docker images and push to GHCR.
-# Each arch gets its own image tag, then a manifest list combines them.
+#
+# Dockerfile.goreleaser is a minimal image that copies the pre-built binary
+# goreleaser places in the build context — the full source Dockerfile is used
+# only for local development builds.
+#
+# Each entry is pinned to its matching build target (goos/goarch/goarm) so
+# goreleaser puts the correct binary in the build context for that platform.
 dockers:
 - image_templates:
   - "ghcr.io/gchiesa/drl:{{ .Tag }}-amd64"
   - "ghcr.io/gchiesa/drl:latest-amd64"
-  dockerfile: Dockerfile
+  dockerfile: Dockerfile.goreleaser
   use: buildx
+  goos: linux
+  goarch: amd64
+  goamd64: v3
   build_flag_templates:
   - "--platform=linux/amd64"
 
 - image_templates:
   - "ghcr.io/gchiesa/drl:{{ .Tag }}-arm64"
   - "ghcr.io/gchiesa/drl:latest-arm64"
-  dockerfile: Dockerfile
+  dockerfile: Dockerfile.goreleaser
   use: buildx
+  goos: linux
+  goarch: arm64
   build_flag_templates:
   - "--platform=linux/arm64"
 
 - image_templates:
   - "ghcr.io/gchiesa/drl:{{ .Tag }}-armv7"
   - "ghcr.io/gchiesa/drl:latest-armv7"
-  dockerfile: Dockerfile
+  dockerfile: Dockerfile.goreleaser
   use: buildx
+  goos: linux
+  goarch: arm
+  goarm: "7"
   build_flag_templates:
   - "--platform=linux/arm/v7"
 
@@ -90,7 +104,7 @@ release:
   prerelease: auto
 
 snapshot:
-  name_template: "{{ .Tag }}-next"
+  version_template: "{{ .Tag }}-next"
 
 changelog:
   disable: true

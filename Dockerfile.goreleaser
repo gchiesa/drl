@@ -1,0 +1,8 @@
+FROM alpine:3.19
+
+RUN apk add --no-cache ca-certificates wget curl
+
+# goreleaser copies the pre-built binary into the build context root as "drl"
+COPY drl /usr/local/bin/drl
+
+ENTRYPOINT ["/usr/local/bin/drl"]
