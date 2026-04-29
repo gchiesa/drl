@@ -168,7 +168,7 @@
                 <p>
                     Retrieve your access token out-of-band using Digest authentication, then paste it below:
                 </p>
-                <code class="token-hint">curl --digest -u "admin:$DRL_PRIVATE_API_KEY" \<br>&nbsp;&nbsp;http://&lt;node&gt;:8082/drl/ui/get-token</code>
+                <code class="token-hint">curl --digest -u "admin:$DRL_PRIVATE_API_KEY" http://&lt;node&gt;:8082/drl/ui/get-token</code>
                 <form class="token-form" on:submit|preventDefault={handleTokenSubmit}>
                     <input
                         class="token-input"
@@ -327,7 +327,7 @@
         border: 1px solid var(--border);
         border-radius: 12px;
         padding: 32px;
-        max-width: 360px;
+        max-width: 640px;
         width: 100%;
         text-align: center;
         display: flex;

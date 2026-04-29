@@ -80,8 +80,8 @@ func (m *uiAuthManager) ServerPublicKeyBase64() string {
 	return base64.StdEncoding.EncodeToString(m.serverPrivKey.PublicKey().Bytes())
 }
 
-// GenerateBootstrapToken produces a short-lived, HMAC-signed token that is embedded
-// in the SPA HTML at serve time.
+// GenerateBootstrapToken produces a short-lived, HMAC-signed token that is used for authenticating the Single Page
+// Application
 //
 // Token format: base64url(nonce:expiry_unix) "." hex(HMAC-SHA256(payload, signingKey))
 func (m *uiAuthManager) GenerateBootstrapToken() string {
