@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.0.1](https://github.com/gchiesa/drl/compare/v1.0.0...v1.0.1) (2026-04-29)
+
+
+### Other
+
+* create FUNDING.yml ([130cecd](https://github.com/gchiesa/drl/commit/130cecd4450d973bac6d21ec7f503d6f7de3ebec))
+* update FUNDING.yml file ([706ea22](https://github.com/gchiesa/drl/commit/706ea2243f00f6a513ca203f3595be71c516a769))
+
 ## 1.0.0 (2026-04-29)
 
 
