@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.1](https://github.com/gchiesa/drl/compare/v0.1.0...v0.1.1) (2026-04-29)
+
+
+### Bug Fixes
+
+* wrong k8s lookup mode ([71b9bc8](https://github.com/gchiesa/drl/commit/71b9bc8f44f71e81a7d6fb67896585a270af0fff))
+
 ## 0.1.0 (2026-04-29)
 
 
