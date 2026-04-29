@@ -30,6 +30,7 @@ jobs:
       id: release
       with:
         command: manifest
+        release-type: go
         token: ${{ secrets.GITHUB_TOKEN }}
         default-branch: main
 
@@ -73,8 +74,7 @@ jobs:
 
     # Set up QEMU so buildx can cross-compile Docker images for arm64/arm.
     - name: Set up QEMU
-      # docker/setup-qemu-action v3
-      uses: docker/setup-qemu-action@29109295f81e9208d7d86ff9c45d9e7c10a59619
+      uses: docker/setup-qemu-action@v3
 
     - name: Set up Docker Buildx
       # docker/setup-buildx-action v3
