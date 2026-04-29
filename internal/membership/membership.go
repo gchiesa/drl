@@ -1,6 +1,7 @@
 package membership
 
 import (
+	"context"
 	"fmt"
 	"log/slog"
 	"net"
@@ -212,19 +213,61 @@ func (c *Cluster) markReady() {
 	}
 }
 
-// discoverPeers resolves the discovery service name to get peer IPs
+// privateIPv4Nets are the RFC 1918 ranges plus link-local. Pod IPs in any
+// Kubernetes CNI will always fall inside one of these; public addresses
+// (e.g. AWS Global Accelerator) never will.
+var privateIPv4Nets = func() []*net.IPNet {
+	var nets []*net.IPNet
+	for _, cidr := range []string{
+		"10.0.0.0/8",
+		"172.16.0.0/12",
+		"192.168.0.0/16",
+		"169.254.0.0/16",
+	} {
+		_, n, _ := net.ParseCIDR(cidr)
+		nets = append(nets, n)
+	}
+	return nets
+}()
+
+// discoverPeers resolves the discovery service name to get peer IPs.
+//
+// net.LookupIP is intentionally avoided: with CGO_ENABLED=0 the pure-Go
+// resolver does not always apply /etc/resolv.conf search domains and ndots
+// in the same order as the system libc resolver, which can cause the name to
+// be resolved by an upstream public DNS server instead of the cluster DNS,
+// returning unexpected public IPs.
+//
+// Using net.DefaultResolver.LookupIPAddr with a context ensures the pure-Go
+// resolver path is taken with full resolv.conf semantics. Results are also
+// filtered to RFC 1918 private ranges so a misconfigured DNS can never inject
+// a public address into the peer list.
 func (c *Cluster) discoverPeers() ([]string, error) {
-	ips, err := net.LookupIP(c.config.Membership.ServiceName)
+	addrs, err := net.DefaultResolver.LookupIPAddr(context.Background(), c.config.Membership.ServiceName)
 	if err != nil {
 		return nil, fmt.Errorf("DNS lookup failed: %w", err)
 	}
 
 	var peers []string
-	for _, ip := range ips {
-		// Only use IPv4 addresses
-		if ip.To4() != nil {
-			peers = append(peers, ip.String())
+	for _, addr := range addrs {
+		ip := addr.IP.To4()
+		if ip == nil {
+			continue // skip IPv6
 		}
+		private := false
+		for _, n := range privateIPv4Nets {
+			if n.Contains(ip) {
+				private = true
+				break
+			}
+		}
+		if !private {
+			c.logger.Warn("discoverPeers: ignoring non-private IP returned by DNS",
+				slog.String("service", c.config.Membership.ServiceName),
+				slog.String("ip", ip.String()))
+			continue
+		}
+		peers = append(peers, ip.String())
 	}
 
 	return peers, nil

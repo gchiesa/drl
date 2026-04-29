@@ -109,16 +109,15 @@ data:
     }
 
     membership {
-        service-name "drl"
+        service-name "drl-headless.drl.svc.cluster.local"
         port 7946
         bind-addr "0.0.0.0"
-        join-addr "drl-headless.drl.svc.cluster.local"
         startup-delay "3s"
     }
 
     logging {
-        level "info"
-        format "json"
+        level "debug"
+        format "text"
     }
 
     internal-api {
