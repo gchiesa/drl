@@ -2297,7 +2297,235 @@ data-copied-label="Copied!"
 &lt;blockquote&gt;
 &lt;p&gt;Because the otter weigher assigns a fixed cost of 100 per entry while actual heap usage is higher,
 monitor process RSS in production and tune &lt;code&gt;*_max_size_mb&lt;/code&gt; to keep RSS within your pod/VM memory limit.&lt;/p&gt;
-&lt;/blockquote&gt;</description></item><item><title>Deployment Models</title><link>https://drl.gchiesa.dev/docs/deployments/</link><pubDate>Mon, 01 Jan 0001 00:00:00 +0000</pubDate><guid>https://drl.gchiesa.dev/docs/deployments/</guid><description>
+&lt;/blockquote&gt;</description></item><item><title>Control Plane UI</title><link>https://drl.gchiesa.dev/docs/ui/</link><pubDate>Mon, 01 Jan 0001 00:00:00 +0000</pubDate><guid>https://drl.gchiesa.dev/docs/ui/</guid><description>
+&lt;p&gt;DRL includes a built-in &lt;strong&gt;Control Plane UI&lt;/strong&gt;: a single-page web dashboard that gives you a live view of
+the entire cluster — blocked entities, rate-limit metrics, node health, and configuration — served
+directly from the DRL binary with no external dependencies.&lt;/p&gt;
+&lt;p&gt;&lt;img src="../assets/drl-ui-01.png" alt="DRL Control Plane UI — Cluster Overview" loading="lazy" /&gt;&lt;/p&gt;
+&lt;h2&gt;URL&lt;span class="hx:absolute hx:-mt-20" id="url"&gt;&lt;/span&gt;
+&lt;a href="#url" class="subheading-anchor" aria-label="Permalink for this section"&gt;&lt;/a&gt;&lt;/h2&gt;&lt;p&gt;The UI is served on the &lt;strong&gt;private API port&lt;/strong&gt; (&lt;code&gt;8082&lt;/code&gt; by default):&lt;/p&gt;
+&lt;div class="hextra-code-block hx:relative hx:mt-6 hx:first:mt-0 hx:group/code"&gt;
+&lt;div&gt;&lt;pre&gt;&lt;code&gt;http://&amp;lt;node-address&amp;gt;:8082/drl/ui/&lt;/code&gt;&lt;/pre&gt;&lt;/div&gt;&lt;div class="hextra-code-copy-btn-container hx:opacity-0 hx:transition hx:group-hover/code:opacity-100 hx:flex hx:gap-1 hx:absolute hx:m-[11px] hx:right-0 hx:top-0"&gt;
+&lt;button
+class="hextra-code-copy-btn hx:group/copybtn hx:cursor-pointer hx:transition-all hx:active:opacity-50 hx:bg-primary-700/5 hx:border hx:border-black/5 hx:text-gray-600 hx:hover:text-gray-900 hx:rounded-md hx:p-1.5 hx:dark:bg-primary-300/10 hx:dark:border-white/10 hx:dark:text-gray-400 hx:dark:hover:text-gray-50"
+title="Copy code"
+aria-label="Copy code"
+data-copied-label="Copied!"
+&gt;
+&lt;div class="hextra-copy-icon hx:group-[.copied]/copybtn:hidden hx:pointer-events-none hx:h-4 hx:w-4"&gt;&lt;/div&gt;
+&lt;div class="hextra-success-icon hx:hidden hx:group-[.copied]/copybtn:block hx:pointer-events-none hx:h-4 hx:w-4"&gt;&lt;/div&gt;
+&lt;/button&gt;
+&lt;/div&gt;
+&lt;/div&gt;
+&lt;p&gt;Every DRL node exposes its own instance of the dashboard. Once open, the SPA automatically queries
+peer nodes via the built-in proxy and aggregates their metrics, so you get a cluster-wide view
+regardless of which node you connect to.&lt;/p&gt;
+&lt;h2&gt;Authentication and encryption&lt;span class="hx:absolute hx:-mt-20" id="authentication-and-encryption"&gt;&lt;/span&gt;
+&lt;a href="#authentication-and-encryption" class="subheading-anchor" aria-label="Permalink for this section"&gt;&lt;/a&gt;&lt;/h2&gt;&lt;p&gt;Access to the UI follows a &lt;strong&gt;high-security, two-step flow&lt;/strong&gt;: the bootstrap token is never embedded
+in the HTML. An operator must retrieve it out-of-band using Digest authentication and paste it into
+the token modal that appears on first load.&lt;/p&gt;
+&lt;h3&gt;Retrieving the access token&lt;span class="hx:absolute hx:-mt-20" id="retrieving-the-access-token"&gt;&lt;/span&gt;
+&lt;a href="#retrieving-the-access-token" class="subheading-anchor" aria-label="Permalink for this section"&gt;&lt;/a&gt;&lt;/h3&gt;&lt;p&gt;Before opening the UI, obtain the bootstrap token using &lt;code&gt;curl&lt;/code&gt; with Digest credentials:&lt;/p&gt;
+&lt;div class="hextra-code-block hx:relative hx:mt-6 hx:first:mt-0 hx:group/code"&gt;
+&lt;div&gt;&lt;div class="highlight"&gt;&lt;pre tabindex="0" class="chroma"&gt;&lt;code class="language-bash" data-lang="bash"&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;curl --digest -u &lt;span class="s2"&gt;&amp;#34;admin:&lt;/span&gt;&lt;span class="nv"&gt;$DRL_PRIVATE_API_KEY&lt;/span&gt;&lt;span class="s2"&gt;&amp;#34;&lt;/span&gt; http://localhost:8082/drl/ui/get-token&lt;/span&gt;&lt;/span&gt;&lt;/code&gt;&lt;/pre&gt;&lt;/div&gt;&lt;/div&gt;&lt;div class="hextra-code-copy-btn-container hx:opacity-0 hx:transition hx:group-hover/code:opacity-100 hx:flex hx:gap-1 hx:absolute hx:m-[11px] hx:right-0 hx:top-0"&gt;
+&lt;button
+class="hextra-code-copy-btn hx:group/copybtn hx:cursor-pointer hx:transition-all hx:active:opacity-50 hx:bg-primary-700/5 hx:border hx:border-black/5 hx:text-gray-600 hx:hover:text-gray-900 hx:rounded-md hx:p-1.5 hx:dark:bg-primary-300/10 hx:dark:border-white/10 hx:dark:text-gray-400 hx:dark:hover:text-gray-50"
+title="Copy code"
+aria-label="Copy code"
+data-copied-label="Copied!"
+&gt;
+&lt;div class="hextra-copy-icon hx:group-[.copied]/copybtn:hidden hx:pointer-events-none hx:h-4 hx:w-4"&gt;&lt;/div&gt;
+&lt;div class="hextra-success-icon hx:hidden hx:group-[.copied]/copybtn:block hx:pointer-events-none hx:h-4 hx:w-4"&gt;&lt;/div&gt;
+&lt;/button&gt;
+&lt;/div&gt;
+&lt;/div&gt;
+&lt;p&gt;The response is a JSON object:&lt;/p&gt;
+&lt;div class="hextra-code-block hx:relative hx:mt-6 hx:first:mt-0 hx:group/code"&gt;
+&lt;div&gt;&lt;div class="highlight"&gt;&lt;pre tabindex="0" class="chroma"&gt;&lt;code class="language-json" data-lang="json"&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;&lt;span class="p"&gt;{&lt;/span&gt;&lt;span class="nt"&gt;&amp;#34;bootstrap_token&amp;#34;&lt;/span&gt;&lt;span class="p"&gt;:&lt;/span&gt; &lt;span class="s2"&gt;&amp;#34;&amp;lt;short-lived-token&amp;gt;&amp;#34;&lt;/span&gt;&lt;span class="p"&gt;}&lt;/span&gt;&lt;/span&gt;&lt;/span&gt;&lt;/code&gt;&lt;/pre&gt;&lt;/div&gt;&lt;/div&gt;&lt;div class="hextra-code-copy-btn-container hx:opacity-0 hx:transition hx:group-hover/code:opacity-100 hx:flex hx:gap-1 hx:absolute hx:m-[11px] hx:right-0 hx:top-0"&gt;
+&lt;button
+class="hextra-code-copy-btn hx:group/copybtn hx:cursor-pointer hx:transition-all hx:active:opacity-50 hx:bg-primary-700/5 hx:border hx:border-black/5 hx:text-gray-600 hx:hover:text-gray-900 hx:rounded-md hx:p-1.5 hx:dark:bg-primary-300/10 hx:dark:border-white/10 hx:dark:text-gray-400 hx:dark:hover:text-gray-50"
+title="Copy code"
+aria-label="Copy code"
+data-copied-label="Copied!"
+&gt;
+&lt;div class="hextra-copy-icon hx:group-[.copied]/copybtn:hidden hx:pointer-events-none hx:h-4 hx:w-4"&gt;&lt;/div&gt;
+&lt;div class="hextra-success-icon hx:hidden hx:group-[.copied]/copybtn:block hx:pointer-events-none hx:h-4 hx:w-4"&gt;&lt;/div&gt;
+&lt;/button&gt;
+&lt;/div&gt;
+&lt;/div&gt;
+&lt;p&gt;The token is valid for &lt;strong&gt;10 minutes&lt;/strong&gt; and can only be used once (for the ECDH key exchange).
+Retrieve a fresh one each time you open the dashboard.&lt;/p&gt;
+&lt;h3&gt;How it works&lt;span class="hx:absolute hx:-mt-20" id="how-it-works"&gt;&lt;/span&gt;
+&lt;a href="#how-it-works" class="subheading-anchor" aria-label="Permalink for this section"&gt;&lt;/a&gt;&lt;/h3&gt;&lt;pre class="mermaid"&gt;
+sequenceDiagram
+participant O as Operator (curl)
+participant B as Browser (SPA)
+participant S as DRL node
+O-&gt;&gt;S: GET /drl/ui/get-token (Digest auth)
+S--&gt;&gt;O: {"bootstrap_token": "..."}
+note over O: Copy token to clipboard
+B-&gt;&gt;S: GET /drl/ui/ → HTML with &amp;lt;meta name="drl-bootstrap"&amp;gt; (no token)
+note over B: Token modal appears — user pastes token
+B-&gt;&gt;B: Generate ephemeral ECDH P-256 key pair
+B-&gt;&gt;S: POST /drl/ui/exchange {clientPublicKey, bootstrapToken}
+S-&gt;&gt;S: Validate bootstrap token (HMAC-SHA256, 10 min TTL)
+S-&gt;&gt;S: Derive shared secret via ECDH
+S-&gt;&gt;S: Create session; encrypt session token with AES-256-GCM
+S--&gt;&gt;B: {serverPublicKey, iv, encryptedSession}
+B-&gt;&gt;B: Derive same shared secret via ECDH
+B-&gt;&gt;B: Decrypt session token with AES-256-GCM
+note over B: Session established — token held in memory only
+B-&gt;&gt;S: GET /drl/ui/api/metrics (Authorization: DRL-Session &amp;lt;token&amp;gt;)
+S--&gt;&gt;B: JSON metrics snapshot
+&lt;/pre&gt;
+&lt;h3&gt;Step by step&lt;span class="hx:absolute hx:-mt-20" id="step-by-step"&gt;&lt;/span&gt;
+&lt;a href="#step-by-step" class="subheading-anchor" aria-label="Permalink for this section"&gt;&lt;/a&gt;&lt;/h3&gt;&lt;ol&gt;
+&lt;li&gt;
+&lt;p&gt;&lt;strong&gt;Token retrieval&lt;/strong&gt; — the operator calls &lt;code&gt;GET /drl/ui/get-token&lt;/code&gt; with HTTP Digest credentials.
+The server generates a short-lived bootstrap token (HMAC-SHA256, 10-minute TTL) and returns it
+as JSON. The token is never embedded in the HTML, so it cannot be intercepted by passive
+network observers or cached by proxies.&lt;/p&gt;
+&lt;/li&gt;
+&lt;li&gt;
+&lt;p&gt;&lt;strong&gt;Token modal&lt;/strong&gt; — when the browser opens the UI, a non-dismissible modal prompts the operator
+to paste the token retrieved in step 1.&lt;/p&gt;
+&lt;/li&gt;
+&lt;li&gt;
+&lt;p&gt;&lt;strong&gt;ECDH key exchange&lt;/strong&gt; — the SPA generates an ephemeral &lt;strong&gt;ECDH P-256&lt;/strong&gt; key pair in the browser
+via the Web Crypto API. It posts the public key along with the bootstrap token to
+&lt;code&gt;POST /drl/ui/exchange&lt;/code&gt;.&lt;/p&gt;
+&lt;/li&gt;
+&lt;li&gt;
+&lt;p&gt;&lt;strong&gt;Shared secret derivation&lt;/strong&gt; — both sides independently derive the same 256-bit shared secret
+using Diffie-Hellman. Neither side ever transmits the secret itself.&lt;/p&gt;
+&lt;/li&gt;
+&lt;li&gt;
+&lt;p&gt;&lt;strong&gt;Session token delivery&lt;/strong&gt; — the server creates a signed session token and encrypts it with
+&lt;strong&gt;AES-256-GCM&lt;/strong&gt; using the shared secret before sending it back. Only the browser, which holds
+the private key, can derive the decryption key.&lt;/p&gt;
+&lt;/li&gt;
+&lt;li&gt;
+&lt;p&gt;&lt;strong&gt;Authenticated requests&lt;/strong&gt; — the SPA decrypts the session token and uses it as
+&lt;code&gt;Authorization: DRL-Session &amp;lt;token&amp;gt;&lt;/code&gt; on all subsequent API calls. The token is held in
+JavaScript memory only — it is never written to &lt;code&gt;localStorage&lt;/code&gt; or cookies, so it disappears
+when the tab is closed, requiring a fresh token on the next visit.&lt;/p&gt;
+&lt;/li&gt;
+&lt;li&gt;
+&lt;p&gt;&lt;strong&gt;Cross-node validation&lt;/strong&gt; — because all DRL nodes share the same API key, they derive the
+same HMAC signing key. A session token issued by any node is cryptographically valid on all
+peers, which is what makes the proxy feature work.&lt;/p&gt;
+&lt;/li&gt;
+&lt;/ol&gt;
+&lt;h3&gt;Dual-auth for CLI access&lt;span class="hx:absolute hx:-mt-20" id="dual-auth-for-cli-access"&gt;&lt;/span&gt;
+&lt;a href="#dual-auth-for-cli-access" class="subheading-anchor" aria-label="Permalink for this section"&gt;&lt;/a&gt;&lt;/h3&gt;&lt;p&gt;The same API endpoints also accept &lt;strong&gt;HTTP Digest authentication&lt;/strong&gt; (SHA-256), so &lt;code&gt;curl&lt;/code&gt; and automated
+scripts continue to work without changes alongside browser sessions.&lt;/p&gt;
+&lt;h2&gt;Cross-node metrics aggregation&lt;span class="hx:absolute hx:-mt-20" id="cross-node-metrics-aggregation"&gt;&lt;/span&gt;
+&lt;a href="#cross-node-metrics-aggregation" class="subheading-anchor" aria-label="Permalink for this section"&gt;&lt;/a&gt;&lt;/h2&gt;&lt;p&gt;The UI connects to a single node but shows &lt;strong&gt;aggregated metrics across the whole cluster&lt;/strong&gt;.&lt;/p&gt;
+&lt;p&gt;&lt;img src="../assets/drl-ui-02.png" alt="DRL Control Plane UI — Metrics aggregation" loading="lazy" /&gt;&lt;/p&gt;
+&lt;p&gt;When the SPA loads the cluster status it receives the list of peer API addresses. It then issues
+parallel requests through the &lt;strong&gt;built-in proxy&lt;/strong&gt;:&lt;/p&gt;
+&lt;div class="hextra-code-block hx:relative hx:mt-6 hx:first:mt-0 hx:group/code"&gt;
+&lt;div&gt;&lt;pre&gt;&lt;code&gt;GET /drl/ui/proxy/&amp;lt;peer-host:port&amp;gt;/drl/ui/api/metrics&lt;/code&gt;&lt;/pre&gt;&lt;/div&gt;&lt;div class="hextra-code-copy-btn-container hx:opacity-0 hx:transition hx:group-hover/code:opacity-100 hx:flex hx:gap-1 hx:absolute hx:m-[11px] hx:right-0 hx:top-0"&gt;
+&lt;button
+class="hextra-code-copy-btn hx:group/copybtn hx:cursor-pointer hx:transition-all hx:active:opacity-50 hx:bg-primary-700/5 hx:border hx:border-black/5 hx:text-gray-600 hx:hover:text-gray-900 hx:rounded-md hx:p-1.5 hx:dark:bg-primary-300/10 hx:dark:border-white/10 hx:dark:text-gray-400 hx:dark:hover:text-gray-50"
+title="Copy code"
+aria-label="Copy code"
+data-copied-label="Copied!"
+&gt;
+&lt;div class="hextra-copy-icon hx:group-[.copied]/copybtn:hidden hx:pointer-events-none hx:h-4 hx:w-4"&gt;&lt;/div&gt;
+&lt;div class="hextra-success-icon hx:hidden hx:group-[.copied]/copybtn:block hx:pointer-events-none hx:h-4 hx:w-4"&gt;&lt;/div&gt;
+&lt;/button&gt;
+&lt;/div&gt;
+&lt;/div&gt;
+&lt;p&gt;The receiving node forwards the request to the target peer, attaching the caller&amp;rsquo;s session token.
+Because session tokens are cluster-wide (see cross-node validation above), the peer accepts the
+request and returns its local metrics. The SPA sums all values before rendering charts and KPI
+cards, and labels every widget with &amp;ldquo;all nodes&amp;rdquo; to make aggregation explicit.&lt;/p&gt;
+&lt;h2&gt;Accessing the UI with Docker Compose&lt;span class="hx:absolute hx:-mt-20" id="accessing-the-ui-with-docker-compose"&gt;&lt;/span&gt;
+&lt;a href="#accessing-the-ui-with-docker-compose" class="subheading-anchor" aria-label="Permalink for this section"&gt;&lt;/a&gt;&lt;/h2&gt;&lt;p&gt;The Docker Compose deployment does not publish the private API port (&lt;code&gt;8082&lt;/code&gt;) to the host by default.
+Use &lt;code&gt;socat&lt;/code&gt; to forward it:&lt;/p&gt;
+&lt;div class="hextra-code-block hx:relative hx:mt-6 hx:first:mt-0 hx:group/code"&gt;
+&lt;div&gt;&lt;div class="highlight"&gt;&lt;pre tabindex="0" class="chroma"&gt;&lt;code class="language-bash" data-lang="bash"&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;docker run --rm -p 8082:8082 &lt;span class="se"&gt;\
+&lt;/span&gt;&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt; --network &lt;span class="k"&gt;$(&lt;/span&gt;docker network ls -qf &lt;span class="s2"&gt;&amp;#34;name=docker-compose_drl-network&amp;#34;&lt;/span&gt;&lt;span class="k"&gt;)&lt;/span&gt; &lt;span class="se"&gt;\
+&lt;/span&gt;&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt; alpine/socat &lt;span class="se"&gt;\
+&lt;/span&gt;&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt; TCP-LISTEN:8082,fork TCP:docker-compose-drl-1:8082&lt;/span&gt;&lt;/span&gt;&lt;/code&gt;&lt;/pre&gt;&lt;/div&gt;&lt;/div&gt;&lt;div class="hextra-code-copy-btn-container hx:opacity-0 hx:transition hx:group-hover/code:opacity-100 hx:flex hx:gap-1 hx:absolute hx:m-[11px] hx:right-0 hx:top-0"&gt;
+&lt;button
+class="hextra-code-copy-btn hx:group/copybtn hx:cursor-pointer hx:transition-all hx:active:opacity-50 hx:bg-primary-700/5 hx:border hx:border-black/5 hx:text-gray-600 hx:hover:text-gray-900 hx:rounded-md hx:p-1.5 hx:dark:bg-primary-300/10 hx:dark:border-white/10 hx:dark:text-gray-400 hx:dark:hover:text-gray-50"
+title="Copy code"
+aria-label="Copy code"
+data-copied-label="Copied!"
+&gt;
+&lt;div class="hextra-copy-icon hx:group-[.copied]/copybtn:hidden hx:pointer-events-none hx:h-4 hx:w-4"&gt;&lt;/div&gt;
+&lt;div class="hextra-success-icon hx:hidden hx:group-[.copied]/copybtn:block hx:pointer-events-none hx:h-4 hx:w-4"&gt;&lt;/div&gt;
+&lt;/button&gt;
+&lt;/div&gt;
+&lt;/div&gt;
+&lt;p&gt;This creates a tunnel from &lt;code&gt;localhost:8082&lt;/code&gt; into the DRL cluster network and forwards to the first
+DRL replica (&lt;code&gt;docker-compose-drl-1&lt;/code&gt;). Then open:&lt;/p&gt;
+&lt;div class="hextra-code-block hx:relative hx:mt-6 hx:first:mt-0 hx:group/code"&gt;
+&lt;div&gt;&lt;pre&gt;&lt;code&gt;http://localhost:8082/drl/ui/&lt;/code&gt;&lt;/pre&gt;&lt;/div&gt;&lt;div class="hextra-code-copy-btn-container hx:opacity-0 hx:transition hx:group-hover/code:opacity-100 hx:flex hx:gap-1 hx:absolute hx:m-[11px] hx:right-0 hx:top-0"&gt;
+&lt;button
+class="hextra-code-copy-btn hx:group/copybtn hx:cursor-pointer hx:transition-all hx:active:opacity-50 hx:bg-primary-700/5 hx:border hx:border-black/5 hx:text-gray-600 hx:hover:text-gray-900 hx:rounded-md hx:p-1.5 hx:dark:bg-primary-300/10 hx:dark:border-white/10 hx:dark:text-gray-400 hx:dark:hover:text-gray-50"
+title="Copy code"
+aria-label="Copy code"
+data-copied-label="Copied!"
+&gt;
+&lt;div class="hextra-copy-icon hx:group-[.copied]/copybtn:hidden hx:pointer-events-none hx:h-4 hx:w-4"&gt;&lt;/div&gt;
+&lt;div class="hextra-success-icon hx:hidden hx:group-[.copied]/copybtn:block hx:pointer-events-none hx:h-4 hx:w-4"&gt;&lt;/div&gt;
+&lt;/button&gt;
+&lt;/div&gt;
+&lt;/div&gt;
+&lt;p&gt;The dashboard will automatically discover and aggregate metrics from all other replicas in the cluster
+via the proxy mechanism — you get a full cluster view even though you are connected to a single node.&lt;/p&gt;
+&lt;blockquote&gt;
+&lt;p&gt;&lt;strong&gt;Tip&lt;/strong&gt; — you can tunnel to any replica, not just the first one. All nodes expose the full UI and
+proxy to their peers. Replace &lt;code&gt;docker-compose-drl-1&lt;/code&gt; with &lt;code&gt;docker-compose-drl-2&lt;/code&gt; etc. to connect
+to a different node.&lt;/p&gt;
+&lt;/blockquote&gt;
+&lt;h3&gt;Generating traffic to visualise&lt;span class="hx:absolute hx:-mt-20" id="generating-traffic-to-visualise"&gt;&lt;/span&gt;
+&lt;a href="#generating-traffic-to-visualise" class="subheading-anchor" aria-label="Permalink for this section"&gt;&lt;/a&gt;&lt;/h3&gt;&lt;p&gt;The Docker Compose stack publishes &lt;strong&gt;Envoy&amp;rsquo;s ingress port&lt;/strong&gt; (&lt;code&gt;10000&lt;/code&gt;) on the host. You can send
+requests directly from your browser or with &lt;code&gt;curl&lt;/code&gt; to watch the rate-limiter in action:&lt;/p&gt;
+&lt;div class="hextra-code-block hx:relative hx:mt-6 hx:first:mt-0 hx:group/code"&gt;
+&lt;div&gt;&lt;pre&gt;&lt;code&gt;http://localhost:10000/anything&lt;/code&gt;&lt;/pre&gt;&lt;/div&gt;&lt;div class="hextra-code-copy-btn-container hx:opacity-0 hx:transition hx:group-hover/code:opacity-100 hx:flex hx:gap-1 hx:absolute hx:m-[11px] hx:right-0 hx:top-0"&gt;
+&lt;button
+class="hextra-code-copy-btn hx:group/copybtn hx:cursor-pointer hx:transition-all hx:active:opacity-50 hx:bg-primary-700/5 hx:border hx:border-black/5 hx:text-gray-600 hx:hover:text-gray-900 hx:rounded-md hx:p-1.5 hx:dark:bg-primary-300/10 hx:dark:border-white/10 hx:dark:text-gray-400 hx:dark:hover:text-gray-50"
+title="Copy code"
+aria-label="Copy code"
+data-copied-label="Copied!"
+&gt;
+&lt;div class="hextra-copy-icon hx:group-[.copied]/copybtn:hidden hx:pointer-events-none hx:h-4 hx:w-4"&gt;&lt;/div&gt;
+&lt;div class="hextra-success-icon hx:hidden hx:group-[.copied]/copybtn:block hx:pointer-events-none hx:h-4 hx:w-4"&gt;&lt;/div&gt;
+&lt;/button&gt;
+&lt;/div&gt;
+&lt;/div&gt;
+&lt;p&gt;Reload repeatedly (or use a tool like &lt;code&gt;k6&lt;/code&gt; or &lt;code&gt;hey&lt;/code&gt;) to ramp up traffic and watch the Blocked
+Entities counter climb and the rate-limit charts update in the dashboard.&lt;/p&gt;
+&lt;h2&gt;Dashboard sections&lt;span class="hx:absolute hx:-mt-20" id="dashboard-sections"&gt;&lt;/span&gt;
+&lt;a href="#dashboard-sections" class="subheading-anchor" aria-label="Permalink for this section"&gt;&lt;/a&gt;&lt;/h2&gt;&lt;table&gt;
+&lt;thead&gt;
+&lt;tr&gt;
+&lt;th&gt;Section&lt;/th&gt;
+&lt;th&gt;Description&lt;/th&gt;
+&lt;/tr&gt;
+&lt;/thead&gt;
+&lt;tbody&gt;
+&lt;tr&gt;
+&lt;td&gt;&lt;strong&gt;Cluster Overview&lt;/strong&gt;&lt;/td&gt;
+&lt;td&gt;KPI cards (peers, blocked entities, tracked entities, uptime), real-time line charts for gRPC checks and rate-limit blocks, sorted peer list with per-node status indicators, and a searchable/filterable blocked-entities table. All numeric widgets show the sum across all cluster nodes.&lt;/td&gt;
+&lt;/tr&gt;
+&lt;tr&gt;
+&lt;td&gt;&lt;strong&gt;Configuration&lt;/strong&gt;&lt;/td&gt;
+&lt;td&gt;Key-value view of the active accounting and membership configuration, followed by a flat, filterable table of every configured rate-limit rule.&lt;/td&gt;
+&lt;/tr&gt;
+&lt;/tbody&gt;
+&lt;/table&gt;
+&lt;h2&gt;Auto-refresh&lt;span class="hx:absolute hx:-mt-20" id="auto-refresh"&gt;&lt;/span&gt;
+&lt;a href="#auto-refresh" class="subheading-anchor" aria-label="Permalink for this section"&gt;&lt;/a&gt;&lt;/h2&gt;&lt;p&gt;The dashboard refreshes automatically. The default interval is &lt;strong&gt;30 seconds&lt;/strong&gt;; the header toolbar
+offers a selector to switch to 1, 2, 5, 10, or 15 seconds for more responsive monitoring during
+active incidents.&lt;/p&gt;
+&lt;h2&gt;Light / dark mode&lt;span class="hx:absolute hx:-mt-20" id="light--dark-mode"&gt;&lt;/span&gt;
+&lt;a href="#light--dark-mode" class="subheading-anchor" aria-label="Permalink for this section"&gt;&lt;/a&gt;&lt;/h2&gt;&lt;p&gt;A theme toggle in the header switches between dark (default) and light mode. The preference is
+persisted in &lt;code&gt;localStorage&lt;/code&gt;.&lt;/p&gt;</description></item><item><title>Deployment Models</title><link>https://drl.gchiesa.dev/docs/deployments/</link><pubDate>Mon, 01 Jan 0001 00:00:00 +0000</pubDate><guid>https://drl.gchiesa.dev/docs/deployments/</guid><description>
 &lt;p&gt;DRL ships with five deployment configurations, each targeting a different infrastructure model. All
 flavours configure the same core components — an echo-server workload, an Envoy reverse proxy, and
 one or more DRL instances — but differ in how Envoy reaches DRL and how DRL nodes form a cluster.&lt;/p&gt;
