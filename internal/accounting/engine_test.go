@@ -271,14 +271,16 @@ func TestEngine_PendingUpdates(t *testing.T) {
 	ac := testEngineAccountingCache(t)
 	defer ac.Close()
 
-	// Engine without flusher
+	// Engine with empty flusher — PendingUpdates should be 0
+	f0 := NewFlusher(testFlusherConfig(t, ac, nil))
 	e := NewEngine(EngineConfig{
 		Accounting: ac,
+		Flusher:    f0,
 		Logger:     testLogger(),
 	})
 	assert.Equal(t, int64(0), e.PendingUpdates())
 
-	// Engine with flusher
+	// Engine with flusher that has 1 pending entry
 	f := NewFlusher(testFlusherConfig(t, ac, nil))
 	f.Enqueue("10.0.0.1", 0xdead, 1)
 

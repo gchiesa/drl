@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"fmt"
 	"log/slog"
 	"os"
 
@@ -10,12 +11,15 @@ import (
 
 // newMetrics initializes and starts a metrics server using the provided configuration and logger.
 // It returns a pointer to the initialized Metrics instance.
-func newMetrics(cfg *config.Config, log *slog.Logger) *metrics.Metrics {
+func newMetrics(cfg *config.Config, log *slog.Logger) (*metrics.Metrics, error) {
 	ms := metrics.NewMetrics()
+	if log == nil {
+		return nil, fmt.Errorf("logger must be provided")
+	}
 	if err := ms.StartServer(cfg.MetricsPort()); err != nil {
 		log.Error("failed to start metrics server", "error", err)
 		os.Exit(1)
 	}
 	log.Info("metrics server started", "port", cfg.MetricsPort())
-	return ms
+	return ms, nil
 }

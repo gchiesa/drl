@@ -57,9 +57,11 @@ func (m *mockEngine) getCalls() []processCall {
 
 func testConfig() ServerConfig {
 	return ServerConfig{
-		Address: ":0",
-		Metrics: metrics.NewMetrics(),
-		Logger:  slog.New(slog.NewTextHandler(io.Discard, nil)),
+		Address:   ":0",
+		Metrics:   metrics.NewMetrics(),
+		Logger:    slog.New(slog.NewTextHandler(io.Discard, nil)),
+		Engine:    &mockEngine{},
+		Blocklist: &mockBlocklist{blocked: make(map[string]bool)},
 	}
 }
 

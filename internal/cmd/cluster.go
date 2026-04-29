@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"fmt"
 	"log/slog"
 	"os"
 	"time"
@@ -12,11 +13,21 @@ import (
 )
 
 // newCluster initializes and starts a cluster, sets configuration, state delegate, and handles node membership updates.
-func newCluster(cfg *config.Config, localIP string, cacheManager *cache.Manager, metricsManager *metrics.Metrics, log *slog.Logger) *membership.Cluster {
+func newCluster(cfg *config.Config, localIP string, cacheManager *cache.Manager, metricsManager *metrics.Metrics, log *slog.Logger) (*membership.Cluster, error) {
 	// clusterRef is captured by the NumNodesFunc closure below.
 	// It is assigned immediately after NewCluster returns, before any broadcast
 	// can be triggered, so no additional synchronization is required.
 	var clusterRef *membership.Cluster
+
+	if cacheManager == nil {
+		return nil, fmt.Errorf("cache must be provided")
+	}
+	if log == nil {
+		return nil, fmt.Errorf("logger must be provided")
+	}
+	if metricsManager == nil {
+		return nil, fmt.Errorf("metrics must be provided")
+	}
 
 	// Create state delegate for blocklist sync and accounting message handling
 	stateDelegate := membership.NewStateDelegate(membership.DelegateConfig{
@@ -56,5 +67,5 @@ func newCluster(cfg *config.Config, localIP string, cacheManager *cache.Manager,
 			log.Error("failed to join cluster", "error", err)
 		}
 	}()
-	return cluster
+	return cluster, nil
 }

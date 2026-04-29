@@ -170,9 +170,7 @@ func (e *Engine) Process(sourceIP, path string, headers map[string]string) {
 	if e.accounting.IsOwner(key) {
 		// Local increment and threshold check
 		newCount := e.accounting.Increment(key, 1)
-		if e.metrics != nil {
-			e.metrics.IncAccountingLocal()
-		}
+		e.metrics.IncAccountingLocal()
 		e.logger.Debug("local accounting increment",
 			"key", key,
 			"owner", ownerAddr,
@@ -190,18 +188,12 @@ func (e *Engine) Process(sourceIP, path string, headers map[string]string) {
 				"count", newCount,
 				"limit", rule.Limit,
 			)
-			if e.blocklist != nil {
-				e.blocklist.Block(key, decision.RetryAfter, &entity)
-			}
-			if e.broadcaster != nil {
-				_ = e.broadcaster.QueueBlockEvent(key, decision.RetryAfter, &entity)
-			}
-			if e.metrics != nil {
-				e.metrics.IncRateLimitBlock(rule.Name, "threshold_exceeded")
-			}
+			e.blocklist.Block(key, decision.RetryAfter, &entity)
+			_ = e.broadcaster.QueueBlockEvent(key, decision.RetryAfter, &entity)
+			e.metrics.IncRateLimitBlock(rule.Name, "threshold_exceeded")
 		}
 		// Token bucket metrics (TokensRemaining >= 0 only when algorithm is token-bucket)
-		if e.metrics != nil && decision.TokensRemaining >= 0 {
+		if decision.TokensRemaining >= 0 {
 			if decision.Blocked {
 				e.metrics.IncRateLimitBucketExhausted(rule.Name)
 			} else {
@@ -211,12 +203,8 @@ func (e *Engine) Process(sourceIP, path string, headers map[string]string) {
 		}
 	} else {
 		// Remote enqueue
-		if e.flusher != nil {
-			e.flusher.Enqueue(ownerAddr, entityHash, 1)
-		}
-		if e.metrics != nil {
-			e.metrics.IncAccountingRemote()
-		}
+		e.flusher.Enqueue(ownerAddr, entityHash, 1)
+		e.metrics.IncAccountingRemote()
 		e.logger.Debug("remote accounting enqueue",
 			"key", key,
 			"owner", ownerAddr,
@@ -243,9 +231,7 @@ func (e *Engine) Process(sourceIP, path string, headers map[string]string) {
 func (e *Engine) BulkLoad(sourceIP, path string, headers map[string]string, distributionEnabled bool) string {
 	_, _, entityHash, key, ok := e.resolveEntity(sourceIP, path, headers)
 	if !ok {
-		if e.metrics != nil {
-			e.metrics.IncAccountingBulkLoad(BulkLoadNoMatch)
-		}
+		e.metrics.IncAccountingBulkLoad(BulkLoadNoMatch)
 		return BulkLoadNoMatch
 	}
 
@@ -254,10 +240,8 @@ func (e *Engine) BulkLoad(sourceIP, path string, headers map[string]string, dist
 	ownerAddr := e.accounting.GetOwner(key)
 	if e.accounting.IsOwner(key) {
 		newCount := e.accounting.Increment(key, 1)
-		if e.metrics != nil {
-			e.metrics.IncAccountingLocal()
-			e.metrics.IncAccountingBulkLoad(BulkLoadAcceptedLocal)
-		}
+		e.metrics.IncAccountingLocal()
+		e.metrics.IncAccountingBulkLoad(BulkLoadAcceptedLocal)
 		e.logger.Debug("bulk load: local accounting increment",
 			"key", key,
 			"owner", ownerAddr,
@@ -279,30 +263,17 @@ func (e *Engine) BulkLoad(sourceIP, path string, headers map[string]string, dist
 			"source_ip", sourceIP,
 			"path", path,
 		)
-		if e.metrics != nil {
-			e.metrics.IncAccountingBulkLoad(BulkLoadDropped)
-		}
+		e.metrics.IncAccountingBulkLoad(BulkLoadDropped)
 		return BulkLoadDropped
 	}
 
 	if e.flusher == nil {
-		e.logger.Warn("bulk load: flusher unavailable, dropping non-owned entity",
-			"key", key,
-			"owner", ownerAddr,
-			"source_ip", sourceIP,
-			"path", path,
-		)
-		if e.metrics != nil {
-			e.metrics.IncAccountingBulkLoad(BulkLoadDropped)
-		}
+		e.metrics.IncAccountingBulkLoad(BulkLoadDropped)
 		return BulkLoadDropped
 	}
-
 	e.flusher.Enqueue(ownerAddr, entityHash, 1)
-	if e.metrics != nil {
-		e.metrics.IncAccountingRemote()
-		e.metrics.IncAccountingBulkLoad(BulkLoadAcceptedRemote)
-	}
+	e.metrics.IncAccountingRemote()
+	e.metrics.IncAccountingBulkLoad(BulkLoadAcceptedRemote)
 	e.logger.Debug("bulk load: remote accounting enqueue",
 		"key", key,
 		"owner", ownerAddr,
@@ -314,9 +285,6 @@ func (e *Engine) BulkLoad(sourceIP, path string, headers map[string]string, dist
 
 // PendingUpdates returns the number of batched updates waiting to be flushed.
 func (e *Engine) PendingUpdates() int64 {
-	if e.flusher == nil {
-		return 0
-	}
 	return e.flusher.PendingCount()
 }
 

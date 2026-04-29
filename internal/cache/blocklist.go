@@ -1,6 +1,7 @@
 package cache
 
 import (
+	"io"
 	"log/slog"
 	"time"
 
@@ -57,13 +58,37 @@ type BlocklistConfig struct {
 func NewBlocklistCache(cfg BlocklistConfig) (*BlocklistCache, error) {
 	maxCost := cfg.MaxSizeMB * 1024 * 1024 // Convert MB to bytes
 
+	logger := cfg.Logger
+	if logger == nil {
+		logger = slog.New(slog.NewTextHandler(io.Discard, nil))
+	}
+
+	noop := func() {}
+	noopCost := func(int64) {}
+	onHit := cfg.OnHit
+	if onHit == nil {
+		onHit = noop
+	}
+	onMiss := cfg.OnMiss
+	if onMiss == nil {
+		onMiss = noop
+	}
+	onEvict := cfg.OnEvict
+	if onEvict == nil {
+		onEvict = noop
+	}
+	onSetCost := cfg.OnSetCost
+	if onSetCost == nil {
+		onSetCost = noopCost
+	}
+
 	bc := &BlocklistCache{
-		logger:    cfg.Logger,
+		logger:    logger,
 		maxCost:   maxCost,
-		onHit:     cfg.OnHit,
-		onMiss:    cfg.OnMiss,
-		onEvict:   cfg.OnEvict,
-		onSetCost: cfg.OnSetCost,
+		onHit:     onHit,
+		onMiss:    onMiss,
+		onEvict:   onEvict,
+		onSetCost: onSetCost,
 	}
 
 	cache, err := otter.New[string, *blocklistEntryData](&otter.Options[string, *blocklistEntryData]{
@@ -80,8 +105,8 @@ func NewBlocklistCache(cfg BlocklistConfig) (*BlocklistCache, error) {
 			return ttl
 		}),
 		OnDeletion: func(e otter.DeletionEvent[string, *blocklistEntryData]) {
-			if e.WasEvicted() && cfg.OnEvict != nil {
-				cfg.OnEvict()
+			if e.WasEvicted() {
+				onEvict()
 			}
 		},
 	})
@@ -97,14 +122,10 @@ func NewBlocklistCache(cfg BlocklistConfig) (*BlocklistCache, error) {
 func (b *BlocklistCache) IsBlockedWithExpiration(key string) (expiresAt time.Time, found bool) {
 	data, found := b.cache.GetIfPresent(key)
 	if !found {
-		if b.onMiss != nil {
-			b.onMiss()
-		}
+		b.onMiss()
 		return expiresAt, false
 	}
-	if b.onHit != nil {
-		b.onHit()
-	}
+	b.onHit()
 	return data.expiresAt, true
 }
 
@@ -121,13 +142,11 @@ func (b *BlocklistCache) Block(key string, ttl time.Duration, entity *model.Enti
 	expiresAt := time.Now().Add(ttl)
 	b.cache.Set(key, &blocklistEntryData{expiresAt: expiresAt, entity: entity})
 
-	if b.logger != nil {
-		b.logger.Debug("entity blocked",
-			"key", key,
-			"ttl", ttl,
-			"expires_at", expiresAt,
-		)
-	}
+	b.logger.Debug("entity blocked",
+		"key", key,
+		"ttl", ttl,
+		"expires_at", expiresAt,
+	)
 }
 
 // Unblock removes a key from the blocklist
@@ -177,11 +196,9 @@ func (b *BlocklistCache) GetState() ([]byte, error) {
 		}
 	}
 
-	if b.logger != nil {
-		b.logger.Debug("serializing blocklist state",
-			"entry_count", len(entries),
-		)
-	}
+	b.logger.Debug("serializing blocklist state",
+		"entry_count", len(entries),
+	)
 
 	data, err := msgpack.Marshal(entries)
 	if err != nil {
@@ -232,12 +249,10 @@ func (b *BlocklistCache) MergeState(data []byte) error {
 		}
 	}
 
-	if b.logger != nil {
-		b.logger.Info("state sync complete",
-			"received_entries", len(entries),
-			"merged_entries", merged,
-		)
-	}
+	b.logger.Info("state sync complete",
+		"received_entries", len(entries),
+		"merged_entries", merged,
+	)
 
 	return nil
 }

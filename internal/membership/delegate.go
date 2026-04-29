@@ -3,6 +3,7 @@ package membership
 import (
 	"bytes"
 	"fmt"
+	"io"
 	"log/slog"
 	"sync"
 	"sync/atomic"
@@ -71,11 +72,21 @@ func NewStateDelegate(cfg DelegateConfig) *StateDelegate {
 		numNodes = func() int { return 1 }
 	}
 
+	logger := cfg.Logger
+	if logger == nil {
+		logger = slog.New(slog.NewTextHandler(io.Discard, nil))
+	}
+
+	m := cfg.Metrics
+	if m == nil {
+		m = metrics.NewMetrics()
+	}
+
 	d := &StateDelegate{
 		blocklist:    cfg.Blocklist,
 		accounting:   cfg.Accounting,
-		metrics:      cfg.Metrics,
-		logger:       cfg.Logger,
+		metrics:      m,
+		logger:       logger,
 		syncComplete: make(chan struct{}),
 		syncTimeout:  timeout,
 		broadcastQueue: &memberlist.TransmitLimitedQueue{
@@ -129,46 +140,38 @@ func (d *StateDelegate) NotifyMsg(buf []byte) {
 	case *drlproto.DrlMessage_Handover:
 		d.handleHandoverPayload(content.Handover)
 	default:
-		if d.logger != nil {
-			d.logger.Warn("received DrlMessage with unknown content type")
-		}
+		d.logger.Warn("received DrlMessage with unknown content type")
 	}
 }
 
 // handleAccountingMsg processes an incoming CounterBatch from a peer,
 // applying increments to the local accounting cache.
 func (d *StateDelegate) handleAccountingMsg(batch *drlproto.CounterBatch) {
-	if d.accounting == nil || batch == nil {
+	if batch == nil {
 		return
 	}
 
-	if d.metrics != nil {
-		d.metrics.IncAccountingMsgRecv()
-		d.metrics.IncMembershipBestEffort()
-	}
+	d.metrics.IncAccountingMsgRecv()
+	d.metrics.IncMembershipBestEffort()
 
 	for _, entry := range batch.Entries {
 		key := fmt.Sprintf("%016x", entry.EntityHash)
 		d.accounting.Increment(key, int64(entry.Hits))
 	}
 
-	if d.logger != nil {
-		d.logger.Debug("received counter batch",
-			"sender_id", batch.SenderId,
-			"entries", len(batch.Entries),
-		)
-	}
+	d.logger.Debug("received counter batch",
+		"sender_id", batch.SenderId,
+		"entries", len(batch.Entries),
+	)
 }
 
 // handleBlockEvent processes an incoming block event from a peer.
 func (d *StateDelegate) handleBlockEvent(evt *drlproto.BlockEvent) {
-	if d.blocklist == nil || evt == nil {
+	if evt == nil {
 		return
 	}
 
-	if d.metrics != nil {
-		d.metrics.IncMembershipReliable()
-	}
+	d.metrics.IncMembershipReliable()
 
 	ttl := time.Duration(evt.TtlNanos)
 	var entity *model.Entity
@@ -186,29 +189,23 @@ func (d *StateDelegate) handleBlockEvent(evt *drlproto.BlockEvent) {
 		d.blocklist.Block(evt.Key, ttl, nil)
 	}
 
-	if d.logger != nil {
-		d.logger.Debug("applied remote block event",
-			"key", evt.Key,
-			"ttl", ttl,
-			"has_entity", entity != nil,
-		)
-	}
+	d.logger.Debug("applied remote block event",
+		"key", evt.Key,
+		"ttl", ttl,
+		"has_entity", entity != nil,
+	)
 }
 
 // handleUnblockEvent processes an incoming unblock event from a peer.
 func (d *StateDelegate) handleUnblockEvent(evt *drlproto.UnblockEvent) {
-	if d.blocklist == nil || evt == nil {
+	if evt == nil {
 		return
 	}
 
-	if d.metrics != nil {
-		d.metrics.IncMembershipReliable()
-	}
+	d.metrics.IncMembershipReliable()
 
 	d.blocklist.Unblock(evt.Key)
-	if d.logger != nil {
-		d.logger.Debug("applied remote unblock event", "key", evt.Key)
-	}
+	d.logger.Debug("applied remote unblock event", "key", evt.Key)
 }
 
 // GetBroadcasts is called by memberlist when it wants messages to broadcast.
@@ -223,23 +220,18 @@ func (d *StateDelegate) LocalState(join bool) []byte {
 	if d.blocklist == nil {
 		return nil
 	}
-
 	state, err := d.blocklist.GetState()
 	if err != nil {
-		if d.logger != nil {
-			d.logger.Error("failed to get local state for sync",
-				"error", err,
-			)
-		}
+		d.logger.Error("failed to get local state for sync",
+			"error", err,
+		)
 		return nil
 	}
 
-	if d.logger != nil {
-		d.logger.Debug("providing local state for sync",
-			"is_join", join,
-			"state_size_bytes", len(state),
-		)
-	}
+	d.logger.Debug("providing local state for sync",
+		"is_join", join,
+		"state_size_bytes", len(state),
+	)
 
 	return state
 }
@@ -247,28 +239,20 @@ func (d *StateDelegate) LocalState(join bool) []byte {
 // MergeRemoteState is called when state is received from a peer during Push/Pull sync.
 // This is called on the joining node to receive the current cluster state.
 func (d *StateDelegate) MergeRemoteState(buf []byte, join bool) {
-	if d.blocklist == nil {
-		return
-	}
-
 	// Record sync start time if this is the first sync
 	d.syncOnce.Do(func() {
 		d.syncStartTime = time.Now()
 	})
 
-	if d.logger != nil {
-		d.logger.Info("state sync started",
-			"is_join", join,
-			"state_size_bytes", len(buf),
-		)
-	}
+	d.logger.Info("state sync started",
+		"is_join", join,
+		"state_size_bytes", len(buf),
+	)
 
 	if err := d.blocklist.MergeState(buf); err != nil {
-		if d.logger != nil {
-			d.logger.Error("failed to merge remote state",
-				"error", err,
-			)
-		}
+		d.logger.Error("failed to merge remote state",
+			"error", err,
+		)
 		return
 	}
 
@@ -276,17 +260,13 @@ func (d *StateDelegate) MergeRemoteState(buf []byte, join bool) {
 	d.markSyncComplete()
 
 	// Record sync duration
-	if d.metrics != nil {
-		duration := time.Since(d.syncStartTime).Seconds()
-		d.metrics.ObserveSyncDuration(duration)
-	}
+	duration := time.Since(d.syncStartTime).Seconds()
+	d.metrics.ObserveSyncDuration(duration)
 
-	if d.logger != nil {
-		entries := d.blocklist.Count()
-		d.logger.Info("state sync complete",
-			"received_entries", entries,
-		)
-	}
+	entries := d.blocklist.Count()
+	d.logger.Info("state sync complete",
+		"received_entries", entries,
+	)
 }
 
 // QueueBlockEvent builds a DrlMessage with a BlockEvent and sends it
@@ -345,12 +325,10 @@ func (d *StateDelegate) sendToAllPeersAsync(data []byte) {
 		}
 		go func(target string) {
 			if err := d.cluster.SendReliableMsg(target, data); err != nil {
-				if d.logger != nil {
-					d.logger.Warn("failed to send reliable msg to peer",
-						"addr", target,
-						"error", err,
-					)
-				}
+				d.logger.Warn("failed to send reliable msg to peer",
+					"addr", target,
+					"error", err,
+				)
 			}
 		}(addr)
 	}
@@ -364,9 +342,7 @@ func (d *StateDelegate) SetHandover(h *Handover) {
 // handleHandoverPayload delegates incoming handover payloads to the Handover handler.
 func (d *StateDelegate) handleHandoverPayload(payload *drlproto.HandoverPayload) {
 	if d.handover == nil {
-		if d.logger != nil {
-			d.logger.Warn("received handover payload but no handover handler configured")
-		}
+		d.logger.Warn("received handover payload but no handover handler configured")
 		return
 	}
 	d.handover.HandleIncoming(payload)
@@ -390,21 +366,17 @@ func (d *StateDelegate) WaitForSync() bool {
 		return true
 	}
 
-	if d.logger != nil {
-		d.logger.Info("waiting for state sync",
-			"timeout", d.syncTimeout,
-		)
-	}
+	d.logger.Info("waiting for state sync",
+		"timeout", d.syncTimeout,
+	)
 
 	select {
 	case <-d.syncComplete:
 		return true
 	case <-time.After(d.syncTimeout):
-		if d.logger != nil {
-			d.logger.Warn("state sync timeout reached, proceeding without full sync",
-				"timeout", d.syncTimeout,
-			)
-		}
+		d.logger.Warn("state sync timeout reached, proceeding without full sync",
+			"timeout", d.syncTimeout,
+		)
 		// Mark as ready anyway after timeout
 		d.ready.Store(true)
 		return false

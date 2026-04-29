@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"fmt"
 	"log/slog"
 	"os"
 	"strings"
@@ -43,10 +44,19 @@ func newAccountingEngine(
 	broadcaster accounting.BlockBroadcaster,
 	sender accounting.NodeSender,
 	log *slog.Logger,
-) *accounting.Engine {
+) (*accounting.Engine, error) {
 	var flusher *accounting.Flusher
 	var engine *accounting.Engine
 
+	if cacheManager == nil {
+		return nil, fmt.Errorf("cache manager must be provided")
+	}
+	if metricsManager == nil {
+		return nil, fmt.Errorf("metrics manager must be provided")
+	}
+	if log == nil {
+		return nil, fmt.Errorf("logger must be provided")
+	}
 	if len(cfg.Accounting.Rules) > 0 {
 		senderID := xxhash.Sum64String(localIP)
 
@@ -82,6 +92,8 @@ func newAccountingEngine(
 			"rules", len(cfg.Accounting.Rules),
 			"algorithm", cfg.Accounting.Settings.Algorithm,
 		)
+	} else {
+		return nil, fmt.Errorf("accounting rules must be provided")
 	}
-	return engine
+	return engine, nil
 }
