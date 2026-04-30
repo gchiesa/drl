@@ -27,11 +27,8 @@ builds:
   - arm
   goarm:
   - "7"
-  # Target x86-64 v3 (AVX2/BMI2, Intel Haswell / AMD Excavator, ~2013+).
-  # Universal in modern datacenters; enables better-vectorised codegen on
-  # the hot rate-limit path without requiring specialised CPU features.
   goamd64:
-  - v3
+  - v1
   ldflags:
   - -s -w -X main.version={{.Version}}
 
