@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.2](https://github.com/gchiesa/drl/compare/v0.1.1...v0.1.2) (2026-04-30)
+
+
+### Bug Fixes
+
+* amd64 build flag with better compatibility ([5597eba](https://github.com/gchiesa/drl/commit/5597eba1cf7143a9616528899b2b1a4a5619a7ee))
+
 ## [0.1.1](https://github.com/gchiesa/drl/compare/v0.1.0...v0.1.1) (2026-04-29)
 
 
