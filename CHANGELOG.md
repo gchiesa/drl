@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.3](https://github.com/gchiesa/drl/compare/v0.1.2...v0.1.3) (2026-04-30)
+
+
+### Bug Fixes
+
+* amd64 build flag with docker v1 support ([d720a59](https://github.com/gchiesa/drl/commit/d720a59bbe767e8d13bf460a2af2e0da08ddf3d4))
+
 ## [0.1.2](https://github.com/gchiesa/drl/compare/v0.1.1...v0.1.2) (2026-04-30)
 
 
