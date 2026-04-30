@@ -48,7 +48,7 @@ dockers:
   use: buildx
   goos: linux
   goarch: amd64
-  goamd64: v3
+  goamd64: v1
   build_flag_templates:
   - "--platform=linux/amd64"
 
