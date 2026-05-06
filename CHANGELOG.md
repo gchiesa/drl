@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.1.4](https://github.com/gchiesa/drl/compare/v0.1.3...v0.1.4) (2026-05-06)
+
+
+### Features
+
+* **mx017:** internal api update to support v1 prefix and swagger docs ([61c1829](https://github.com/gchiesa/drl/commit/61c1829a29f492a40d5e57d5e2d885541ff3c36d))
+* switched to go-fiber scalar for rendering ([5fb726f](https://github.com/gchiesa/drl/commit/5fb726f2eb1004602cfa2e6f7001a720875e5971))
+
+
+### Docs
+
+* fix typo ([e01445e](https://github.com/gchiesa/drl/commit/e01445edd1afc4c2b84253abd6e811e1df175f8d))
+
 ## [0.1.3](https://github.com/gchiesa/drl/compare/v0.1.2...v0.1.3) (2026-04-30)
 
 
