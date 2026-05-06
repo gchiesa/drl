@@ -14,8 +14,8 @@ const docTemplate = `{
             "url": "https://github.com/gchiesa/drl"
         },
         "license": {
-            "name": "Apache 2.0",
-            "url": "http://www.apache.org/licenses/LICENSE-2.0.html"
+            "name": "MIT",
+            "url": "https://opensource.org/licenses/MIT"
         },
         "version": "{{.Version}}"
     },
@@ -647,7 +647,7 @@ var SwaggerInfo = &swag.Spec{
 	BasePath:         "/v1",
 	Schemes:          []string{},
 	Title:            "DRL Private API",
-	Description:      "DRL Distributed Rate Limiter — Private Management API (port 8082).\nProvides cluster status, blocklist management, accounting statistics, and configuration access.",
+	Description:      "DRL Distributed Rate Limiter — Private Management API (port 8082).\nProvides cluster status, blocklist management, accounting statistics, and configuration access.\n\n## Authentication\n\nAll management endpoints (except OpenAPI docs) require authentication via one of:\n\n- **HTTP Digest Authentication (SHA-256)** — for CLI / curl access\n- **Bearer Token (ECDH session)** — for browser SPA encrypted communication\n\n## Digest Auth (CLI / Management access)\n\nThe SHA-256 Digest challenge-response flow never transmits the password on the wire:\n\n```\nClient → GET /v1/status\nServer → 401 WWW-Authenticate: Digest realm=\"DRL Internal API\", nonce=\"...\", algorithm=SHA-256\nClient computes:\n  A1 = SHA256(username:realm:password)\n  A2 = SHA256(method:uri)\n  response = SHA256(A1:nonce:nc:cnonce:qop:A2)\nClient → GET /v1/status Authorization: Digest username=\"...\", response=\"...\"\nServer → 200 OK\n```\n\nExample (curl):\n\n```bash\ncurl --digest -u \"admin:$DRL_PRIVATE_API_KEY\" http://localhost:8082/v1/status\n```\n\n## Bearer Token (ECDH Session — browser SPA)\n\nThe browser SPA performs an ECDH P-256 key exchange to establish an encrypted session:\n\n1. `GET /v1/ui/get-token` (Digest auth) → `{\"bootstrap_token\": \"...\"}`\n2. `POST /v1/ui/exchange` `{ clientPublicKey, bootstrapToken }` → encrypted session token\n3. All subsequent requests carry `Authorization: DRL-Session <session_token>`.\n   Responses are AES-256-GCM encrypted using the ECDH-derived shared key.\n",
 	InfoInstanceName: "swagger",
 	SwaggerTemplate:  docTemplate,
 	LeftDelim:        "{{",
