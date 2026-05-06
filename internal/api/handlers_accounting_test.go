@@ -9,6 +9,8 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/gchiesa/drl/internal/api/models"
 )
 
 // mockAccountingStats implements AccountingStatsProvider for testing.
@@ -35,7 +37,7 @@ func TestAccountingStats_Unauthorized(t *testing.T) {
 	})
 	require.NoError(t, err)
 
-	req := httptest.NewRequest("GET", "/accounting/stats", nil)
+	req := httptest.NewRequest("GET", "/v1/accounting/stats", nil)
 	resp, err := server.app.Test(req)
 	require.NoError(t, err)
 
@@ -60,14 +62,14 @@ func TestAccountingStats_WithProvider(t *testing.T) {
 	require.NoError(t, err)
 
 	// Step 1: Get challenge
-	req1 := httptest.NewRequest("GET", "/accounting/stats", nil)
+	req1 := httptest.NewRequest("GET", "/v1/accounting/stats", nil)
 	resp1, err := server.app.Test(req1)
 	require.NoError(t, err)
 	nonce := extractNonceFromHeader(resp1.Header.Get("WWW-Authenticate"))
 
 	// Step 2: Authenticated request
-	digestAuth := buildDigestAuthForTest(digestUsername, apiKey, nonce, "/accounting/stats", "GET")
-	req2 := httptest.NewRequest("GET", "/accounting/stats", nil)
+	digestAuth := buildDigestAuthForTest(digestUsername, apiKey, nonce, "/v1/accounting/stats", "GET")
+	req2 := httptest.NewRequest("GET", "/v1/accounting/stats", nil)
 	req2.Header.Set("Authorization", digestAuth)
 	resp2, err := server.app.Test(req2)
 	require.NoError(t, err)
@@ -75,7 +77,7 @@ func TestAccountingStats_WithProvider(t *testing.T) {
 	assert.Equal(t, 200, resp2.StatusCode)
 
 	body, _ := io.ReadAll(resp2.Body)
-	var result accountingStatsResponse
+	var result models.AccountingStatsResponse
 	err = json.Unmarshal(body, &result)
 	require.NoError(t, err)
 
@@ -101,14 +103,14 @@ func TestAccountingStats_NilProvider(t *testing.T) {
 	require.NoError(t, err)
 
 	// Step 1: Get challenge
-	req1 := httptest.NewRequest("GET", "/accounting/stats", nil)
+	req1 := httptest.NewRequest("GET", "/v1/accounting/stats", nil)
 	resp1, err := server.app.Test(req1)
 	require.NoError(t, err)
 	nonce := extractNonceFromHeader(resp1.Header.Get("WWW-Authenticate"))
 
 	// Step 2: Authenticated request
-	digestAuth := buildDigestAuthForTest(digestUsername, apiKey, nonce, "/accounting/stats", "GET")
-	req2 := httptest.NewRequest("GET", "/accounting/stats", nil)
+	digestAuth := buildDigestAuthForTest(digestUsername, apiKey, nonce, "/v1/accounting/stats", "GET")
+	req2 := httptest.NewRequest("GET", "/v1/accounting/stats", nil)
 	req2.Header.Set("Authorization", digestAuth)
 	resp2, err := server.app.Test(req2)
 	require.NoError(t, err)
@@ -116,7 +118,7 @@ func TestAccountingStats_NilProvider(t *testing.T) {
 	assert.Equal(t, 200, resp2.StatusCode)
 
 	body, _ := io.ReadAll(resp2.Body)
-	var result accountingStatsResponse
+	var result models.AccountingStatsResponse
 	err = json.Unmarshal(body, &result)
 	require.NoError(t, err)
 

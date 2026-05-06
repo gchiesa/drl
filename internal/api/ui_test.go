@@ -13,6 +13,8 @@ import (
 	"testing"
 
 	"github.com/gofiber/fiber/v2"
+
+	"github.com/gchiesa/drl/internal/api/models"
 )
 
 // ─── uiAuthManager unit tests ────────────────────────────────────────────────
@@ -237,7 +239,7 @@ func newTestServer(t *testing.T) *Server {
 func TestHandleUIIndex_ServesHTML(t *testing.T) {
 	s := newTestServer(t)
 
-	req := httptest.NewRequest("GET", "/drl/ui/", nil)
+	req := httptest.NewRequest("GET", "/v1/ui/", nil)
 	resp, err := s.app.Test(req)
 	if err != nil {
 		t.Fatalf("app.Test: %v", err)
@@ -268,7 +270,7 @@ func TestHandleUIIndex_ServesHTML(t *testing.T) {
 
 func TestHandleUIIndex_NoCacheHeader(t *testing.T) {
 	s := newTestServer(t)
-	req := httptest.NewRequest("GET", "/drl/ui/", nil)
+	req := httptest.NewRequest("GET", "/v1/ui/", nil)
 	resp, _ := s.app.Test(req)
 	cc := resp.Header.Get("Cache-Control")
 	if cc != "no-store" {
@@ -290,7 +292,7 @@ func TestHandleUIExchange_MissingFields(t *testing.T) {
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			req := httptest.NewRequest("POST", "/drl/ui/exchange",
+			req := httptest.NewRequest("POST", "/v1/ui/exchange",
 				bytes.NewBufferString(tc.body))
 			req.Header.Set("Content-Type", "application/json")
 			resp, err := s.app.Test(req)
@@ -311,7 +313,8 @@ func TestHandleUIExchange_InvalidBootstrapToken(t *testing.T) {
 		ClientPublicKey: "dummykey",
 		BootstrapToken:  "invalid.token",
 	})
-	req := httptest.NewRequest("POST", "/drl/ui/exchange", bytes.NewReader(body))
+	req := httptest.NewRequest("POST", "/v1/ui/exchange", bytes.NewReader(body))
+
 	req.Header.Set("Content-Type", "application/json")
 
 	resp, err := s.app.Test(req)
@@ -329,7 +332,7 @@ func TestHandleUIExchange_FullFlow(t *testing.T) {
 	// Retrieve the bootstrap token from the dedicated endpoint (requires Digest auth).
 	bootstrapToken := fetchBootstrapTokenViaDigest(t, s)
 	if bootstrapToken == "" {
-		t.Fatal("could not retrieve bootstrap token from /drl/ui/get-token")
+		t.Fatal("could not retrieve bootstrap token from /v1/ui/get-token")
 	}
 
 	// Generate a fake client public key using a second uiAuthManager (same P-256 curve).
@@ -341,7 +344,8 @@ func TestHandleUIExchange_FullFlow(t *testing.T) {
 		ClientPublicKey: clientPubKeyB64,
 		BootstrapToken:  bootstrapToken,
 	})
-	req := httptest.NewRequest("POST", "/drl/ui/exchange", bytes.NewReader(body))
+	req := httptest.NewRequest("POST", "/v1/ui/exchange", bytes.NewReader(body))
+
 	req.Header.Set("Content-Type", "application/json")
 
 	resp, err := s.app.Test(req)
@@ -382,7 +386,7 @@ func TestDualAuthMiddleware_DRLSession(t *testing.T) {
 		t.Fatalf("CreateSession: %v", err)
 	}
 
-	req := httptest.NewRequest("GET", "/status", nil)
+	req := httptest.NewRequest("GET", "/v1/status", nil)
 	req.Header.Set("Authorization", "DRL-Session "+sessionToken)
 	resp, err := s.app.Test(req)
 	if err != nil {
@@ -403,7 +407,7 @@ func TestDualAuthMiddleware_BearerToken(t *testing.T) {
 		t.Fatalf("CreateSession: %v", err)
 	}
 
-	req := httptest.NewRequest("GET", "/status", nil)
+	req := httptest.NewRequest("GET", "/v1/status", nil)
 	req.Header.Set("Authorization", "Bearer "+sessionToken)
 	resp, err := s.app.Test(req)
 	if err != nil {
@@ -418,7 +422,7 @@ func TestDualAuthMiddleware_BearerToken(t *testing.T) {
 func TestDualAuthMiddleware_InvalidSession(t *testing.T) {
 	s := newTestServer(t)
 
-	req := httptest.NewRequest("GET", "/status", nil)
+	req := httptest.NewRequest("GET", "/v1/status", nil)
 	req.Header.Set("Authorization", "DRL-Session invalid.session.token")
 	resp, _ := s.app.Test(req)
 	if resp.StatusCode != fiber.StatusUnauthorized {
@@ -431,7 +435,7 @@ func TestDualAuthMiddleware_DigestStillWorks(t *testing.T) {
 	apiKey := "thisIsAVerySecureAPIKey123"
 
 	// Step 1: get challenge
-	req1 := httptest.NewRequest("GET", "/status", nil)
+	req1 := httptest.NewRequest("GET", "/v1/status", nil)
 	resp1, _ := s.app.Test(req1)
 	if resp1.StatusCode != fiber.StatusUnauthorized {
 		t.Fatalf("expected 401 challenge, got %d", resp1.StatusCode)
@@ -439,8 +443,8 @@ func TestDualAuthMiddleware_DigestStillWorks(t *testing.T) {
 	nonce := extractNonceFromHeader(resp1.Header.Get("WWW-Authenticate"))
 
 	// Step 2: authenticated request via Digest
-	digestAuth := buildDigestAuthForTest(digestUsername, apiKey, nonce, "/status", "GET")
-	req2 := httptest.NewRequest("GET", "/status", nil)
+	digestAuth := buildDigestAuthForTest(digestUsername, apiKey, nonce, "/v1/status", "GET")
+	req2 := httptest.NewRequest("GET", "/v1/status", nil)
 	req2.Header.Set("Authorization", digestAuth)
 	resp2, _ := s.app.Test(req2)
 	if resp2.StatusCode != fiber.StatusOK {
@@ -454,7 +458,7 @@ func TestHandleUIMetrics_WithSession(t *testing.T) {
 	sharedKey := make([]byte, 32) // all-zeros key for deterministic test decryption
 	sessionToken, _ := s.uiAuth.CreateSession(sharedKey)
 
-	req := httptest.NewRequest("GET", "/drl/ui/api/metrics", nil)
+	req := httptest.NewRequest("GET", "/v1/ui/api/metrics", nil)
 	req.Header.Set("Authorization", "DRL-Session "+sessionToken)
 	resp, err := s.app.Test(req)
 	if err != nil {
@@ -467,7 +471,7 @@ func TestHandleUIMetrics_WithSession(t *testing.T) {
 	// Response is E2EE encrypted — decrypt before decoding.
 	plain := decryptTestResponse(t, resp.Body, sharedKey)
 
-	var result uiMetricsResponse
+	var result models.UIMetricsResponse
 	if err := json.Unmarshal(plain, &result); err != nil {
 		t.Fatalf("decoding metrics response: %v", err)
 	}
@@ -487,12 +491,12 @@ func TestEncryptedResponseMiddleware_DigestPassthrough(t *testing.T) {
 	s := newTestServer(t)
 	apiKey := "thisIsAVerySecureAPIKey123"
 
-	req1 := httptest.NewRequest("GET", "/status", nil)
+	req1 := httptest.NewRequest("GET", "/v1/status", nil)
 	resp1, _ := s.app.Test(req1)
 	nonce := extractNonceFromHeader(resp1.Header.Get("WWW-Authenticate"))
 
-	digestAuth := buildDigestAuthForTest(digestUsername, apiKey, nonce, "/status", "GET")
-	req2 := httptest.NewRequest("GET", "/status", nil)
+	digestAuth := buildDigestAuthForTest(digestUsername, apiKey, nonce, "/v1/status", "GET")
+	req2 := httptest.NewRequest("GET", "/v1/status", nil)
 	req2.Header.Set("Authorization", digestAuth)
 	resp2, err := s.app.Test(req2)
 	if err != nil {
@@ -519,7 +523,7 @@ func TestEncryptedResponseMiddleware_SessionEncrypts(t *testing.T) {
 	sharedKey := make([]byte, 32)
 	sessionToken, _ := s.uiAuth.CreateSession(sharedKey)
 
-	req := httptest.NewRequest("GET", "/status", nil)
+	req := httptest.NewRequest("GET", "/v1/status", nil)
 	req.Header.Set("Authorization", "DRL-Session "+sessionToken)
 	resp, err := s.app.Test(req)
 	if err != nil {
@@ -546,12 +550,12 @@ func TestEncryptedResponseMiddleware_SessionEncrypts(t *testing.T) {
 	}
 }
 
-// ─── GET /drl/ui/get-token tests ─────────────────────────────────────────────
+// ─── GET /v1/ui/get-token tests ──────────────────────────────────────────────
 
 func TestHandleUIGetToken_Unauthenticated(t *testing.T) {
 	s := newTestServer(t)
 
-	req := httptest.NewRequest("GET", "/drl/ui/get-token", nil)
+	req := httptest.NewRequest("GET", "/v1/ui/get-token", nil)
 	resp, err := s.app.Test(req)
 	if err != nil {
 		t.Fatalf("app.Test: %v", err)
@@ -569,7 +573,7 @@ func TestHandleUIGetToken_WithDigestAuth(t *testing.T) {
 	apiKey := "thisIsAVerySecureAPIKey123"
 
 	// Step 1: obtain Digest challenge.
-	req1 := httptest.NewRequest("GET", "/drl/ui/get-token", nil)
+	req1 := httptest.NewRequest("GET", "/v1/ui/get-token", nil)
 	resp1, err := s.app.Test(req1)
 	if err != nil {
 		t.Fatalf("app.Test (challenge): %v", err)
@@ -580,8 +584,8 @@ func TestHandleUIGetToken_WithDigestAuth(t *testing.T) {
 	nonce := extractNonceFromHeader(resp1.Header.Get("WWW-Authenticate"))
 
 	// Step 2: authenticated request.
-	digestAuth := buildDigestAuthForTest(digestUsername, apiKey, nonce, "/drl/ui/get-token", "GET")
-	req2 := httptest.NewRequest("GET", "/drl/ui/get-token", nil)
+	digestAuth := buildDigestAuthForTest(digestUsername, apiKey, nonce, "/v1/ui/get-token", "GET")
+	req2 := httptest.NewRequest("GET", "/v1/ui/get-token", nil)
 	req2.Header.Set("Authorization", digestAuth)
 	resp2, err := s.app.Test(req2)
 	if err != nil {
@@ -592,7 +596,7 @@ func TestHandleUIGetToken_WithDigestAuth(t *testing.T) {
 		t.Fatalf("expected 200, got %d: %s", resp2.StatusCode, body)
 	}
 
-	var result getTokenResponse
+	var result models.GetTokenResponse
 	if err := json.NewDecoder(resp2.Body).Decode(&result); err != nil {
 		t.Fatalf("decoding response: %v", err)
 	}
@@ -611,7 +615,7 @@ func TestHandleUIGetToken_SessionNotAccepted(t *testing.T) {
 	// A DRL-Session token must NOT be accepted on the get-token endpoint —
 	// it is protected by Digest auth only.
 	sessionToken, _ := s.uiAuth.CreateSession(make([]byte, 32))
-	req := httptest.NewRequest("GET", "/drl/ui/get-token", nil)
+	req := httptest.NewRequest("GET", "/v1/ui/get-token", nil)
 	req.Header.Set("Authorization", "DRL-Session "+sessionToken)
 	resp, err := s.app.Test(req)
 	if err != nil {
@@ -625,20 +629,20 @@ func TestHandleUIGetToken_SessionNotAccepted(t *testing.T) {
 // ─── helpers ─────────────────────────────────────────────────────────────────
 
 // fetchBootstrapTokenViaDigest retrieves the bootstrap token from
-// GET /drl/ui/get-token using the test server's Digest credentials.
+// GET /v1/ui/get-token using the test server's Digest credentials.
 func fetchBootstrapTokenViaDigest(t *testing.T, s *Server) string {
 	t.Helper()
 	apiKey := "thisIsAVerySecureAPIKey123"
 
-	req1 := httptest.NewRequest("GET", "/drl/ui/get-token", nil)
+	req1 := httptest.NewRequest("GET", "/v1/ui/get-token", nil)
 	resp1, err := s.app.Test(req1)
 	if err != nil {
 		t.Fatalf("get-token challenge: %v", err)
 	}
 	nonce := extractNonceFromHeader(resp1.Header.Get("WWW-Authenticate"))
 
-	digestAuth := buildDigestAuthForTest(digestUsername, apiKey, nonce, "/drl/ui/get-token", "GET")
-	req2 := httptest.NewRequest("GET", "/drl/ui/get-token", nil)
+	digestAuth := buildDigestAuthForTest(digestUsername, apiKey, nonce, "/v1/ui/get-token", "GET")
+	req2 := httptest.NewRequest("GET", "/v1/ui/get-token", nil)
 	req2.Header.Set("Authorization", digestAuth)
 	resp2, err := s.app.Test(req2)
 	if err != nil {
@@ -649,7 +653,7 @@ func fetchBootstrapTokenViaDigest(t *testing.T, s *Server) string {
 		t.Fatalf("get-token returned %d: %s", resp2.StatusCode, body)
 	}
 
-	var result getTokenResponse
+	var result models.GetTokenResponse
 	if err := json.NewDecoder(resp2.Body).Decode(&result); err != nil {
 		t.Fatalf("decoding get-token response: %v", err)
 	}

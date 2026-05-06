@@ -12,6 +12,8 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/gchiesa/drl/internal/api/models"
 )
 
 // mockBulkLoader implements AccountingBulkLoader for tests. The function
@@ -117,7 +119,7 @@ func TestAccountingLoad_Unauthenticated(t *testing.T) {
 	loader := &mockBulkLoader{}
 	server := newTestServerWithBulkLoader(t, loader, nil)
 
-	req := httptest.NewRequest("POST", "/accounting/load",
+	req := httptest.NewRequest("POST", "/v1/accounting/load",
 		strings.NewReader(`{"sourceIP":"1.1.1.1","path":"/api"}`))
 	resp, err := server.app.Test(req)
 	require.NoError(t, err)
@@ -137,7 +139,7 @@ func TestAccountingLoad_NotConfigured(t *testing.T) {
 	})
 	require.NoError(t, err)
 
-	req := httptest.NewRequest("POST", "/accounting/load",
+	req := httptest.NewRequest("POST", "/v1/accounting/load",
 		strings.NewReader(`{"sourceIP":"1.1.1.1","path":"/api"}`))
 	resp, err := server.app.Test(req)
 	require.NoError(t, err)
@@ -162,10 +164,10 @@ func TestAccountingLoad_HappyPath(t *testing.T) {
 		`{"sourceIP":"10.0.0.3","path":"/other"}`,
 	}, "\n")
 
-	status, respBody := doAuthenticatedPOST(t, server, "/accounting/load", body)
+	status, respBody := doAuthenticatedPOST(t, server, "/v1/accounting/load", body)
 	require.Equal(t, 200, status)
 
-	var resp bulkLoadResponse
+	var resp models.BulkLoadResponse
 	require.NoError(t, json.Unmarshal(respBody, &resp))
 
 	assert.Equal(t, 3, resp.Total)
@@ -196,10 +198,10 @@ func TestAccountingLoad_DistributionEnabled(t *testing.T) {
 
 	body := `{"sourceIP":"10.0.0.1","path":"/api"}`
 	status, respBody := doAuthenticatedPOST(t, server,
-		"/accounting/load?distributionEnabled=true", body)
+		"/v1/accounting/load?distributionEnabled=true", body)
 	require.Equal(t, 200, status)
 
-	var resp bulkLoadResponse
+	var resp models.BulkLoadResponse
 	require.NoError(t, json.Unmarshal(respBody, &resp))
 	assert.Equal(t, 1, resp.AcceptedRemote)
 
@@ -214,11 +216,11 @@ func TestAccountingLoad_InvalidDistributionEnabled(t *testing.T) {
 	server := newTestServerWithBulkLoader(t, loader, nil)
 
 	status, respBody := doAuthenticatedPOST(t, server,
-		"/accounting/load?distributionEnabled=maybe",
+		"/v1/accounting/load?distributionEnabled=maybe",
 		`{"sourceIP":"10.0.0.1","path":"/api"}`)
 	require.Equal(t, 400, status)
 
-	var resp bulkLoadResponse
+	var resp models.BulkLoadResponse
 	require.NoError(t, json.Unmarshal(respBody, &resp))
 	assert.NotEmpty(t, resp.Errors)
 	assert.Equal(t, 0, loader.callCount(), "loader must not be invoked on bad query")
@@ -241,10 +243,10 @@ func TestAccountingLoad_MalformedLinesContinue(t *testing.T) {
 		`{"sourceIP":"10.0.0.2","path":"/api"}`,
 	}, "\n")
 
-	status, respBody := doAuthenticatedPOST(t, server, "/accounting/load", body)
+	status, respBody := doAuthenticatedPOST(t, server, "/v1/accounting/load", body)
 	require.Equal(t, 200, status)
 
-	var resp bulkLoadResponse
+	var resp models.BulkLoadResponse
 	require.NoError(t, json.Unmarshal(respBody, &resp))
 
 	assert.Equal(t, 4, resp.Total, "blank line skipped, two valid + two invalid counted")
@@ -263,10 +265,10 @@ func TestAccountingLoad_Dropped(t *testing.T) {
 	server := newTestServerWithBulkLoader(t, loader, nil)
 
 	body := `{"sourceIP":"10.0.0.1","path":"/api"}`
-	status, respBody := doAuthenticatedPOST(t, server, "/accounting/load", body)
+	status, respBody := doAuthenticatedPOST(t, server, "/v1/accounting/load", body)
 	require.Equal(t, 200, status)
 
-	var resp bulkLoadResponse
+	var resp models.BulkLoadResponse
 	require.NoError(t, json.Unmarshal(respBody, &resp))
 	assert.Equal(t, 1, resp.Dropped)
 	assert.Equal(t, 1, resp.Total)
@@ -276,10 +278,10 @@ func TestAccountingLoad_EmptyBody(t *testing.T) {
 	loader := &mockBulkLoader{}
 	server := newTestServerWithBulkLoader(t, loader, nil)
 
-	status, respBody := doAuthenticatedPOST(t, server, "/accounting/load", "")
+	status, respBody := doAuthenticatedPOST(t, server, "/v1/accounting/load", "")
 	require.Equal(t, 200, status)
 
-	var resp bulkLoadResponse
+	var resp models.BulkLoadResponse
 	require.NoError(t, json.Unmarshal(respBody, &resp))
 	assert.Equal(t, 0, resp.Total)
 	assert.Equal(t, 0, loader.callCount())

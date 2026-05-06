@@ -120,7 +120,7 @@ func TestStatusEndpoint_Unauthorized(t *testing.T) {
 		t.Fatalf("Failed to create server: %v", err)
 	}
 
-	req := httptest.NewRequest("GET", "/status", nil)
+	req := httptest.NewRequest("GET", "/v1/status", nil)
 	resp, err := server.app.Test(req)
 	if err != nil {
 		t.Fatalf("Failed to test request: %v", err)
@@ -159,7 +159,7 @@ func TestStatusEndpoint_Authenticated(t *testing.T) {
 	}
 
 	// Step 1: Get challenge
-	req1 := httptest.NewRequest("GET", "/status", nil)
+	req1 := httptest.NewRequest("GET", "/v1/status", nil)
 	resp1, err := server.app.Test(req1)
 	if err != nil {
 		t.Fatalf("Step 1 failed: %v", err)
@@ -176,8 +176,8 @@ func TestStatusEndpoint_Authenticated(t *testing.T) {
 	}
 
 	// Step 2: Send authenticated request
-	digestAuth := buildDigestAuthForTest(digestUsername, apiKey, nonce, "/status", "GET")
-	req2 := httptest.NewRequest("GET", "/status", nil)
+	digestAuth := buildDigestAuthForTest(digestUsername, apiKey, nonce, "/v1/status", "GET")
+	req2 := httptest.NewRequest("GET", "/v1/status", nil)
 	req2.Header.Set("Authorization", digestAuth)
 	resp2, err := server.app.Test(req2)
 	if err != nil {
@@ -270,13 +270,13 @@ func TestStatusEndpoint_EmptyCluster(t *testing.T) {
 	}
 
 	// Step 1: Get challenge
-	req1 := httptest.NewRequest("GET", "/status", nil)
+	req1 := httptest.NewRequest("GET", "/v1/status", nil)
 	resp1, _ := server.app.Test(req1)
 	nonce := extractNonceFromHeader(resp1.Header.Get("WWW-Authenticate"))
 
 	// Step 2: Authenticated request
-	digestAuth := buildDigestAuthForTest(digestUsername, apiKey, nonce, "/status", "GET")
-	req2 := httptest.NewRequest("GET", "/status", nil)
+	digestAuth := buildDigestAuthForTest(digestUsername, apiKey, nonce, "/v1/status", "GET")
+	req2 := httptest.NewRequest("GET", "/v1/status", nil)
 	req2.Header.Set("Authorization", digestAuth)
 	resp2, _ := server.app.Test(req2)
 

@@ -63,13 +63,13 @@
         try {
             // Parallel: core data fetch
             const [status, blocked, accountingStats] = await Promise.all([
-                apiFetch('/status'),
-                apiFetch('/blocked-entity').catch(() => []),
-                apiFetch('/accounting/stats').catch(() => ({})),
+                apiFetch('/v1/status'),
+                apiFetch('/v1/blocked-entity').catch(() => []),
+                apiFetch('/v1/accounting/stats').catch(() => ({})),
             ]);
 
             // Own-node metrics
-            const metrics = await apiFetch('/drl/ui/api/metrics').catch(() => null);
+            const metrics = await apiFetch('/v1/ui/api/metrics').catch(() => null);
 
             // Cross-node aggregation: fetch metrics from all peers via proxy
             const peerMetrics = [];
@@ -77,12 +77,12 @@
             if (peerAddresses.length > 0) {
                 const peerResults = await Promise.allSettled(
                     peerAddresses.map(addr =>
-                        apiFetch(`/drl/ui/proxy/${encodeURIComponent(addr)}/drl/ui/api/metrics`)
+                        apiFetch(`/v1/ui/proxy/${encodeURIComponent(addr)}/v1/ui/api/metrics`)
                     )
                 );
                 const peerAccountingStats = await Promise.allSettled(
                     peerAddresses.map(addr =>
-                        apiFetch(`/drl/ui/proxy/${encodeURIComponent(addr)}/accounting/stats`)
+                        apiFetch(`/v1/ui/proxy/${encodeURIComponent(addr)}/v1/accounting/stats`)
                     )
                 );
                 for (const r of peerResults) {
@@ -127,8 +127,8 @@
 
     async function loadConfig() {
         [cfgAccounting, cfgMembership] = await Promise.all([
-            apiFetch('/configuration/static/accounting').catch(() => null),
-            apiFetch('/configuration/static/membership').catch(() => null),
+            apiFetch('/v1/configuration/static/accounting').catch(() => null),
+            apiFetch('/v1/configuration/static/membership').catch(() => null),
         ]);
     }
 
@@ -168,7 +168,7 @@
                 <p>
                     Retrieve your access token out-of-band using Digest authentication, then paste it below:
                 </p>
-                <code class="token-hint">curl --digest -u "admin:$DRL_PRIVATE_API_KEY" http://&lt;node&gt;:8082/drl/ui/get-token</code>
+                <code class="token-hint">curl --digest -u "admin:$DRL_PRIVATE_API_KEY" http://&lt;node&gt;:8082/v1/ui/get-token</code>
                 <form class="token-form" on:submit|preventDefault={handleTokenSubmit}>
                     <input
                         class="token-input"

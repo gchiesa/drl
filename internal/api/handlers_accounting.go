@@ -7,6 +7,8 @@ import (
 	"fmt"
 
 	"github.com/gofiber/fiber/v2"
+
+	"github.com/gchiesa/drl/internal/api/models"
 )
 
 // Bulk-load outcome strings, mirrored from internal/accounting. Duplicated
@@ -28,48 +30,30 @@ const (
 	bulkLoadScannerMaxLine = 1024 * 1024 // 1 MiB
 )
 
-// bulkLoadLine is one record in the NDJSON request body.
-type bulkLoadLine struct {
-	SourceIP string            `json:"sourceIP"`
-	Path     string            `json:"path"`
-	Headers  map[string]string `json:"headers"`
-}
-
-// bulkLoadResponse is the JSON body returned by POST /accounting/load.
-type bulkLoadResponse struct {
-	ID             string   `json:"id"`
-	Total          int      `json:"total"`
-	AcceptedLocal  int      `json:"accepted_local"`
-	AcceptedRemote int      `json:"accepted_remote"`
-	Dropped        int      `json:"dropped"`
-	NoMatch        int      `json:"no_match"`
-	Invalid        int      `json:"invalid"`
-	Errors         []string `json:"errors"`
-}
-
-// accountingStatsResponse is the JSON body returned by GET /accounting/stats.
-type accountingStatsResponse struct {
-	LocalNodeID            string `json:"local_node_id"`
-	MonitoredEntitiesCount int64  `json:"monitored_entities_count"`
-	BatchedUpdatesPending  int64  `json:"batched_updates_pending"`
-	EstimatedEntitiesCount int64  `json:"estimated_entities_count"`
-}
-
-// handleAccountingLoad handles POST /accounting/load
+// handleAccountingLoad handles POST /v1/accounting/load.
 //
-// Body: NDJSON, one bulkLoadLine per line. The handler streams the body
+// Body: NDJSON, one record per line. The handler streams the body
 // line-by-line, invoking the engine's BulkLoad path for each record.
-//
-// Query parameters:
-//
-//	distributionEnabled=true|false (default false)
-//	  When false, records whose owner is a remote node are dropped.
-//	  When true, they are forwarded to the owning node via the flusher.
 //
 // Bulk-loaded entities are ingested directly into the accounting cache and
 // do NOT pass through rate-limit/blocklist evaluation. This endpoint exists
 // to support load-testing the cache and warming nodes; it must never trigger
 // blocking behaviour.
+//
+// @Summary      Bulk-load accounting entries
+// @Description  Ingests a stream of NDJSON records into the accounting cache without rate-limit evaluation.
+// @Description  Useful for warming cache state or load-testing. Does not trigger blocking.
+// @Tags         accounting
+// @Accept       application/x-ndjson
+// @Produce      json
+// @Param        distributionEnabled  query    boolean                 false  "Forward records owned by remote nodes via the flusher (default: false)"
+// @Param        body                 body     models.BulkLoadLine     true   "NDJSON stream — one record per line"
+// @Success      200                  {object} models.BulkLoadResponse
+// @Failure      400                  {object} models.BulkLoadResponse
+// @Failure      401                  {object} models.ErrorResponse
+// @Security     DigestAuth
+// @Security     BearerToken
+// @Router       /accounting/load [post]
 func (s *Server) handleAccountingLoad(c *fiber.Ctx) error {
 	distributionEnabled := false
 	switch c.Query("distributionEnabled") {
@@ -78,13 +62,13 @@ func (s *Server) handleAccountingLoad(c *fiber.Ctx) error {
 	case "", "false", "0":
 		distributionEnabled = false
 	default:
-		return c.Status(fiber.StatusBadRequest).JSON(bulkLoadResponse{
+		return c.Status(fiber.StatusBadRequest).JSON(models.BulkLoadResponse{
 			ID:     generateOperationID(),
 			Errors: []string{"invalid distributionEnabled (expected true|false)"},
 		})
 	}
 
-	resp := bulkLoadResponse{ID: generateOperationID(), Errors: []string{}}
+	resp := models.BulkLoadResponse{ID: generateOperationID(), Errors: []string{}}
 	droppedKeys := make([]string, 0, maxBulkLoadDroppedLogged)
 
 	scanner := bufio.NewScanner(bytes.NewReader(c.Body()))
@@ -98,7 +82,7 @@ func (s *Server) handleAccountingLoad(c *fiber.Ctx) error {
 			continue
 		}
 
-		var rec bulkLoadLine
+		var rec models.BulkLoadLine
 		if err := json.Unmarshal(raw, &rec); err != nil {
 			resp.Total++
 			resp.Invalid++
@@ -168,14 +152,24 @@ func (s *Server) handleAccountingLoad(c *fiber.Ctx) error {
 	return c.Status(fiber.StatusOK).JSON(resp)
 }
 
-// handleAccountingStats handles GET /accounting/stats
+// handleAccountingStats handles GET /v1/accounting/stats.
+//
+// @Summary      Get accounting statistics
+// @Description  Returns local accounting statistics for this node: tracked entities, pending updates, and cache estimates.
+// @Tags         accounting
+// @Produce      json
+// @Success      200  {object}  models.AccountingStatsResponse
+// @Failure      401  {object}  models.ErrorResponse
+// @Security     DigestAuth
+// @Security     BearerToken
+// @Router       /accounting/stats [get]
 func (s *Server) handleAccountingStats(c *fiber.Ctx) error {
-	resp := accountingStatsResponse{
-		LocalNodeID: s.nodeID,
+	resp := models.AccountingStatsResponse{
+		LocalNodeID:            s.nodeID,
+		MonitoredEntitiesCount: s.accountingStats.TrackedEntities(),
+		BatchedUpdatesPending:  s.accountingStats.PendingUpdates(),
+		EstimatedEntitiesCount: s.accountingStats.EstimatedEntities(),
 	}
-	resp.MonitoredEntitiesCount = s.accountingStats.TrackedEntities()
-	resp.BatchedUpdatesPending = s.accountingStats.PendingUpdates()
-	resp.EstimatedEntitiesCount = s.accountingStats.EstimatedEntities()
 
 	return c.JSON(resp)
 }

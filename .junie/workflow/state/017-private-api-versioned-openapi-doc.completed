@@ -1,0 +1,77 @@
+completed: 2026-05-06
+
+## Summary
+
+Implemented milestone 017: Private API versioning (`/v1`), OpenAPI documentation via Swagger, typed response models, and UI updates.
+
+### Backend changes
+
+#### API Versioning (`internal/api/api.go`)
+- All management routes moved under `/v1` using `app.Group("/v1")`.
+- Added `github.com/gofiber/swagger` import and two unauthenticated routes:
+  - `GET /v1/apidocs/*` — Swagger UI (interactive documentation)
+  - `GET /v1/swagger.json` — raw OpenAPI 3.0 JSON spec
+- Added main API info Swagger annotation block (`@title`, `@version`, `@description`, `@securityDefinitions`) documenting both `DigestAuth` and `BearerToken` security schemes.
+- Imported `_ "github.com/gchiesa/drl/internal/api/docs"` (generated swagger docs package).
+
+#### Models package (`internal/api/models/models.go`)
+Created new `models` package with typed request/response structs replacing all `fiber.Map` and local anonymous structs:
+- `ErrorResponse` — standardized error body `{error, code, details}`
+- `StatusResponse` — cluster status
+- `AccountingStatsResponse` — accounting statistics
+- `BulkLoadLine` + `BulkLoadResponse` — bulk load request/response
+- `EntityResponse` + `BlockedEntityEntry` — blocklist add/delete/list
+- `GetTokenResponse` — bootstrap token issuance
+- `UIMetricsResponse` — dashboard metrics snapshot
+
+#### Handler annotations and model usage
+- `handlers.go` — `handleStatus`: Swagger `@Router /status [get]`; returns `models.StatusResponse`.
+- `handlers_accounting.go` — `handleAccountingLoad`: `@Router /accounting/load [post]`; uses `models.BulkLoadLine` / `models.BulkLoadResponse`. `handleAccountingStats`: `@Router /accounting/stats [get]`; returns `models.AccountingStatsResponse`.
+- `handlers_blocklist.go` — `handleBlockEntityList/Add/Delete`: Swagger annotations; uses `models.BlockedEntityEntry` / `models.EntityResponse`.
+- `handlers_config.go` — `handleGetStaticConfig`: Swagger annotation; returns `models.ErrorResponse` on errors.
+- `ui_handlers.go` — `handleUIGetToken`/`handleUIMetrics`: Swagger annotations; return `models.GetTokenResponse` / `models.UIMetricsResponse`.
+
+#### Proxy handler (`ui_handlers.go`)
+- Updated allowlist to accept both `v1/` prefixed and legacy endpoint prefixes for cross-node proxying.
+
+#### OpenAPI spec generation
+- Added `swaggo/swag` v1.16.4 as a Go tool in `mise.toml`.
+- `swag init --parseDependency --parseInternal -g internal/api/api.go -o internal/api/docs` generates `internal/api/docs/{docs.go,swagger.json,swagger.yaml}`.
+- `swag init` step added to `ci/scripts/build.sh` before the Go binary build.
+
+### Frontend changes
+
+#### `ui/src/lib/auth.js`
+- ECDH exchange endpoint updated: `/drl/ui/exchange` → `/v1/drl/ui/exchange`.
+
+#### `ui/src/App.svelte`
+- All `apiFetch` calls updated to `/v1/` prefix:
+  - `/status` → `/v1/status`
+  - `/blocked-entity` → `/v1/blocked-entity`
+  - `/accounting/stats` → `/v1/accounting/stats`
+  - `/drl/ui/api/metrics` → `/v1/drl/ui/api/metrics`
+  - `/drl/ui/proxy/:addr/drl/ui/api/metrics` → `/v1/drl/ui/proxy/:addr/v1/drl/ui/api/metrics`
+  - `/drl/ui/proxy/:addr/accounting/stats` → `/v1/drl/ui/proxy/:addr/v1/accounting/stats`
+  - `/configuration/static/accounting` → `/v1/configuration/static/accounting`
+  - `/configuration/static/membership` → `/v1/configuration/static/membership`
+- Token modal curl hint updated to `/v1/drl/ui/get-token`.
+
+### Documentation
+
+#### `docs/content/docs/internal-api.md`
+- All endpoint paths updated to `/v1/` prefix.
+- Added OpenAPI documentation section with links to `/v1/apidocs/` and `/v1/swagger.json`.
+- Added ECDH session auth section alongside Digest auth.
+- Added standardized error response model section.
+
+### Test updates
+All test files updated to use `/v1/` routes and `models.*` types:
+- `handlers_accounting_test.go` — `/v1/accounting/stats`, `models.AccountingStatsResponse`
+- `handlers_accounting_load_test.go` — `/v1/accounting/load`, `models.BulkLoadResponse`
+- `handlers_blocklist_test.go` — `/v1/blocked-entity`, `models.EntityResponse`, `models.BlockedEntityEntry`
+- `api_test.go` — `/v1/status`
+- `ui_test.go` — `/v1/status`, `/v1/drl/ui/*`, `models.UIMetricsResponse`, `models.GetTokenResponse`
+
+### Test results
+- Lint: 0 issues
+- Tests: 375 passed, 0 failed (internal/api coverage: 82.3%)

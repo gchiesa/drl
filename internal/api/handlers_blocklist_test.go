@@ -11,6 +11,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/gchiesa/drl/internal/api/models"
 	"github.com/gchiesa/drl/internal/model"
 )
 
@@ -173,7 +174,7 @@ func TestBlockEntityAdd_Unauthenticated(t *testing.T) {
 	server := newTestServerWithBlocklist(t, newMockBlocklist(), &mockBroadcaster{})
 
 	req := httptest.NewRequest("POST",
-		"/blocked-entity/192.168.1.1/_path/api/v1/payments/_headers/User-Agent:ScraperBot", nil)
+		"/v1/blocked-entity/192.168.1.1/_path/api/v1/payments/_headers/User-Agent:ScraperBot", nil)
 	resp, err := server.app.Test(req)
 	require.NoError(t, err)
 	assert.Equal(t, 401, resp.StatusCode)
@@ -183,7 +184,7 @@ func TestBlockEntityDelete_Unauthenticated(t *testing.T) {
 	server := newTestServerWithBlocklist(t, newMockBlocklist(), &mockBroadcaster{})
 
 	req := httptest.NewRequest("DELETE",
-		"/blocked-entity/192.168.1.1/_path/api/v1/payments", nil)
+		"/v1/blocked-entity/192.168.1.1/_path/api/v1/payments", nil)
 	resp, err := server.app.Test(req)
 	require.NoError(t, err)
 	assert.Equal(t, 401, resp.StatusCode)
@@ -194,11 +195,11 @@ func TestBlockEntityAdd_Success(t *testing.T) {
 	bc := &mockBroadcaster{}
 	server := newTestServerWithBlocklist(t, bl, bc)
 
-	uri := "/blocked-entity/192.168.1.1/_path/api/v1/payments/_headers/User-Agent:ScraperBot"
+	uri := "/v1/blocked-entity/192.168.1.1/_path/api/v1/payments/_headers/User-Agent:ScraperBot"
 	code, raw := doAuthenticatedRequest(t, server, "POST", uri)
 
 	require.Equal(t, 200, code, "body: %s", string(raw))
-	var er entityResponse
+	var er models.EntityResponse
 	require.NoError(t, json.Unmarshal(raw, &er))
 	assert.NotEmpty(t, er.ID)
 	assert.Equal(t, "192.168.1.1", er.IP)
@@ -226,11 +227,11 @@ func TestBlockEntityDelete_Success(t *testing.T) {
 	bl.Block(key, 24*time.Hour, nil)
 	require.True(t, bl.IsBlocked(key))
 
-	uri := "/blocked-entity/10.0.0.1/_path/api/v1/payments"
+	uri := "/v1/blocked-entity/10.0.0.1/_path/api/v1/payments"
 	code, raw := doAuthenticatedRequest(t, server, "DELETE", uri)
 
 	require.Equal(t, 200, code, "body: %s", string(raw))
-	var er entityResponse
+	var er models.EntityResponse
 	require.NoError(t, json.Unmarshal(raw, &er))
 	assert.Equal(t, "10.0.0.1", er.IP)
 	assert.Equal(t, "Entity removed from blocklist", er.Message)
@@ -242,11 +243,11 @@ func TestBlockEntityAdd_PathOnly(t *testing.T) {
 	bl := newMockBlocklist()
 	server := newTestServerWithBlocklist(t, bl, &mockBroadcaster{})
 
-	uri := "/blocked-entity/10.0.0.1/_path/api/v1/no-headers"
+	uri := "/v1/blocked-entity/10.0.0.1/_path/api/v1/no-headers"
 	code, raw := doAuthenticatedRequest(t, server, "POST", uri)
 
 	require.Equal(t, 200, code, "body: %s", string(raw))
-	var er entityResponse
+	var er models.EntityResponse
 	require.NoError(t, json.Unmarshal(raw, &er))
 	assert.Equal(t, "Entity added to blocklist", er.Message)
 
@@ -258,12 +259,12 @@ func TestBlockEntityAdd_MalformedHeader_Returns400(t *testing.T) {
 	server := newTestServerWithBlocklist(t, newMockBlocklist(), &mockBroadcaster{})
 
 	// "NoColon" has no colon separator — must yield 400
-	uri := "/blocked-entity/10.0.0.1/_path/api/v1/_headers/NoColon"
+	uri := "/v1/blocked-entity/10.0.0.1/_path/api/v1/_headers/NoColon"
 	code, raw := doAuthenticatedRequest(t, server, "POST", uri)
 
 	assert.Equal(t, 400, code, "malformed header must return 400; body: %s", string(raw))
 
-	var er entityResponse
+	var er models.EntityResponse
 	require.NoError(t, json.Unmarshal(raw, &er))
 	assert.NotEmpty(t, er.Errors)
 }
@@ -272,11 +273,11 @@ func TestBlockEntityAdd_NilBlocklistAndBroadcaster(t *testing.T) {
 	// A server without blocklist/broadcaster must still respond 200 without panicking
 	server := newTestServerWithBlocklist(t, nil, nil)
 
-	uri := "/blocked-entity/10.0.0.1/_path/api/v1"
+	uri := "/v1/blocked-entity/10.0.0.1/_path/api/v1"
 	code, raw := doAuthenticatedRequest(t, server, "POST", uri)
 
 	require.Equal(t, 200, code, "body: %s", string(raw))
-	var er entityResponse
+	var er models.EntityResponse
 	require.NoError(t, json.Unmarshal(raw, &er))
 	assert.Equal(t, "Entity added to blocklist", er.Message)
 }
@@ -285,7 +286,7 @@ func TestBlockEntityAdd_ImmediateLocalEnforcement(t *testing.T) {
 	bl := newMockBlocklist()
 	server := newTestServerWithBlocklist(t, bl, &mockBroadcaster{})
 
-	uri := "/blocked-entity/192.168.1.1/_path/api/v1/payments/_headers/User-Agent:ScraperBot"
+	uri := "/v1/blocked-entity/192.168.1.1/_path/api/v1/payments/_headers/User-Agent:ScraperBot"
 	code, _ := doAuthenticatedRequest(t, server, "POST", uri)
 	require.Equal(t, 200, code)
 
@@ -304,7 +305,7 @@ func TestBlockEntityDelete_Removes(t *testing.T) {
 
 	// Block first
 	addCode, _ := doAuthenticatedRequest(t, server, "POST",
-		"/blocked-entity/10.0.0.1/_path/api/v1/payments")
+		"/v1/blocked-entity/10.0.0.1/_path/api/v1/payments")
 	require.Equal(t, 200, addCode)
 
 	key := model.Entity{IP: "10.0.0.1", Path: "api/v1/payments"}.Key()
@@ -312,7 +313,7 @@ func TestBlockEntityDelete_Removes(t *testing.T) {
 
 	// Then delete
 	delCode, _ := doAuthenticatedRequest(t, server, "DELETE",
-		"/blocked-entity/10.0.0.1/_path/api/v1/payments")
+		"/v1/blocked-entity/10.0.0.1/_path/api/v1/payments")
 	require.Equal(t, 200, delCode)
 	assert.False(t, bl.IsBlocked(key))
 }
@@ -322,11 +323,11 @@ func TestBlockEntityAdd_DifferentIPsSamePathProduceDifferentKeys(t *testing.T) {
 	server := newTestServerWithBlocklist(t, bl, &mockBroadcaster{})
 
 	code1, _ := doAuthenticatedRequest(t, server, "POST",
-		"/blocked-entity/10.0.0.1/_path/api/v1")
+		"/v1/blocked-entity/10.0.0.1/_path/api/v1")
 	require.Equal(t, 200, code1)
 
 	code2, _ := doAuthenticatedRequest(t, server, "POST",
-		"/blocked-entity/10.0.0.2/_path/api/v1")
+		"/v1/blocked-entity/10.0.0.2/_path/api/v1")
 	require.Equal(t, 200, code2)
 
 	key1 := model.Entity{IP: "10.0.0.1", Path: "api/v1"}.Key()
@@ -341,11 +342,11 @@ func TestBlockEntityAdd_ResponseIncludesEntityFields(t *testing.T) {
 
 	// Use a single header to avoid commas in the URI, which would conflict
 	// with the comma-separated Digest auth header parser.
-	uri := "/blocked-entity/172.16.0.5/_path/api/v2/users/_headers/X-Bot:true"
+	uri := "/v1/blocked-entity/172.16.0.5/_path/api/v2/users/_headers/X-Bot:true"
 	code, raw := doAuthenticatedRequest(t, server, "POST", uri)
 
 	require.Equal(t, 200, code, "body: %s", string(raw))
-	var er entityResponse
+	var er models.EntityResponse
 	require.NoError(t, json.Unmarshal(raw, &er))
 
 	assert.Equal(t, "172.16.0.5", er.IP)
@@ -357,7 +358,7 @@ func TestBlockEntityAdd_StoresEntityMetadata(t *testing.T) {
 	bl := newMockBlocklist()
 	server := newTestServerWithBlocklist(t, bl, &mockBroadcaster{})
 
-	uri := "/blocked-entity/10.0.0.1/_path/api/v1/_headers/X-Bot:true"
+	uri := "/v1/blocked-entity/10.0.0.1/_path/api/v1/_headers/X-Bot:true"
 	code, _ := doAuthenticatedRequest(t, server, "POST", uri)
 	require.Equal(t, 200, code)
 
@@ -379,7 +380,7 @@ func TestBlockEntityAdd_WithTTLQueryParam(t *testing.T) {
 	bl := newMockBlocklist()
 	server := newTestServerWithBlocklist(t, bl, &mockBroadcaster{})
 
-	uri := "/blocked-entity/10.0.0.1/_path/api/v1?ttl=300"
+	uri := "/v1/blocked-entity/10.0.0.1/_path/api/v1?ttl=300"
 	code, _ := doAuthenticatedRequest(t, server, "POST", uri)
 	require.Equal(t, 200, code)
 
@@ -393,7 +394,7 @@ func TestBlockEntityAdd_DefaultTTLUsedWhenNoQueryParam(t *testing.T) {
 	bl := newMockBlocklist()
 	server := newTestServerWithBlocklist(t, bl, &mockBroadcaster{})
 
-	uri := "/blocked-entity/10.0.0.1/_path/api/v1"
+	uri := "/v1/blocked-entity/10.0.0.1/_path/api/v1"
 	code, _ := doAuthenticatedRequest(t, server, "POST", uri)
 	require.Equal(t, 200, code)
 
@@ -406,11 +407,11 @@ func TestBlockEntityAdd_DefaultTTLUsedWhenNoQueryParam(t *testing.T) {
 func TestBlockEntityAdd_InvalidTTL_Returns400(t *testing.T) {
 	server := newTestServerWithBlocklist(t, newMockBlocklist(), &mockBroadcaster{})
 
-	uri := "/blocked-entity/10.0.0.1/_path/api/v1?ttl=abc"
+	uri := "/v1/blocked-entity/10.0.0.1/_path/api/v1?ttl=abc"
 	code, raw := doAuthenticatedRequest(t, server, "POST", uri)
 
 	assert.Equal(t, 400, code, "body: %s", string(raw))
-	var er entityResponse
+	var er models.EntityResponse
 	require.NoError(t, json.Unmarshal(raw, &er))
 	assert.NotEmpty(t, er.Errors)
 }
@@ -418,10 +419,10 @@ func TestBlockEntityAdd_InvalidTTL_Returns400(t *testing.T) {
 func TestBlockEntityList_Empty(t *testing.T) {
 	server := newTestServerWithBlocklist(t, newMockBlocklist(), &mockBroadcaster{})
 
-	code, raw := doAuthenticatedRequest(t, server, "GET", "/blocked-entity")
+	code, raw := doAuthenticatedRequest(t, server, "GET", "/v1/blocked-entity")
 	require.Equal(t, 200, code, "body: %s", string(raw))
 
-	var entries []blockedEntityEntry
+	var entries []models.BlockedEntityEntry
 	require.NoError(t, json.Unmarshal(raw, &entries))
 	assert.Empty(t, entries)
 }
@@ -429,10 +430,10 @@ func TestBlockEntityList_Empty(t *testing.T) {
 func TestBlockEntityList_NilBlocklist(t *testing.T) {
 	server := newTestServerWithBlocklist(t, nil, nil)
 
-	code, raw := doAuthenticatedRequest(t, server, "GET", "/blocked-entity")
+	code, raw := doAuthenticatedRequest(t, server, "GET", "/v1/blocked-entity")
 	require.Equal(t, 200, code, "body: %s", string(raw))
 
-	var entries []blockedEntityEntry
+	var entries []models.BlockedEntityEntry
 	require.NoError(t, json.Unmarshal(raw, &entries))
 	assert.Empty(t, entries)
 }
@@ -443,23 +444,23 @@ func TestBlockEntityList_ReturnsBlockedEntities(t *testing.T) {
 
 	// Add some entities via POST
 	code1, _ := doAuthenticatedRequest(t, server, "POST",
-		"/blocked-entity/10.0.0.1/_path/api/v1/_headers/X-Bot:true")
+		"/v1/blocked-entity/10.0.0.1/_path/api/v1/_headers/X-Bot:true")
 	require.Equal(t, 200, code1)
 
 	code2, _ := doAuthenticatedRequest(t, server, "POST",
-		"/blocked-entity/10.0.0.2/_path/api/v2")
+		"/v1/blocked-entity/10.0.0.2/_path/api/v2")
 	require.Equal(t, 200, code2)
 
 	// List
-	code, raw := doAuthenticatedRequest(t, server, "GET", "/blocked-entity")
+	code, raw := doAuthenticatedRequest(t, server, "GET", "/v1/blocked-entity")
 	require.Equal(t, 200, code, "body: %s", string(raw))
 
-	var entries []blockedEntityEntry
+	var entries []models.BlockedEntityEntry
 	require.NoError(t, json.Unmarshal(raw, &entries))
 	assert.Len(t, entries, 2)
 
 	// Build a map by IP for easier assertion (map iteration order is non-deterministic)
-	byIP := make(map[string]blockedEntityEntry)
+	byIP := make(map[string]models.BlockedEntityEntry)
 	for _, e := range entries {
 		byIP[e.IP] = e
 	}
@@ -481,13 +482,13 @@ func TestBlockEntityList_ExpiresAtIsRFC3339(t *testing.T) {
 	server := newTestServerWithBlocklist(t, bl, &mockBroadcaster{})
 
 	code, _ := doAuthenticatedRequest(t, server, "POST",
-		"/blocked-entity/10.0.0.1/_path/api/v1")
+		"/v1/blocked-entity/10.0.0.1/_path/api/v1")
 	require.Equal(t, 200, code)
 
-	listCode, raw := doAuthenticatedRequest(t, server, "GET", "/blocked-entity")
+	listCode, raw := doAuthenticatedRequest(t, server, "GET", "/v1/blocked-entity")
 	require.Equal(t, 200, listCode)
 
-	var entries []blockedEntityEntry
+	var entries []models.BlockedEntityEntry
 	require.NoError(t, json.Unmarshal(raw, &entries))
 	require.Len(t, entries, 1)
 
@@ -498,7 +499,7 @@ func TestBlockEntityList_ExpiresAtIsRFC3339(t *testing.T) {
 func TestBlockEntityList_Unauthenticated(t *testing.T) {
 	server := newTestServerWithBlocklist(t, newMockBlocklist(), &mockBroadcaster{})
 
-	req := httptest.NewRequest("GET", "/blocked-entity", nil)
+	req := httptest.NewRequest("GET", "/v1/blocked-entity", nil)
 	resp, err := server.app.Test(req)
 	require.NoError(t, err)
 	assert.Equal(t, 401, resp.StatusCode)
