@@ -15,7 +15,7 @@ directly from the DRL binary with no external dependencies.
 The UI is served on the **private API port** (`8082` by default):
 
 ```
-http://<node-address>:8082/drl/ui/
+http://<node-address>:8082/v1/ui/
 ```
 
 Every DRL node exposes its own instance of the dashboard. Once open, the SPA automatically queries
@@ -33,7 +33,7 @@ the token modal that appears on first load.
 Before opening the UI, obtain the bootstrap token using `curl` with Digest credentials:
 
 ```bash
-curl --digest -u "admin:$DRL_PRIVATE_API_KEY" http://localhost:8082/drl/ui/get-token
+curl --digest -u "admin:$DRL_PRIVATE_API_KEY" http://localhost:8082/v1/ui/get-token
 ```
 
 The response is a JSON object:
@@ -53,14 +53,14 @@ sequenceDiagram
     participant B  as Browser (SPA)
     participant S  as DRL node
 
-    O->>S: GET /drl/ui/get-token (Digest auth)
+    O->>S: GET /v1/ui/get-token (Digest auth)
     S-->>O: {"bootstrap_token": "..."}
     note over O: Copy token to clipboard
 
-    B->>S: GET /drl/ui/ → HTML with &lt;meta name="drl-bootstrap"&gt; (no token)
+    B->>S: GET /v1/ui/ → HTML with &lt;meta name="drl-bootstrap"&gt; (no token)
     note over B: Token modal appears — user pastes token
     B->>B: Generate ephemeral ECDH P-256 key pair
-    B->>S: POST /drl/ui/exchange {clientPublicKey, bootstrapToken}
+    B->>S: POST /v1/ui/exchange {clientPublicKey, bootstrapToken}
     S->>S: Validate bootstrap token (HMAC-SHA256, 10 min TTL)
     S->>S: Derive shared secret via ECDH
     S->>S: Create session; encrypt session token with AES-256-GCM
@@ -68,13 +68,13 @@ sequenceDiagram
     B->>B: Derive same shared secret via ECDH
     B->>B: Decrypt session token with AES-256-GCM
     note over B: Session established — token held in memory only
-    B->>S: GET /drl/ui/api/metrics (Authorization: DRL-Session &lt;token&gt;)
+    B->>S: GET /v1/ui/api/metrics (Authorization: DRL-Session &lt;token&gt;)
     S-->>B: JSON metrics snapshot
 {{< /mermaid >}}
 
 ### Step by step
 
-1. **Token retrieval** — the operator calls `GET /drl/ui/get-token` with HTTP Digest credentials.
+1. **Token retrieval** — the operator calls `GET /v1/ui/get-token` with HTTP Digest credentials.
    The server generates a short-lived bootstrap token (HMAC-SHA256, 10-minute TTL) and returns it
    as JSON. The token is never embedded in the HTML, so it cannot be intercepted by passive
    network observers or cached by proxies.
@@ -84,7 +84,7 @@ sequenceDiagram
 
 3. **ECDH key exchange** — the SPA generates an ephemeral **ECDH P-256** key pair in the browser
    via the Web Crypto API. It posts the public key along with the bootstrap token to
-   `POST /drl/ui/exchange`.
+   `POST /v1/ui/exchange`.
 
 4. **Shared secret derivation** — both sides independently derive the same 256-bit shared secret
    using Diffie-Hellman. Neither side ever transmits the secret itself.
@@ -117,7 +117,7 @@ When the SPA loads the cluster status it receives the list of peer API addresses
 parallel requests through the **built-in proxy**:
 
 ```
-GET /drl/ui/proxy/<peer-host:port>/drl/ui/api/metrics
+GET /v1/ui/proxy/<peer-host:port>/v1/ui/api/metrics
 ```
 
 The receiving node forwards the request to the target peer, attaching the caller's session token.
@@ -141,7 +141,7 @@ This creates a tunnel from `localhost:8082` into the DRL cluster network and for
 DRL replica (`docker-compose-drl-1`). Then open:
 
 ```
-http://localhost:8082/drl/ui/
+http://localhost:8082/v1/ui/
 ```
 
 The dashboard will automatically discover and aggregate metrics from all other replicas in the cluster

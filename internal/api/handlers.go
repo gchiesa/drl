@@ -5,9 +5,21 @@ import (
 	"time"
 
 	"github.com/gofiber/fiber/v2"
+
+	"github.com/gchiesa/drl/internal/api/models"
 )
 
-// handleStatus returns the cluster status
+// handleStatus returns the cluster status.
+//
+// @Summary      Get cluster status
+// @Description  Returns cluster membership information and uptime for this node.
+// @Tags         cluster
+// @Produce      json
+// @Success      200  {object}  models.StatusResponse
+// @Failure      401  {object}  models.ErrorResponse
+// @Security     DigestAuth
+// @Security     BearerToken
+// @Router       /status [get]
 func (s *Server) handleStatus(c *fiber.Ctx) error {
 	uptime := time.Since(s.startTime)
 
@@ -27,12 +39,12 @@ func (s *Server) handleStatus(c *fiber.Ctx) error {
 		}
 	}
 
-	return c.JSON(fiber.Map{
-		"cluster_name":          s.clusterName,
-		"node_id":               s.nodeID,
-		"active_peers":          activePeers,
-		"active_peer_addresses": peerAPIAddresses,
-		"uptime":                uptime.String(),
-		"uptime_seconds":        uptime.Seconds(),
+	return c.JSON(models.StatusResponse{
+		ClusterName:         s.clusterName,
+		NodeID:              s.nodeID,
+		ActivePeers:         activePeers,
+		ActivePeerAddresses: peerAPIAddresses,
+		Uptime:              uptime.String(),
+		UptimeSeconds:       uptime.Seconds(),
 	})
 }

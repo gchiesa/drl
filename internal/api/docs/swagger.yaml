@@ -1,0 +1,420 @@
+basePath: /v1
+definitions:
+  models.AccountingStatsResponse:
+    properties:
+      batched_updates_pending:
+        type: integer
+      estimated_entities_count:
+        type: integer
+      local_node_id:
+        type: string
+      monitored_entities_count:
+        type: integer
+    type: object
+  models.BlockedEntityEntry:
+    properties:
+      expires_at:
+        type: string
+      headers:
+        additionalProperties:
+          type: string
+        type: object
+      id:
+        type: string
+      ip:
+        type: string
+      uriPath:
+        type: string
+    type: object
+  models.BulkLoadLine:
+    properties:
+      headers:
+        additionalProperties:
+          type: string
+        type: object
+      path:
+        type: string
+      sourceIP:
+        type: string
+    required:
+    - path
+    - sourceIP
+    type: object
+  models.BulkLoadResponse:
+    properties:
+      accepted_local:
+        type: integer
+      accepted_remote:
+        type: integer
+      dropped:
+        type: integer
+      errors:
+        items:
+          type: string
+        type: array
+      id:
+        type: string
+      invalid:
+        type: integer
+      no_match:
+        type: integer
+      total:
+        type: integer
+    type: object
+  models.EntityResponse:
+    properties:
+      errors:
+        items:
+          type: string
+        type: array
+      headers:
+        additionalProperties:
+          type: string
+        type: object
+      id:
+        type: string
+      ip:
+        type: string
+      message:
+        type: string
+      uriPath:
+        type: string
+    type: object
+  models.ErrorResponse:
+    properties:
+      code:
+        type: integer
+      details:
+        type: string
+      error:
+        type: string
+    type: object
+  models.GetTokenResponse:
+    properties:
+      bootstrap_token:
+        type: string
+    type: object
+  models.StatusResponse:
+    properties:
+      active_peer_addresses:
+        items:
+          type: string
+        type: array
+      active_peers:
+        items:
+          type: string
+        type: array
+      cluster_name:
+        type: string
+      node_id:
+        type: string
+      uptime:
+        type: string
+      uptime_seconds:
+        type: number
+    type: object
+  models.UIMetricsResponse:
+    properties:
+      metrics:
+        additionalProperties:
+          type: number
+        type: object
+      nodeId:
+        type: string
+      timestamp:
+        type: string
+    type: object
+host: localhost:8082
+info:
+  contact:
+    name: DRL Project
+    url: https://github.com/gchiesa/drl
+  description: |-
+    DRL Distributed Rate Limiter — Private Management API (port 8082).
+    Provides cluster status, blocklist management, accounting statistics, and configuration access.
+  license:
+    name: Apache 2.0
+    url: http://www.apache.org/licenses/LICENSE-2.0.html
+  title: DRL Private API
+  version: "1.0"
+paths:
+  /accounting/load:
+    post:
+      consumes:
+      - application/x-ndjson
+      description: |-
+        Ingests a stream of NDJSON records into the accounting cache without rate-limit evaluation.
+        Useful for warming cache state or load-testing. Does not trigger blocking.
+      parameters:
+      - description: 'Forward records owned by remote nodes via the flusher (default:
+          false)'
+        in: query
+        name: distributionEnabled
+        type: boolean
+      - description: NDJSON stream — one record per line
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/models.BulkLoadLine'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/models.BulkLoadResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/models.BulkLoadResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/models.ErrorResponse'
+      security:
+      - DigestAuth: []
+      - BearerToken: []
+      summary: Bulk-load accounting entries
+      tags:
+      - accounting
+  /accounting/stats:
+    get:
+      description: 'Returns local accounting statistics for this node: tracked entities,
+        pending updates, and cache estimates.'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/models.AccountingStatsResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/models.ErrorResponse'
+      security:
+      - DigestAuth: []
+      - BearerToken: []
+      summary: Get accounting statistics
+      tags:
+      - accounting
+  /blocked-entity:
+    get:
+      description: Returns all entities currently held in the local blocklist cache.
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            items:
+              $ref: '#/definitions/models.BlockedEntityEntry'
+            type: array
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/models.ErrorResponse'
+      security:
+      - DigestAuth: []
+      - BearerToken: []
+      summary: List blocked entities
+      tags:
+      - blocklist
+  /blocked-entity/{ip}/_path/{path}:
+    delete:
+      description: Removes the matching entity from the local blocklist and gossips
+        an UnblockEvent to all cluster peers.
+      parameters:
+      - description: Source IP address
+        in: path
+        name: ip
+        required: true
+        type: string
+      - description: URI path; append /_headers/key:val to match headers
+        in: path
+        name: path
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/models.EntityResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/models.EntityResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/models.ErrorResponse'
+      security:
+      - DigestAuth: []
+      - BearerToken: []
+      summary: Unblock an entity
+      tags:
+      - blocklist
+    post:
+      description: |-
+        Adds the entity (IP + URI path + optional headers) to the local blocklist and gossips a BlockEvent to all cluster peers.
+        Append `/_headers/key:val,key2:val2` to the path to scope the block to specific request headers.
+      parameters:
+      - description: Source IP address
+        in: path
+        name: ip
+        required: true
+        type: string
+      - description: URI path; append /_headers/key:val to include headers
+        in: path
+        name: path
+        required: true
+        type: string
+      - description: 'Block TTL in seconds (default: configured blocklist-default-ttl-seconds)'
+        in: query
+        name: ttl
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/models.EntityResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/models.EntityResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/models.ErrorResponse'
+      security:
+      - DigestAuth: []
+      - BearerToken: []
+      summary: Block an entity
+      tags:
+      - blocklist
+  /configuration/static/{section}:
+    get:
+      description: |-
+        Returns the JSON representation of a named top-level configuration section.
+        Sensitive fields (encryption keys, passwords) are redacted via json:\"-\" tags.
+        Valid sections: accounting, membership, cache, listen, logging, internal-api
+      parameters:
+      - description: Configuration section name
+        enum:
+        - accounting
+        - membership
+        - cache
+        - listen
+        - logging
+        - internal-api
+        in: path
+        name: section
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            type: object
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/models.ErrorResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/models.ErrorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/models.ErrorResponse'
+      security:
+      - DigestAuth: []
+      - BearerToken: []
+      summary: Get static configuration section
+      tags:
+      - configuration
+  /status:
+    get:
+      description: Returns cluster membership information and uptime for this node.
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/models.StatusResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/models.ErrorResponse'
+      security:
+      - DigestAuth: []
+      - BearerToken: []
+      summary: Get cluster status
+      tags:
+      - cluster
+  /ui/api/metrics:
+    get:
+      description: Returns a flat JSON snapshot of the current Prometheus metric values
+        for the dashboard UI.
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/models.UIMetricsResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/models.ErrorResponse'
+      security:
+      - DigestAuth: []
+      - BearerToken: []
+      summary: Get node metrics snapshot
+      tags:
+      - ui
+  /ui/get-token:
+    get:
+      description: |-
+        Issues a short-lived (10-minute) bootstrap token required to initiate the ECDH key exchange.
+        Protected by Digest authentication. Retrieve out-of-band and paste into the SPA token modal.
+        Example: `curl --digest -u "admin:$DRL_PRIVATE_API_KEY" http://localhost:8082/v1/ui/get-token`
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/models.GetTokenResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/models.ErrorResponse'
+      security:
+      - DigestAuth: []
+      summary: Get bootstrap token
+      tags:
+      - ui
+securityDefinitions:
+  BearerToken:
+    description: 'ECDH session token. Format: `DRL-Session <token>` or `Bearer <token>`.
+      Obtain via POST /v1/ui/exchange after completing key exchange.'
+    in: header
+    name: Authorization
+    type: apiKey
+  DigestAuth:
+    description: 'HTTP Digest Authentication (RFC 7616, SHA-256). Use curl: `curl
+      --digest -u "admin:$DRL_PRIVATE_API_KEY" http://localhost:8082/v1/status`'
+    in: header
+    name: Authorization
+    type: apiKey
+swagger: "2.0"

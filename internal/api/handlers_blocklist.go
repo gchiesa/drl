@@ -8,6 +8,7 @@ import (
 
 	"github.com/gofiber/fiber/v2"
 
+	"github.com/gchiesa/drl/internal/api/models"
 	"github.com/gchiesa/drl/internal/model"
 )
 
@@ -15,25 +16,6 @@ const (
 	// headerMarker separates the URI path from the optional header list in the URL.
 	headerMarker = "/_headers/"
 )
-
-// entityResponse is the JSON body returned by block / unblock endpoints.
-type entityResponse struct {
-	ID      string            `json:"id"`
-	IP      string            `json:"ip"`
-	URIPath string            `json:"uriPath"`
-	Headers map[string]string `json:"headers"`
-	Message string            `json:"message"`
-	Errors  []string          `json:"errors"`
-}
-
-// blockedEntityEntry is one element in the GET /blocked-entity JSON array.
-type blockedEntityEntry struct {
-	ID        string            `json:"id"`
-	IP        string            `json:"ip"`
-	URIPath   string            `json:"uriPath"`
-	Headers   map[string]string `json:"headers"`
-	ExpiresAt string            `json:"expires_at"`
-}
 
 // parseEntityFromWildcard splits the Fiber wildcard parameter (everything after
 // `/_path/`) into its constituent path and header map.
@@ -100,18 +82,28 @@ func parseTTLQuery(c *fiber.Ctx, fallback time.Duration) (time.Duration, error) 
 	return time.Duration(secs) * time.Second, nil
 }
 
-// handleBlockEntityList handles GET /blocked-entity
+// handleBlockEntityList handles GET /v1/blocked-entity.
 // It returns all currently blocked entities from the local cache.
+//
+// @Summary      List blocked entities
+// @Description  Returns all entities currently held in the local blocklist cache.
+// @Tags         blocklist
+// @Produce      json
+// @Success      200  {array}   models.BlockedEntityEntry
+// @Failure      401  {object}  models.ErrorResponse
+// @Security     DigestAuth
+// @Security     BearerToken
+// @Router       /blocked-entity [get]
 func (s *Server) handleBlockEntityList(c *fiber.Ctx) error {
 	if s.blocklist == nil {
-		return c.Status(fiber.StatusOK).JSON([]blockedEntityEntry{})
+		return c.Status(fiber.StatusOK).JSON([]models.BlockedEntityEntry{})
 	}
 
 	entries := s.blocklist.ListEntries()
-	result := make([]blockedEntityEntry, 0, len(entries))
+	result := make([]models.BlockedEntityEntry, 0, len(entries))
 
 	for _, e := range entries {
-		entry := blockedEntityEntry{
+		entry := models.BlockedEntityEntry{
 			ID:        e.Key,
 			ExpiresAt: e.ExpiresAt.Format(time.RFC3339),
 		}
@@ -126,16 +118,31 @@ func (s *Server) handleBlockEntityList(c *fiber.Ctx) error {
 	return c.Status(fiber.StatusOK).JSON(result)
 }
 
-// handleBlockEntityAdd handles POST /blocked-entity/:ip/_path/*
+// handleBlockEntityAdd handles POST /v1/blocked-entity/:ip/_path/*.
 // It adds the entity (IP + path + headers) to the local blocklist and
 // asynchronously broadcasts the block event to all cluster peers.
+//
+// @Summary      Block an entity
+// @Description  Adds the entity (IP + URI path + optional headers) to the local blocklist and gossips a BlockEvent to all cluster peers.
+// @Description  Append `/_headers/key:val,key2:val2` to the path to scope the block to specific request headers.
+// @Tags         blocklist
+// @Produce      json
+// @Param        ip   path      string  true  "Source IP address"
+// @Param        path path      string  true  "URI path; append /_headers/key:val to include headers"
+// @Param        ttl  query     integer false "Block TTL in seconds (default: configured blocklist-default-ttl-seconds)"
+// @Success      200  {object}  models.EntityResponse
+// @Failure      400  {object}  models.EntityResponse
+// @Failure      401  {object}  models.ErrorResponse
+// @Security     DigestAuth
+// @Security     BearerToken
+// @Router       /blocked-entity/{ip}/_path/{path} [post]
 func (s *Server) handleBlockEntityAdd(c *fiber.Ctx) error {
 	ip := strings.Clone(c.Params("ip"))
 	wildcard := c.Params("*")
 
 	path, headers, err := parseEntityFromWildcard(wildcard)
 	if err != nil {
-		return c.Status(fiber.StatusBadRequest).JSON(entityResponse{
+		return c.Status(fiber.StatusBadRequest).JSON(models.EntityResponse{
 			ID:     generateOperationID(),
 			Errors: []string{err.Error()},
 		})
@@ -143,7 +150,7 @@ func (s *Server) handleBlockEntityAdd(c *fiber.Ctx) error {
 
 	ttl, err := parseTTLQuery(c, s.defaultBlockTTL)
 	if err != nil {
-		return c.Status(fiber.StatusBadRequest).JSON(entityResponse{
+		return c.Status(fiber.StatusBadRequest).JSON(models.EntityResponse{
 			ID:     generateOperationID(),
 			Errors: []string{err.Error()},
 		})
@@ -175,7 +182,7 @@ func (s *Server) handleBlockEntityAdd(c *fiber.Ctx) error {
 		"ttl", ttl,
 	)
 
-	return c.Status(fiber.StatusOK).JSON(entityResponse{
+	return c.Status(fiber.StatusOK).JSON(models.EntityResponse{
 		ID:      generateOperationID(),
 		IP:      ip,
 		URIPath: path,
@@ -185,16 +192,29 @@ func (s *Server) handleBlockEntityAdd(c *fiber.Ctx) error {
 	})
 }
 
-// handleBlockEntityDelete handles DELETE /blocked-entity/:ip/_path/*
+// handleBlockEntityDelete handles DELETE /v1/blocked-entity/:ip/_path/*.
 // It removes the entity from the local blocklist and asynchronously
 // broadcasts the unblock event to all cluster peers.
+//
+// @Summary      Unblock an entity
+// @Description  Removes the matching entity from the local blocklist and gossips an UnblockEvent to all cluster peers.
+// @Tags         blocklist
+// @Produce      json
+// @Param        ip   path      string  true  "Source IP address"
+// @Param        path path      string  true  "URI path; append /_headers/key:val to match headers"
+// @Success      200  {object}  models.EntityResponse
+// @Failure      400  {object}  models.EntityResponse
+// @Failure      401  {object}  models.ErrorResponse
+// @Security     DigestAuth
+// @Security     BearerToken
+// @Router       /blocked-entity/{ip}/_path/{path} [delete]
 func (s *Server) handleBlockEntityDelete(c *fiber.Ctx) error {
 	ip := strings.Clone(c.Params("ip"))
 	wildcard := c.Params("*")
 
 	path, headers, err := parseEntityFromWildcard(wildcard)
 	if err != nil {
-		return c.Status(fiber.StatusBadRequest).JSON(entityResponse{
+		return c.Status(fiber.StatusBadRequest).JSON(models.EntityResponse{
 			ID:     generateOperationID(),
 			Errors: []string{err.Error()},
 		})
@@ -225,7 +245,7 @@ func (s *Server) handleBlockEntityDelete(c *fiber.Ctx) error {
 		"key", key,
 	)
 
-	return c.Status(fiber.StatusOK).JSON(entityResponse{
+	return c.Status(fiber.StatusOK).JSON(models.EntityResponse{
 		ID:      generateOperationID(),
 		IP:      ip,
 		URIPath: path,

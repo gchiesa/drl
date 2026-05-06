@@ -12,6 +12,8 @@ import (
 	"time"
 
 	"github.com/gofiber/fiber/v2"
+
+	"github.com/gchiesa/drl/internal/api/models"
 )
 
 //go:embed resources/index.html
@@ -19,32 +21,24 @@ var uiIndexHTML []byte
 
 // bootstrapMeta holds the non-sensitive values injected into the SPA as a <meta> tag.
 // The bootstrap token is no longer embedded here; it must be retrieved out-of-band
-// via GET /drl/ui/get-token (Digest-authenticated).
+// via GET /v1/ui/get-token (Digest-authenticated).
 type bootstrapMeta struct {
 	ServerPubKey string `json:"serverPublicKey"`
 	ClusterName  string `json:"clusterName"`
 	NodeID       string `json:"nodeId"`
 }
 
-// getTokenResponse is returned by GET /drl/ui/get-token.
-type getTokenResponse struct {
-	BootstrapToken string `json:"bootstrap_token"`
-}
-
-// keyExchangeRequest is the body of POST /drl/ui/exchange.
+// keyExchangeRequest is the body of POST /v1/ui/exchange.
 type keyExchangeRequest struct {
 	// ClientPublicKey is the browser's ephemeral ECDH P-256 public key:
 	// standard base64 of the 65-byte uncompressed point (04 || x || y).
-	// Obtain in the browser with:
-	//   const raw = await crypto.subtle.exportKey("raw", keyPair.publicKey);
-	//   clientPublicKey = btoa(String.fromCharCode(...new Uint8Array(raw)));
 	ClientPublicKey string `json:"clientPublicKey"`
 
-	// BootstrapToken is the short-lived token injected into the SPA HTML at serve time.
+	// BootstrapToken is the short-lived token obtained via GET /v1/ui/get-token.
 	BootstrapToken string `json:"bootstrapToken"`
 }
 
-// keyExchangeResponse is the JSON response of POST /drl/ui/exchange.
+// keyExchangeResponse is the JSON response of POST /v1/ui/exchange.
 type keyExchangeResponse struct {
 	// ServerPublicKey is the server's ECDH P-256 public key (same format as client).
 	ServerPublicKey string `json:"serverPublicKey"`
@@ -59,19 +53,12 @@ type keyExchangeResponse struct {
 	ExpiresIn int `json:"expiresIn"`
 }
 
-// uiMetricsResponse is returned by GET /drl/ui/api/metrics.
-type uiMetricsResponse struct {
-	NodeID    string             `json:"nodeId"`
-	Timestamp string             `json:"timestamp"`
-	Metrics   map[string]float64 `json:"metrics"`
-}
-
 // handleUIIndex serves the Svelte single-page application.
 //
 // The built index.html is embedded at compile time. Non-sensitive metadata
 // (server public key, cluster name, node ID) is injected just before </head>
 // as a <meta name="drl-bootstrap"> tag. The bootstrap token is intentionally
-// omitted; the SPA must retrieve it out-of-band via GET /drl/ui/get-token.
+// omitted; the SPA must retrieve it out-of-band via GET /v1/ui/get-token.
 func (s *Server) handleUIIndex(c *fiber.Ctx) error {
 	meta := bootstrapMeta{
 		ServerPubKey: s.uiAuth.ServerPublicKeyBase64(),
@@ -96,7 +83,7 @@ func (s *Server) handleUIIndex(c *fiber.Ctx) error {
 	return c.Send(html)
 }
 
-// handleUIGetToken handles GET /drl/ui/get-token.
+// handleUIGetToken handles GET /v1/ui/get-token.
 //
 // Protected by Digest authentication. Returns a short-lived bootstrap token
 // that the browser SPA can use to initiate the ECDH key exchange. The caller
@@ -105,14 +92,25 @@ func (s *Server) handleUIIndex(c *fiber.Ctx) error {
 //
 // Example:
 //
-//	curl --digest -u "admin:$DRL_PRIVATE_API_KEY" http://localhost:8082/drl/ui/get-token
+//	curl --digest -u "admin:$DRL_PRIVATE_API_KEY" http://localhost:8082/v1/ui/get-token
+//
+// @Summary      Get bootstrap token
+// @Description  Issues a short-lived (10-minute) bootstrap token required to initiate the ECDH key exchange.
+// @Description  Protected by Digest authentication. Retrieve out-of-band and paste into the SPA token modal.
+// @Description  Example: `curl --digest -u "admin:$DRL_PRIVATE_API_KEY" http://localhost:8082/v1/ui/get-token`
+// @Tags         ui
+// @Produce      json
+// @Success      200  {object}  models.GetTokenResponse
+// @Failure      401  {object}  models.ErrorResponse
+// @Security     DigestAuth
+// @Router       /ui/get-token [get]
 func (s *Server) handleUIGetToken(c *fiber.Ctx) error {
-	return c.JSON(getTokenResponse{
+	return c.JSON(models.GetTokenResponse{
 		BootstrapToken: s.uiAuth.GenerateBootstrapToken(),
 	})
 }
 
-// handleUIExchange handles POST /drl/ui/exchange.
+// handleUIExchange handles POST /v1/ui/exchange.
 //
 // The browser posts its ephemeral ECDH public key and the bootstrap token
 // obtained from the SPA HTML. The server:
@@ -170,20 +168,29 @@ func (s *Server) handleUIExchange(c *fiber.Ctx) error {
 	})
 }
 
-// handleUIMetrics handles GET /drl/ui/api/metrics.
+// handleUIMetrics handles GET /v1/ui/api/metrics.
 // Returns a JSON snapshot of the most relevant Prometheus metrics.
+//
+// @Summary      Get node metrics snapshot
+// @Description  Returns a flat JSON snapshot of the current Prometheus metric values for the dashboard UI.
+// @Tags         ui
+// @Produce      json
+// @Success      200  {object}  models.UIMetricsResponse
+// @Failure      401  {object}  models.ErrorResponse
+// @Security     DigestAuth
+// @Security     BearerToken
+// @Router       /ui/api/metrics [get]
 func (s *Server) handleUIMetrics(c *fiber.Ctx) error {
-	resp := uiMetricsResponse{
+	resp := models.UIMetricsResponse{
 		NodeID:    s.nodeID,
 		Timestamp: time.Now().UTC().Format(time.RFC3339),
-		Metrics:   make(map[string]float64),
+		Metrics:   s.metricsGatherer.GatherForUI(),
 	}
-	resp.Metrics = s.metricsGatherer.GatherForUI()
 
 	return c.JSON(resp)
 }
 
-// handleUIProxy handles GET /drl/ui/proxy/:nodeAddr/*endpoint.
+// handleUIProxy handles GET /v1/ui/proxy/:nodeAddr/*endpoint.
 //
 // Acts as an authenticated cross-node proxy: forwards the request to the
 // specified peer's API endpoint using the caller's DRL-Session token.
@@ -191,7 +198,7 @@ func (s *Server) handleUIMetrics(c *fiber.Ctx) error {
 // CORS issues or token sharing.
 //
 // :nodeAddr  — URL-encoded "host:port" of the target node's private API.
-// *endpoint  — the API path to forward, e.g. "drl/ui/api/metrics".
+// *endpoint  — the API path to forward, e.g. "v1/ui/api/metrics".
 func (s *Server) handleUIProxy(c *fiber.Ctx) error {
 	rawAddr := c.Params("nodeAddr")
 	if rawAddr == "" {
@@ -216,9 +223,16 @@ func (s *Server) handleUIProxy(c *fiber.Ctx) error {
 	}
 
 	// Validate endpoint — allow only paths under known safe prefixes.
-	if !strings.HasPrefix(endpoint, "drl/ui/api/") &&
-		!strings.HasPrefix(endpoint, "status") &&
-		!strings.HasPrefix(endpoint, "accounting/") {
+	allowed := false
+	for _, prefix := range []string{
+		"v1/ui/api/", "v1/status", "v1/accounting/",
+	} {
+		if strings.HasPrefix(endpoint, prefix) {
+			allowed = true
+			break
+		}
+	}
+	if !allowed {
 		return c.Status(fiber.StatusForbidden).JSON(fiber.Map{
 			"error": "endpoint not proxiable",
 		})

@@ -14,7 +14,11 @@ echo "=== Copying built UI into Go embed path ==="
 cp "${ROOT_DIR}/ui/dist/index.html" "${ROOT_DIR}/internal/api/resources/index.html"
 echo "Copied to internal/api/resources/index.html"
 
-echo "=== Building DRL binary ==="
+echo "=== Generating OpenAPI docs (swag) ==="
 cd "${ROOT_DIR}"
+swag init --parseDependency --parseInternal -g internal/api/api.go -o internal/api/docs
+echo "OpenAPI docs generated: internal/api/docs/"
+
+echo "=== Building DRL binary ==="
 go build -o bin/drl ./main.go
 echo "Build complete: bin/drl"

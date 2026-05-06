@@ -32,7 +32,7 @@ type sessionInfo struct {
 //
 // Authentication flow:
 //  1. Server embeds a short-lived bootstrap token in the served SPA HTML.
-//  2. Browser performs ECDH key exchange (POST /drl/ui/exchange), presenting the bootstrap token.
+//  2. Browser performs ECDH key exchange (POST /v1/ui/exchange), presenting the bootstrap token.
 //  3. Server validates the bootstrap token, performs ECDH, and returns an AES-GCM-encrypted
 //     session token using the derived shared key.
 //  4. Browser decrypts the session token and includes it as

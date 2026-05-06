@@ -374,7 +374,7 @@ func (m *Metrics) SetRateLimitTokensCurrent(ruleName string, tokens float64) {
 // returns a flat map of metric name (with label key=value suffix for labelled
 // metrics) to its current float64 value.  Counter families are summed across
 // labels; Gauge families take the last observed value.
-// The result is consumed by the DRL dashboard SPA via GET /drl/ui/api/metrics.
+// The result is consumed by the DRL dashboard SPA via GET /v1/ui/api/metrics.
 func (m *Metrics) GatherForUI() map[string]float64 {
 	mfs, err := m.registry.Gather()
 	if err != nil {

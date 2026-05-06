@@ -4,6 +4,7 @@ golangci-lint = "2.8"
 protoc = "29.6"
 hugo = "0.160.1"
 node = "22"
+"go:github.com/swaggo/swag/cmd/swag" = "v1.16.4"
 
 [tasks.build]
 description = "Build the DRL binary"

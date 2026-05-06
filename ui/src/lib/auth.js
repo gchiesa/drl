@@ -8,11 +8,11 @@
  *  2. If no bootstrap token is in memory, set authStatus to 'awaiting_token' so the SPA
  *     renders the token modal.
  *  3. Operator retrieves the bootstrap token out-of-band:
- *       curl --digest -u "admin:$DRL_PRIVATE_API_KEY" http://localhost:8082/drl/ui/get-token
+ *       curl --digest -u "admin:$DRL_PRIVATE_API_KEY" http://localhost:8082/v1/ui/get-token
  *  4. User pastes the token into the modal; setBootstrapToken() stores it in session memory
  *     and resumes the handshake.
  *  5. Generate ephemeral ECDH P-256 key pair in the browser.
- *  6. POST /drl/ui/exchange with clientPublicKey + bootstrapToken.
+ *  6. POST /v1/ui/exchange with clientPublicKey + bootstrapToken.
  *  7. Derive shared secret; decrypt the AES-256-GCM encrypted session token.
  *  8. Store session token in module scope (never localStorage); provide apiFetch() wrapper.
  */
@@ -55,7 +55,7 @@ function getBootstrapData() {
  * Store the bootstrap token provided by the user and proceed with the ECDH
  * handshake. Called by the token modal in App.svelte.
  *
- * @param {string} token  The bootstrap token obtained from GET /drl/ui/get-token
+ * @param {string} token  The bootstrap token obtained from GET /v1/ui/get-token
  */
 export async function setBootstrapToken(token) {
   _bootstrapToken = token;
@@ -97,8 +97,8 @@ export async function authenticate() {
     const clientPubRaw = await crypto.subtle.exportKey('raw', keyPair.publicKey);
     const clientPubB64 = btoa(String.fromCharCode(...new Uint8Array(clientPubRaw)));
 
-    // Step 2 — POST /drl/ui/exchange
-    const exchResp = await fetch('/drl/ui/exchange', {
+    // Step 2 — POST /v1/ui/exchange
+    const exchResp = await fetch('/v1/ui/exchange', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({

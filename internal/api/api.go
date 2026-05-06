@@ -1,3 +1,61 @@
+// Package api implements the DRL Private Management HTTP API (port 8082).
+//
+// # Authentication
+//
+// All management endpoints (except OpenAPI docs) require authentication via one of:
+//
+//   - HTTP Digest Authentication (SHA-256): for CLI / curl access
+//   - Bearer Token (ECDH session): for browser SPA encrypted communication
+//
+// # Digest Auth (CLI/Management access)
+//
+// The SHA-256 Digest challenge-response flow never transmits the password on the wire:
+//
+//	Client → GET /v1/status
+//	Server → 401 WWW-Authenticate: Digest realm="DRL Internal API", nonce="...", algorithm=SHA-256
+//	Client computes:
+//	  A1 = SHA256(username:realm:password)
+//	  A2 = SHA256(method:uri)
+//	  response = SHA256(A1:nonce:nc:cnonce:qop:A2)
+//	Client → GET /v1/status Authorization: Digest username="...", response="..."
+//	Server → 200 OK
+//
+// Example (curl):
+//
+//	curl --digest -u "admin:$DRL_PRIVATE_API_KEY" http://localhost:8082/v1/status
+//
+// # Bearer Token (ECDH Session — browser SPA)
+//
+// The browser SPA performs an ECDH P-256 key exchange to establish an encrypted session:
+//
+//  1. GET /v1/ui/get-token  (Digest auth) → bootstrap_token
+//  2. POST /v1/ui/exchange  { clientPublicKey, bootstrapToken } → encrypted session token
+//  3. All subsequent requests: Authorization: DRL-Session <session_token>
+//     Responses are AES-256-GCM encrypted using the ECDH-derived shared key.
+//
+// @title DRL Private API
+// @version 1.0
+// @description DRL Distributed Rate Limiter — Private Management API (port 8082).
+// @description Provides cluster status, blocklist management, accounting statistics, and configuration access.
+//
+// @contact.name DRL Project
+// @contact.url https://github.com/gchiesa/drl
+//
+// @license.name Apache 2.0
+// @license.url http://www.apache.org/licenses/LICENSE-2.0.html
+//
+// @host localhost:8082
+// @BasePath /v1
+//
+// @securityDefinitions.apikey DigestAuth
+// @in header
+// @name Authorization
+// @description HTTP Digest Authentication (RFC 7616, SHA-256). Use curl: `curl --digest -u "admin:$DRL_PRIVATE_API_KEY" http://localhost:8082/v1/status`
+//
+// @securityDefinitions.apikey BearerToken
+// @in header
+// @name Authorization
+// @description ECDH session token. Format: `DRL-Session <token>` or `Bearer <token>`. Obtain via POST /v1/ui/exchange after completing key exchange.
 package api
 
 import (
@@ -9,7 +67,9 @@ import (
 	"time"
 
 	"github.com/gofiber/fiber/v2"
+	fiberSwagger "github.com/gofiber/swagger"
 
+	_ "github.com/gchiesa/drl/internal/api/docs" // swagger generated docs
 	"github.com/gchiesa/drl/internal/model"
 )
 
@@ -136,7 +196,7 @@ type ServerConfig struct {
 	Metrics BulkLoadMetricsRecorder
 	// StaticConfig is optional; when set, the GET /configuration/static/:section endpoint is active.
 	StaticConfig StaticConfigProvider
-	// MetricsGatherer is optional; when set, the GET /drl/ui/api/metrics endpoint returns
+	// MetricsGatherer is optional; when set, the GET /v1/ui/api/metrics endpoint returns
 	// a JSON snapshot of current Prometheus metric values for the dashboard.
 	MetricsGatherer MetricsGatherer
 }
@@ -327,37 +387,48 @@ func (s *Server) setupRoutes() {
 	// encMW calls c.Next() → authMW calls c.Next() → handler runs → encMW encrypts.
 	encMW := s.encryptedResponseMiddleware()
 
+	// ── OpenAPI docs (unauthenticated — exempt from Digest/ECDH middleware) ───
+	// Swagger UI at /v1/apidocs and raw spec at /v1/swagger.json
+	s.app.Get("/v1/apidocs/*", fiberSwagger.HandlerDefault)
+	s.app.Get("/v1/swagger.json", func(c *fiber.Ctx) error {
+		c.Set("Content-Type", "application/json")
+		return fiberSwagger.HandlerDefault(c)
+	})
+
+	// ── v1 route group (all management endpoints) ─────────────────────────────
+	v1 := s.app.Group("/v1")
+
 	// ── UI routes ─────────────────────────────────────────────────────────────
 	// Serve the Svelte SPA (no auth — non-sensitive metadata only in HTML).
-	s.app.Get("/drl/ui", s.handleUIIndex)
-	s.app.Get("/drl/ui/", s.handleUIIndex)
+	v1.Get("/ui", s.handleUIIndex)
+	v1.Get("/ui/", s.handleUIIndex)
 
 	// Token issuance: Digest auth only, returns a short-lived bootstrap token.
-	s.app.Get("/drl/ui/get-token", s.auth.Middleware(), s.handleUIGetToken)
+	v1.Get("/ui/get-token", s.auth.Middleware(), s.handleUIGetToken)
 
 	// ECDH key exchange (protected only by the bootstrap token in the request body).
-	s.app.Post("/drl/ui/exchange", s.handleUIExchange)
+	v1.Post("/ui/exchange", s.handleUIExchange)
 
 	// Metrics snapshot for the dashboard — E2EE encrypted for browser sessions.
-	s.app.Get("/drl/ui/api/metrics", encMW, authMW, s.handleUIMetrics)
+	v1.Get("/ui/api/metrics", encMW, authMW, s.handleUIMetrics)
 
 	// Cross-node proxy — response is re-encrypted by encMW for the browser.
 	// Peer nodes return plaintext (no local shared key) which encMW then wraps.
-	s.app.Get("/drl/ui/proxy/:nodeAddr/*", encMW, authMW, s.handleUIProxy)
+	v1.Get("/ui/proxy/:nodeAddr/*", encMW, authMW, s.handleUIProxy)
 
 	// ── Admin API routes (dual-auth + E2EE for browser sessions) ──────────────
-	s.app.Get("/status", encMW, authMW, s.handleStatus)
+	v1.Get("/status", encMW, authMW, s.handleStatus)
 
-	s.app.Get("/blocked-entity", encMW, authMW, s.handleBlockEntityList)
-	s.app.Post("/blocked-entity/:ip/_path/*", encMW, authMW, s.handleBlockEntityAdd)
-	s.app.Delete("/blocked-entity/:ip/_path/*", encMW, authMW, s.handleBlockEntityDelete)
+	v1.Get("/blocked-entity", encMW, authMW, s.handleBlockEntityList)
+	v1.Post("/blocked-entity/:ip/_path/*", encMW, authMW, s.handleBlockEntityAdd)
+	v1.Delete("/blocked-entity/:ip/_path/*", encMW, authMW, s.handleBlockEntityDelete)
 
-	s.app.Get("/accounting/stats", encMW, authMW, s.handleAccountingStats)
+	v1.Get("/accounting/stats", encMW, authMW, s.handleAccountingStats)
 	if s.bulkLoader != nil {
-		s.app.Post("/accounting/load", encMW, authMW, s.handleAccountingLoad)
+		v1.Post("/accounting/load", encMW, authMW, s.handleAccountingLoad)
 	}
 
-	s.app.Get("/configuration/static/:section", encMW, authMW, s.handleGetStaticConfig)
+	v1.Get("/configuration/static/:section", encMW, authMW, s.handleGetStaticConfig)
 }
 
 // Start starts the internal API server
