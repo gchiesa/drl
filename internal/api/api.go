@@ -35,14 +35,13 @@
 //
 // @title DRL Private API
 // @version 1.0
-// @description DRL Distributed Rate Limiter — Private Management API (port 8082).
-// @description Provides cluster status, blocklist management, accounting statistics, and configuration access.
+// @description.markdown api.md
 //
 // @contact.name DRL Project
 // @contact.url https://github.com/gchiesa/drl
 //
-// @license.name Apache 2.0
-// @license.url http://www.apache.org/licenses/LICENSE-2.0.html
+// @license.name MIT
+// @license.url https://opensource.org/licenses/MIT
 //
 // @host localhost:8082
 // @BasePath /v1
@@ -67,7 +66,8 @@ import (
 	"time"
 
 	"github.com/gofiber/fiber/v2"
-	fiberSwagger "github.com/gofiber/swagger"
+	"github.com/swaggo/swag"
+	scalar "github.com/yokeTH/gofiber-scalar"
 
 	_ "github.com/gchiesa/drl/internal/api/docs" // swagger generated docs
 	"github.com/gchiesa/drl/internal/model"
@@ -388,11 +388,21 @@ func (s *Server) setupRoutes() {
 	encMW := s.encryptedResponseMiddleware()
 
 	// ── OpenAPI docs (unauthenticated — exempt from Digest/ECDH middleware) ───
-	// Swagger UI at /v1/apidocs and raw spec at /v1/swagger.json
-	s.app.Get("/v1/apidocs/*", fiberSwagger.HandlerDefault)
+	// Scalar UI at /v1/apidocs (and sub-paths for embedded JS fallback).
+	// Raw spec at /v1/swagger.json served directly from the generated docs.
+	s.app.Use("/v1/apidocs", scalar.New(scalar.Config{
+		Title:      "DRL Internal API v1",
+		BasePath:   "/",
+		Path:       "v1/apidocs",
+		RawSpecUrl: "swagger.json",
+	}))
 	s.app.Get("/v1/swagger.json", func(c *fiber.Ctx) error {
+		doc, err := swag.ReadDoc()
+		if err != nil {
+			return c.Status(fiber.StatusInternalServerError).SendString(err.Error())
+		}
 		c.Set("Content-Type", "application/json")
-		return fiberSwagger.HandlerDefault(c)
+		return c.SendString(doc)
 	})
 
 	// ── v1 route group (all management endpoints) ─────────────────────────────

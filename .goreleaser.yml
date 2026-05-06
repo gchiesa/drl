@@ -8,6 +8,8 @@ before:
   - go mod tidy
   # Build the Svelte UI so it is embedded into the Go binary
   - sh -c "cd ui && npm ci --prefer-offline && npm run build && cp dist/index.html ../internal/api/resources/index.html"
+  # Generate OpenAPI docs so the embedded spec is up-to-date in the release binary
+  - sh -c "swag init --parseDependency --parseInternal --md internal/api -g internal/api/api.go -o internal/api/docs"
 
 builds:
 - env:

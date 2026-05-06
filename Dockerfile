@@ -24,11 +24,17 @@ RUN apk add --no-cache git
 COPY go.mod go.sum* ./
 RUN go mod download
 
+# Install swag CLI for OpenAPI doc generation
+RUN go install github.com/swaggo/swag/cmd/swag@v1.16.4
+
 # Copy Go source
 COPY . .
 
 # Overwrite the stub with the real Svelte build artifact
 COPY --from=ui-builder /ui/dist/index.html ./internal/api/resources/index.html
+
+# Generate OpenAPI docs
+RUN swag init --parseDependency --parseInternal --md internal/api -g internal/api/api.go -o internal/api/docs
 
 # Build the binary (CGO disabled for a fully static binary)
 RUN CGO_ENABLED=0 GOOS=linux go build -ldflags="-w -s" -o /drl ./main.go

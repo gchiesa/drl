@@ -16,7 +16,7 @@ echo "Copied to internal/api/resources/index.html"
 
 echo "=== Generating OpenAPI docs (swag) ==="
 cd "${ROOT_DIR}"
-swag init --parseDependency --parseInternal -g internal/api/api.go -o internal/api/docs
+swag init --parseDependency --parseInternal --md internal/api -g internal/api/api.go -o internal/api/docs
 echo "OpenAPI docs generated: internal/api/docs/"
 
 echo "=== Building DRL binary ==="
