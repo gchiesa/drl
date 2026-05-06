@@ -100,7 +100,7 @@ DRL ships a built-in web dashboard for real-time cluster monitoring — no exter
 
 ![DRL Control Plane UI](docs/content/docs/assets/drl-ui-01.png)
 
-The dashboard is served directly from the DRL binary at `http://<node>:8082/drl/ui/`. Access is
+The dashboard is served directly from the DRL binary at `http://<node>:8082/v1/ui/`. Access is
 zero-touch: the browser performs an automatic ECDH key exchange on page load, establishing an encrypted
 session without any manual login. Metrics from all cluster nodes are aggregated in real time.
 
