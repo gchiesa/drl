@@ -2,6 +2,7 @@
 
 [![CI](https://github.com/gchiesa/drl/actions/workflows/ci.yml/badge.svg)](https://github.com/gchiesa/drl/actions/workflows/ci.yml)
 [![Performance](https://github.com/gchiesa/drl/actions/workflows/performance.yml/badge.svg)](https://github.com/gchiesa/drl/actions/workflows/performance.yml)
+[![License](https://img.shields.io/badge/license-Apache%202.0-blue.svg)](LICENSE)
 
 > [!WARNING]
 > This project is in **alpha**. APIs, configuration format, and wire protocols may change without notice. Do not use in production.
@@ -150,4 +151,13 @@ Reports are published to GitHub Pages after each successful run on `main`.
 
 ## License
 
-MIT
+DRL is released under the [Apache License 2.0](LICENSE).
+
+Copyright 2024 Giuseppe Chiesa
+
+Licensed under the Apache License, Version 2.0 (the "License"); you may not use this software except in compliance
+with the License. You may obtain a copy of the License at <http://www.apache.org/licenses/LICENSE-2.0>.
+
+Unless required by applicable law or agreed to in writing, software distributed under the License is distributed on
+an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the LICENSE file for
+the specific language governing permissions and limitations under the License.

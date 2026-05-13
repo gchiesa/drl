@@ -1,0 +1,16 @@
+DRL — Distributed Rate Limiter
+Copyright 2024 Giuseppe Chiesa
+
+This product is licensed under the Apache License, Version 2.0.
+You may obtain a copy of the License at:
+
+    http://www.apache.org/licenses/LICENSE-2.0
+
+This product includes software developed at or by:
+- Hashicorp Memberlist (https://github.com/hashicorp/memberlist) — Mozilla Public License 2.0
+- Hashicorp Serf (https://github.com/hashicorp/serf) — Mozilla Public License 2.0
+- stathat/consistent (https://github.com/stathat/consistent) — MIT License
+- maypok86/otter (https://github.com/maypok86/otter) — Apache License 2.0
+- envoyproxy/go-control-plane (https://github.com/envoyproxy/go-control-plane) — Apache License 2.0
+- gofiber/fiber (https://github.com/gofiber/fiber) — MIT License
+- prometheus/client_golang (https://github.com/prometheus/client_golang) — Apache License 2.0
