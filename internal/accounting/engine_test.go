@@ -588,3 +588,131 @@ func TestFilterHeaders(t *testing.T) {
 	assert.Equal(t, "testkey", result["apikey"])
 	assert.Equal(t, "application/json", result["content-type"])
 }
+
+// ── extractSourceIP ───────────────────────────────────────────────────────────
+
+func TestExtractSourceIP_Disabled(t *testing.T) {
+	// Feature off — always returns socket IP unchanged.
+	settings := &config.AccountingSettings{UseXForwardedFor: false}
+	headers := map[string]string{"x-forwarded-for": "1.2.3.4, 5.6.7.8"}
+	assert.Equal(t, "10.0.0.1", extractSourceIP("10.0.0.1", headers, settings))
+}
+
+func TestExtractSourceIP_NoHeader(t *testing.T) {
+	settings := &config.AccountingSettings{
+		UseXForwardedFor:          true,
+		UseXForwardedForDirection: "left",
+		UseXForwardedForIndex:     0,
+	}
+	// XFF absent — fall back to socket IP.
+	assert.Equal(t, "10.0.0.1", extractSourceIP("10.0.0.1", map[string]string{}, settings))
+}
+
+func TestExtractSourceIP_LeftDirection(t *testing.T) {
+	// XFF: "client, proxy1, proxy2" — direction left, index 0 → original client
+	settings := &config.AccountingSettings{
+		UseXForwardedFor:          true,
+		UseXForwardedForDirection: "left",
+		UseXForwardedForIndex:     0,
+	}
+	headers := map[string]string{"x-forwarded-for": "1.2.3.4, 10.0.0.2, 10.0.0.3"}
+	assert.Equal(t, "1.2.3.4", extractSourceIP("10.0.0.3", headers, settings))
+}
+
+func TestExtractSourceIP_LeftDirectionIndex1(t *testing.T) {
+	settings := &config.AccountingSettings{
+		UseXForwardedFor:          true,
+		UseXForwardedForDirection: "left",
+		UseXForwardedForIndex:     1,
+	}
+	headers := map[string]string{"x-forwarded-for": "1.2.3.4, 10.0.0.2, 10.0.0.3"}
+	assert.Equal(t, "10.0.0.2", extractSourceIP("10.0.0.3", headers, settings))
+}
+
+func TestExtractSourceIP_RightIndex0(t *testing.T) {
+	// direction right, index 0 → rightmost entry (last proxy)
+	settings := &config.AccountingSettings{
+		UseXForwardedFor:          true,
+		UseXForwardedForDirection: "right",
+		UseXForwardedForIndex:     0,
+	}
+	headers := map[string]string{"x-forwarded-for": "1.2.3.4, 10.0.0.2, 10.0.0.3"}
+	assert.Equal(t, "10.0.0.3", extractSourceIP("127.0.0.1", headers, settings))
+}
+
+func TestExtractSourceIP_RightIndex1_TrustedProxy(t *testing.T) {
+	// Common trusted-proxy pattern: direction right, index 1 → the IP that
+	// the outermost controlled proxy observed as the upstream. The client
+	// cannot spoof this entry.
+	settings := &config.AccountingSettings{
+		UseXForwardedFor:          true,
+		UseXForwardedForDirection: "right",
+		UseXForwardedForIndex:     1,
+	}
+	headers := map[string]string{"x-forwarded-for": "1.2.3.4, 10.0.0.2, 10.0.0.3"}
+	assert.Equal(t, "10.0.0.2", extractSourceIP("127.0.0.1", headers, settings))
+}
+
+func TestExtractSourceIP_RightDirection_SingleProxy(t *testing.T) {
+	// One trusted proxy: right index 1 goes out of bounds → fallback to socket IP.
+	settings := &config.AccountingSettings{
+		UseXForwardedFor:          true,
+		UseXForwardedForDirection: "right",
+		UseXForwardedForIndex:     1,
+	}
+	headers := map[string]string{"x-forwarded-for": "1.2.3.4"}
+	assert.Equal(t, "127.0.0.1", extractSourceIP("127.0.0.1", headers, settings))
+}
+
+func TestExtractSourceIP_IndexOutOfBounds(t *testing.T) {
+	settings := &config.AccountingSettings{
+		UseXForwardedFor:          true,
+		UseXForwardedForDirection: "left",
+		UseXForwardedForIndex:     10,
+	}
+	headers := map[string]string{"x-forwarded-for": "1.2.3.4, 10.0.0.2"}
+	assert.Equal(t, "10.0.0.1", extractSourceIP("10.0.0.1", headers, settings))
+}
+
+func TestExtractSourceIP_DirectionCaseInsensitive(t *testing.T) {
+	settings := &config.AccountingSettings{
+		UseXForwardedFor:          true,
+		UseXForwardedForDirection: "RIGHT",
+		UseXForwardedForIndex:     0,
+	}
+	headers := map[string]string{"x-forwarded-for": "1.2.3.4, 10.0.0.2"}
+	assert.Equal(t, "10.0.0.2", extractSourceIP("127.0.0.1", headers, settings))
+}
+
+func TestExtractSourceIP_WhitespaceTrimmed(t *testing.T) {
+	settings := &config.AccountingSettings{
+		UseXForwardedFor:          true,
+		UseXForwardedForDirection: "left",
+		UseXForwardedForIndex:     0,
+	}
+	headers := map[string]string{"x-forwarded-for": "  1.2.3.4  , 10.0.0.2"}
+	assert.Equal(t, "1.2.3.4", extractSourceIP("10.0.0.1", headers, settings))
+}
+
+func TestEngine_Process_XFF_UsesExtractedIP(t *testing.T) {
+	rules := map[string]config.AccountingRule{
+		"api-limit": {PathPrefix: "/api", Limit: 100, Per: "minute"},
+	}
+	e, ac := testEngine(t, rules)
+	defer ac.Close()
+	// Inject XFF settings directly — simulates what cmd/accounting.go wires up.
+	e.settings = config.AccountingSettings{
+		UseXForwardedFor:          true,
+		UseXForwardedForDirection: "left",
+		UseXForwardedForIndex:     0,
+	}
+
+	headers := map[string]string{"x-forwarded-for": "203.0.113.5, 10.0.0.1"}
+	e.Process("10.0.0.1", "/api/v1", headers)
+
+	// Counter must be keyed under the extracted client IP, not the socket IP.
+	clientKey := model.Entity{IP: "203.0.113.5", Path: "/api"}.Key()
+	socketKey := model.Entity{IP: "10.0.0.1", Path: "/api"}.Key()
+	assert.Equal(t, int64(1), ac.Get(clientKey), "counter must be under extracted IP")
+	assert.Equal(t, int64(0), ac.Get(socketKey), "socket IP must have no counter")
+}

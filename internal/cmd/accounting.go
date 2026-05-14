@@ -80,6 +80,7 @@ func newAccountingEngine(
 
 		engine = accounting.NewEngine(accounting.EngineConfig{
 			Rules:       cfg.Accounting.Rules,
+			Settings:    cfg.Accounting.Settings,
 			Accounting:  cacheManager.Accounting,
 			Flusher:     flusher,
 			Logger:      log,

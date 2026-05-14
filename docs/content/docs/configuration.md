@@ -54,6 +54,11 @@ accounting {
         retry-after-type "delay-seconds"
         flush-interval   "200ms"
         max-batch-size   1000
+
+        // Optional: extract the real client IP from the X-Forwarded-For header.
+        // use-x-forwarded-for           true
+        // use-x-forwarded-for-direction "right"  // left | right
+        // use-x-forwarded-for-index     1
     }
 
     rules {
@@ -161,14 +166,83 @@ characters). This variable has no KDL equivalent — it is always sourced from t
 
 ### `accounting.settings`
 
-Global settings for the accounting engine. These do **not** have individual environment variable overrides.
+Global settings for the accounting engine. Each field can be overridden via its corresponding `DRL_ACCOUNTING_SETTINGS_*` environment variable.
 
-| KDL key | Default | Description |
-|---------|---------|-------------|
-| `algorithm` | `sliding-window` | Rate-limiting algorithm (`sliding-window` is the only supported value) |
-| `retry-after-type` | `delay-seconds` | Format of the `Retry-After` header: `delay-seconds` or `http-date` |
-| `flush-interval` | `200ms` | How often the Flusher drains per-owner buffers |
-| `max-batch-size` | `1000` | Maximum entries per batch; triggers an immediate flush when reached |
+| KDL key | Env var | Default | Description |
+|---------|---------|---------|-------------|
+| `algorithm` | `DRL_ACCOUNTING_SETTINGS_ALGORITHM` | `sliding-window` | Rate-limiting algorithm: `sliding-window` or `token-bucket` |
+| `retry-after-type` | `DRL_ACCOUNTING_SETTINGS_RETRY_AFTER_TYPE` | `delay-seconds` | Format of the `Retry-After` response header: `delay-seconds` or `http-date` |
+| `flush-interval` | `DRL_ACCOUNTING_SETTINGS_FLUSH_INTERVAL` | `200ms` | How often the Flusher drains per-owner buffers |
+| `max-batch-size` | `DRL_ACCOUNTING_SETTINGS_MAX_BATCH_SIZE` | `1000` | Maximum entries per batch; triggers an immediate flush when reached |
+| `capacity` | `DRL_ACCOUNTING_SETTINGS_CAPACITY` | — | Token-bucket burst size (required when `algorithm` is `token-bucket`) |
+| `refill-rate` | `DRL_ACCOUNTING_SETTINGS_REFILL_RATE` | — | Token-bucket refill rate in tokens per second (required when `algorithm` is `token-bucket`) |
+| `use-x-forwarded-for` | `DRL_ACCOUNTING_SETTINGS_USE_X_FORWARDED_FOR` | `false` | Extract the client IP from the `X-Forwarded-For` header instead of the socket remote address. See [X-Forwarded-For](#x-forwarded-for-xff-ip-extraction) below. |
+| `use-x-forwarded-for-direction` | `DRL_ACCOUNTING_SETTINGS_USE_X_FORWARDED_FOR_DIRECTION` | `left` | Which end of the XFF chain to read from: `left` (client end) or `right` (proxy end). Only evaluated when `use-x-forwarded-for` is `true`. |
+| `use-x-forwarded-for-index` | `DRL_ACCOUNTING_SETTINGS_USE_X_FORWARDED_FOR_INDEX` | `0` | Zero-based offset from the chosen direction. Only evaluated when `use-x-forwarded-for` is `true`. |
+
+**Validation rules (when `use-x-forwarded-for` is `true`):**
+- `use-x-forwarded-for-direction` must be `left` or `right` (case-insensitive); defaults to `left` if omitted
+- `use-x-forwarded-for-index` must be ≥ 0
+
+---
+
+### X-Forwarded-For (XFF) IP extraction
+
+When DRL runs behind one or more reverse proxies, the Envoy socket remote address is the proxy IP rather
+than the originating client. Enabling `use-x-forwarded-for` tells the accounting engine to parse the
+`X-Forwarded-For` header and use a specific entry as the effective source IP for rate-limit accounting and
+entity key construction.
+
+**How the header is structured**
+
+Each proxy in the chain appends the address it received the connection from, left to right:
+
+```
+X-Forwarded-For: <client>, <proxy1>, <proxy2>
+```
+
+Index `0` from the **left** is the original client IP (cheapest to obtain, but trivially spoofable by the
+client). Index `0` from the **right** is the last proxy.
+
+#### Recipe 1 — Single trusted proxy, simple setup
+
+Use the leftmost entry when there is exactly one proxy and you accept that a malicious client could
+forge the header value:
+
+```kdl
+accounting {
+    settings {
+        use-x-forwarded-for           true
+        use-x-forwarded-for-direction "left"
+        use-x-forwarded-for-index     0
+    }
+}
+```
+
+#### Recipe 2 — Single trusted proxy, anti-spoofing
+
+Use `direction "right"` with `index 1` to read the IP that **your** outermost controlled proxy recorded
+as the upstream address. This entry is appended by your proxy — the client cannot forge it:
+
+```
+X-Forwarded-For: <client-or-spoofed>, <trusted-proxy-appended-this>
+                                       └── right index 1 reads here
+```
+
+```kdl
+accounting {
+    settings {
+        use-x-forwarded-for           true
+        use-x-forwarded-for-direction "right"
+        use-x-forwarded-for-index     1
+    }
+}
+```
+
+#### Fallback behaviour
+
+When `use-x-forwarded-for` is `true` but the header is absent, empty, or the computed index is out of
+range, DRL falls back silently to the socket remote address without logging a warning.
 
 ---
 
