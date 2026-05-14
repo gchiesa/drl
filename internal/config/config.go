@@ -65,6 +65,21 @@ type AccountingSettings struct {
 	Capacity int64 `kdl:"capacity" env:"CAPACITY" json:"capacity,omitempty"`
 	// RefillRate is the token bucket refill rate in tokens per second (required when algorithm is "token-bucket")
 	RefillRate float64 `kdl:"refill-rate" env:"REFILL_RATE" json:"refill-rate,omitempty"`
+	// UseXForwardedFor enables source IP extraction from the x-forwarded-for header
+	// instead of the socket remote address. Useful when DRL sits behind one or more
+	// reverse proxies and the Envoy remote_addr is a proxy IP rather than the
+	// originating client.
+	UseXForwardedFor bool `kdl:"use-x-forwarded-for" env:"USE_X_FORWARDED_FOR" json:"use-x-forwarded-for"`
+	// UseXForwardedForDirection controls which end of the XFF chain to read from.
+	// "left" reads from the client end (index 0 = original client IP, spoofable).
+	// "right" reads from the proxy end (index 0 = last proxy, index 1 = first trusted
+	// external IP — safer when you control the rightmost proxy). Default: "left".
+	UseXForwardedForDirection string `kdl:"use-x-forwarded-for-direction" env:"USE_X_FORWARDED_FOR_DIRECTION" json:"use-x-forwarded-for-direction,omitempty"`
+	// UseXForwardedForIndex is the zero-based offset from the chosen direction.
+	// With direction "left" and index 0, the leftmost (client-supplied) IP is used.
+	// With direction "right" and index 1, the second-from-right IP is used — the
+	// one that your outermost trusted proxy recorded as the upstream address.
+	UseXForwardedForIndex int `kdl:"use-x-forwarded-for-index" env:"USE_X_FORWARDED_FOR_INDEX" json:"use-x-forwarded-for-index,omitempty"`
 }
 
 // AccountingRule defines a rate-limiting rule for a path prefix
@@ -341,6 +356,24 @@ func (c *Config) Validate() error {
 	validRetryAfter := map[string]bool{"delay-seconds": true, "http-date": true}
 	if !validRetryAfter[strings.ToLower(c.Accounting.Settings.RetryAfterType)] {
 		errs = append(errs, fmt.Sprintf("accounting.settings.retry-after-type must be one of delay-seconds, http-date; got %q", c.Accounting.Settings.RetryAfterType))
+	}
+
+	// Validate x-forwarded-for settings (only when the feature is enabled)
+	if c.Accounting.Settings.UseXForwardedFor {
+		if c.Accounting.Settings.UseXForwardedForDirection == "" {
+			c.Accounting.Settings.UseXForwardedForDirection = "left"
+		}
+		validDirs := map[string]bool{"left": true, "right": true}
+		if !validDirs[strings.ToLower(c.Accounting.Settings.UseXForwardedForDirection)] {
+			errs = append(errs, fmt.Sprintf(
+				"accounting.settings.use-x-forwarded-for-direction must be one of left, right; got %q",
+				c.Accounting.Settings.UseXForwardedForDirection))
+		}
+		if c.Accounting.Settings.UseXForwardedForIndex < 0 {
+			errs = append(errs, fmt.Sprintf(
+				"accounting.settings.use-x-forwarded-for-index must be >= 0; got %d",
+				c.Accounting.Settings.UseXForwardedForIndex))
+		}
 	}
 
 	// Validate accounting rules

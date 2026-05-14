@@ -50,6 +50,7 @@ type Engine struct {
 	limiter     ratelimit.RateLimiter
 	blocklist   BlocklistEnforcer
 	broadcaster BlockBroadcaster
+	settings    config.AccountingSettings
 }
 
 // accountingRuleWithName pairs a rule with its config map key (for metrics labels).
@@ -61,6 +62,7 @@ type accountingRuleWithName struct {
 // EngineConfig holds the configuration for creating an Engine.
 type EngineConfig struct {
 	Rules       map[string]config.AccountingRule
+	Settings    config.AccountingSettings
 	Accounting  *cache.AccountingCache
 	Flusher     *Flusher
 	Logger      *slog.Logger
@@ -86,6 +88,7 @@ func NewEngine(cfg EngineConfig) *Engine {
 		limiter:     limiter,
 		blocklist:   cfg.Blocklist,
 		broadcaster: cfg.Broadcaster,
+		settings:    cfg.Settings,
 	}
 	for name, rule := range cfg.Rules {
 		e.logger.Info("accounting rule loaded",
@@ -148,7 +151,8 @@ func (e *Engine) resolveEntity(sourceIP, path string, headers map[string]string)
 	if rule == nil {
 		return nil, model.Entity{}, 0, "", false
 	}
-	entity = e.buildEntity(sourceIP, rule, headers)
+	effectiveIP := extractSourceIP(sourceIP, headers, &e.settings)
+	entity = e.buildEntity(effectiveIP, rule, headers)
 	entityHash = entity.Hash()
 	key = model.HashToEntityKey(entityHash)
 	return rule, entity, entityHash, key, true
@@ -349,6 +353,50 @@ func isPathSegmentMatch(path, prefix string) bool {
 	}
 	// next byte after the prefix in the path must be a segment separator
 	return path[len(prefix)] == '/'
+}
+
+// extractSourceIP returns the effective source IP for the request. When
+// settings.UseXForwardedFor is enabled it parses the x-forwarded-for header
+// and returns the entry at the configured direction and index.
+//
+// The XFF header is a comma-separated list appended left-to-right as the
+// request travels through proxies:
+//
+//	X-Forwarded-For: <client>, <proxy1>, <proxy2>
+//
+// direction "left"  — reads from the client end; index 0 is the original
+// client IP (cheapest to obtain, but trivially spoofable by the client).
+//
+// direction "right" — reads from the proxy end; index 0 is the rightmost
+// entry (the last proxy), index 1 is the second-from-right, and so on.
+// This is the safer choice when you control the outermost proxy and trust
+// that it always appends the true upstream IP: the entry at index 1 is the
+// IP your trusted proxy observed, which the client cannot forge.
+//
+// Falls back to socketIP when the header is absent, empty, or the computed
+// index falls outside the list.
+func extractSourceIP(socketIP string, headers map[string]string, settings *config.AccountingSettings) string {
+	if !settings.UseXForwardedFor {
+		return socketIP
+	}
+	xff := headers["x-forwarded-for"]
+	if xff == "" {
+		return socketIP
+	}
+	parts := strings.Split(xff, ",")
+	var idx int
+	if strings.ToLower(settings.UseXForwardedForDirection) == "right" {
+		idx = len(parts) - 1 - settings.UseXForwardedForIndex
+	} else {
+		idx = settings.UseXForwardedForIndex
+	}
+	if idx < 0 || idx >= len(parts) {
+		return socketIP
+	}
+	if ip := strings.TrimSpace(parts[idx]); ip != "" {
+		return ip
+	}
+	return socketIP
 }
 
 // filterHeaders returns a new map containing only the header keys named by

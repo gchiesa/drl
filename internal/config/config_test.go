@@ -1242,6 +1242,112 @@ func TestGetConfigSection_AccountingContent(t *testing.T) {
 	assert.Equal(t, "sliding-window", ac.Settings.Algorithm)
 }
 
+// ── XFF configuration ─────────────────────────────────────────────────────────
+
+func TestValidate_XFF_Disabled_NoValidation(t *testing.T) {
+	clearEnvVars(t)
+	cfg := validBaseConfig()
+	// When disabled, direction/index are not validated.
+	cfg.Accounting.Settings.UseXForwardedFor = false
+	cfg.Accounting.Settings.UseXForwardedForDirection = "invalid"
+	cfg.Accounting.Settings.UseXForwardedForIndex = -99
+	assert.NoError(t, cfg.Validate())
+}
+
+func TestValidate_XFF_Enabled_DefaultsDirection(t *testing.T) {
+	clearEnvVars(t)
+	cfg := validBaseConfig()
+	cfg.Accounting.Settings.UseXForwardedFor = true
+	// Direction not set — should default to "left" during Validate.
+	require.NoError(t, cfg.Validate())
+	assert.Equal(t, "left", cfg.Accounting.Settings.UseXForwardedForDirection)
+}
+
+func TestValidate_XFF_Enabled_ValidDirections(t *testing.T) {
+	for _, dir := range []string{"left", "right", "LEFT", "RIGHT"} {
+		t.Run(dir, func(t *testing.T) {
+			clearEnvVars(t)
+			cfg := validBaseConfig()
+			cfg.Accounting.Settings.UseXForwardedFor = true
+			cfg.Accounting.Settings.UseXForwardedForDirection = dir
+			assert.NoError(t, cfg.Validate())
+		})
+	}
+}
+
+func TestValidate_XFF_Enabled_InvalidDirection(t *testing.T) {
+	clearEnvVars(t)
+	cfg := validBaseConfig()
+	cfg.Accounting.Settings.UseXForwardedFor = true
+	cfg.Accounting.Settings.UseXForwardedForDirection = "middle"
+	err := cfg.Validate()
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "use-x-forwarded-for-direction must be one of left, right")
+}
+
+func TestValidate_XFF_Enabled_NegativeIndex(t *testing.T) {
+	clearEnvVars(t)
+	cfg := validBaseConfig()
+	cfg.Accounting.Settings.UseXForwardedFor = true
+	cfg.Accounting.Settings.UseXForwardedForDirection = "left"
+	cfg.Accounting.Settings.UseXForwardedForIndex = -1
+	err := cfg.Validate()
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "use-x-forwarded-for-index must be >= 0")
+}
+
+func TestValidate_XFF_Enabled_ZeroIndex(t *testing.T) {
+	clearEnvVars(t)
+	cfg := validBaseConfig()
+	cfg.Accounting.Settings.UseXForwardedFor = true
+	cfg.Accounting.Settings.UseXForwardedForDirection = "right"
+	cfg.Accounting.Settings.UseXForwardedForIndex = 0
+	assert.NoError(t, cfg.Validate())
+}
+
+func TestAccountingSettings_XFF_KDLParsing(t *testing.T) {
+	clearEnvVars(t)
+
+	tmpDir := t.TempDir()
+	configPath := filepath.Join(tmpDir, "xff.kdl")
+	kdlConfig := `
+accounting {
+    settings {
+        use-x-forwarded-for true
+        use-x-forwarded-for-direction "right"
+        use-x-forwarded-for-index 1
+    }
+    rules {
+        "catch-all" {
+            path-prefix "/"
+            limit 100
+            per "minute"
+        }
+    }
+}
+`
+	require.NoError(t, os.WriteFile(configPath, []byte(kdlConfig), 0644))
+
+	cfg, err := Load(configPath)
+	require.NoError(t, err)
+	assert.True(t, cfg.Accounting.Settings.UseXForwardedFor)
+	assert.Equal(t, "right", cfg.Accounting.Settings.UseXForwardedForDirection)
+	assert.Equal(t, 1, cfg.Accounting.Settings.UseXForwardedForIndex)
+}
+
+func TestAccountingSettings_XFF_EnvOverride(t *testing.T) {
+	clearEnvVars(t)
+	t.Setenv("DRL_ACCOUNTING_SETTINGS_USE_X_FORWARDED_FOR", "true")
+	t.Setenv("DRL_ACCOUNTING_SETTINGS_USE_X_FORWARDED_FOR_DIRECTION", "right")
+	t.Setenv("DRL_ACCOUNTING_SETTINGS_USE_X_FORWARDED_FOR_INDEX", "2")
+
+	cfg, err := Load("")
+	require.NoError(t, err)
+	assert.True(t, cfg.Accounting.Settings.UseXForwardedFor)
+	assert.Equal(t, "right", cfg.Accounting.Settings.UseXForwardedForDirection)
+	assert.Equal(t, 2, cfg.Accounting.Settings.UseXForwardedForIndex)
+}
+
 // validBaseConfig returns a Config that passes validation with defaults.
 func validBaseConfig() *Config {
 	return &Config{
@@ -1284,6 +1390,9 @@ func clearEnvVars(t *testing.T) {
 		"DRL_ACCOUNTING_SETTINGS_RETRY_AFTER_TYPE",
 		"DRL_ACCOUNTING_SETTINGS_FLUSH_INTERVAL",
 		"DRL_ACCOUNTING_SETTINGS_MAX_BATCH_SIZE",
+		"DRL_ACCOUNTING_SETTINGS_USE_X_FORWARDED_FOR",
+		"DRL_ACCOUNTING_SETTINGS_USE_X_FORWARDED_FOR_DIRECTION",
+		"DRL_ACCOUNTING_SETTINGS_USE_X_FORWARDED_FOR_INDEX",
 	}
 
 	for _, env := range envVars {
