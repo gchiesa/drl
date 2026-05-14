@@ -48,6 +48,11 @@
 &lt;/span&gt;&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;&lt;span class="nl"&gt; retry-after-type&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="s"&gt;&amp;#34;delay-seconds&amp;#34;&lt;/span&gt;&lt;span class="w"&gt;
 &lt;/span&gt;&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;&lt;span class="nl"&gt; flush-interval&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="s"&gt;&amp;#34;200ms&amp;#34;&lt;/span&gt;&lt;span class="w"&gt;
 &lt;/span&gt;&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;&lt;span class="nl"&gt; max-batch-size&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="m"&gt;1000&lt;/span&gt;&lt;span class="w"&gt;
+&lt;/span&gt;&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;&lt;span class="w"&gt;
+&lt;/span&gt;&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="c1"&gt;// Optional: extract the real client IP from the X-Forwarded-For header.
+&lt;/span&gt;&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="c1"&gt;// use-x-forwarded-for true
+&lt;/span&gt;&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="c1"&gt;// use-x-forwarded-for-direction &amp;#34;right&amp;#34; // left | right
+&lt;/span&gt;&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="c1"&gt;// use-x-forwarded-for-index 1
 &lt;/span&gt;&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="o"&gt;}&lt;/span&gt;&lt;span class="w"&gt;
 &lt;/span&gt;&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;&lt;span class="nl"&gt;
 &lt;/span&gt;&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;&lt;span class="nl"&gt; rules&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="o"&gt;{&lt;/span&gt;&lt;span class="nl"&gt;
@@ -305,11 +310,12 @@ characters). This variable has no KDL equivalent — it is always sourced from t
 &lt;/ul&gt;
 &lt;hr&gt;
 &lt;h3&gt;&lt;code&gt;accounting.settings&lt;/code&gt;&lt;span class="hx:absolute hx:-mt-20" id="accountingsettings"&gt;&lt;/span&gt;
-&lt;a href="#accountingsettings" class="subheading-anchor" aria-label="Permalink for this section"&gt;&lt;/a&gt;&lt;/h3&gt;&lt;p&gt;Global settings for the accounting engine. These do &lt;strong&gt;not&lt;/strong&gt; have individual environment variable overrides.&lt;/p&gt;
+&lt;a href="#accountingsettings" class="subheading-anchor" aria-label="Permalink for this section"&gt;&lt;/a&gt;&lt;/h3&gt;&lt;p&gt;Global settings for the accounting engine. Each field can be overridden via its corresponding &lt;code&gt;DRL_ACCOUNTING_SETTINGS_*&lt;/code&gt; environment variable.&lt;/p&gt;
 &lt;table&gt;
 &lt;thead&gt;
 &lt;tr&gt;
 &lt;th&gt;KDL key&lt;/th&gt;
+&lt;th&gt;Env var&lt;/th&gt;
 &lt;th&gt;Default&lt;/th&gt;
 &lt;th&gt;Description&lt;/th&gt;
 &lt;/tr&gt;
@@ -317,26 +323,149 @@ characters). This variable has no KDL equivalent — it is always sourced from t
 &lt;tbody&gt;
 &lt;tr&gt;
 &lt;td&gt;&lt;code&gt;algorithm&lt;/code&gt;&lt;/td&gt;
+&lt;td&gt;&lt;code&gt;DRL_ACCOUNTING_SETTINGS_ALGORITHM&lt;/code&gt;&lt;/td&gt;
 &lt;td&gt;&lt;code&gt;sliding-window&lt;/code&gt;&lt;/td&gt;
-&lt;td&gt;Rate-limiting algorithm (&lt;code&gt;sliding-window&lt;/code&gt; is the only supported value)&lt;/td&gt;
+&lt;td&gt;Rate-limiting algorithm: &lt;code&gt;sliding-window&lt;/code&gt; or &lt;code&gt;token-bucket&lt;/code&gt;&lt;/td&gt;
 &lt;/tr&gt;
 &lt;tr&gt;
 &lt;td&gt;&lt;code&gt;retry-after-type&lt;/code&gt;&lt;/td&gt;
+&lt;td&gt;&lt;code&gt;DRL_ACCOUNTING_SETTINGS_RETRY_AFTER_TYPE&lt;/code&gt;&lt;/td&gt;
 &lt;td&gt;&lt;code&gt;delay-seconds&lt;/code&gt;&lt;/td&gt;
-&lt;td&gt;Format of the &lt;code&gt;Retry-After&lt;/code&gt; header: &lt;code&gt;delay-seconds&lt;/code&gt; or &lt;code&gt;http-date&lt;/code&gt;&lt;/td&gt;
+&lt;td&gt;Format of the &lt;code&gt;Retry-After&lt;/code&gt; response header: &lt;code&gt;delay-seconds&lt;/code&gt; or &lt;code&gt;http-date&lt;/code&gt;&lt;/td&gt;
 &lt;/tr&gt;
 &lt;tr&gt;
 &lt;td&gt;&lt;code&gt;flush-interval&lt;/code&gt;&lt;/td&gt;
+&lt;td&gt;&lt;code&gt;DRL_ACCOUNTING_SETTINGS_FLUSH_INTERVAL&lt;/code&gt;&lt;/td&gt;
 &lt;td&gt;&lt;code&gt;200ms&lt;/code&gt;&lt;/td&gt;
 &lt;td&gt;How often the Flusher drains per-owner buffers&lt;/td&gt;
 &lt;/tr&gt;
 &lt;tr&gt;
 &lt;td&gt;&lt;code&gt;max-batch-size&lt;/code&gt;&lt;/td&gt;
+&lt;td&gt;&lt;code&gt;DRL_ACCOUNTING_SETTINGS_MAX_BATCH_SIZE&lt;/code&gt;&lt;/td&gt;
 &lt;td&gt;&lt;code&gt;1000&lt;/code&gt;&lt;/td&gt;
 &lt;td&gt;Maximum entries per batch; triggers an immediate flush when reached&lt;/td&gt;
 &lt;/tr&gt;
+&lt;tr&gt;
+&lt;td&gt;&lt;code&gt;capacity&lt;/code&gt;&lt;/td&gt;
+&lt;td&gt;&lt;code&gt;DRL_ACCOUNTING_SETTINGS_CAPACITY&lt;/code&gt;&lt;/td&gt;
+&lt;td&gt;—&lt;/td&gt;
+&lt;td&gt;Token-bucket burst size (required when &lt;code&gt;algorithm&lt;/code&gt; is &lt;code&gt;token-bucket&lt;/code&gt;)&lt;/td&gt;
+&lt;/tr&gt;
+&lt;tr&gt;
+&lt;td&gt;&lt;code&gt;refill-rate&lt;/code&gt;&lt;/td&gt;
+&lt;td&gt;&lt;code&gt;DRL_ACCOUNTING_SETTINGS_REFILL_RATE&lt;/code&gt;&lt;/td&gt;
+&lt;td&gt;—&lt;/td&gt;
+&lt;td&gt;Token-bucket refill rate in tokens per second (required when &lt;code&gt;algorithm&lt;/code&gt; is &lt;code&gt;token-bucket&lt;/code&gt;)&lt;/td&gt;
+&lt;/tr&gt;
+&lt;tr&gt;
+&lt;td&gt;&lt;code&gt;use-x-forwarded-for&lt;/code&gt;&lt;/td&gt;
+&lt;td&gt;&lt;code&gt;DRL_ACCOUNTING_SETTINGS_USE_X_FORWARDED_FOR&lt;/code&gt;&lt;/td&gt;
+&lt;td&gt;&lt;code&gt;false&lt;/code&gt;&lt;/td&gt;
+&lt;td&gt;Extract the client IP from the &lt;code&gt;X-Forwarded-For&lt;/code&gt; header instead of the socket remote address. See &lt;a href="#x-forwarded-for-xff-ip-extraction"&gt;X-Forwarded-For&lt;/a&gt; below.&lt;/td&gt;
+&lt;/tr&gt;
+&lt;tr&gt;
+&lt;td&gt;&lt;code&gt;use-x-forwarded-for-direction&lt;/code&gt;&lt;/td&gt;
+&lt;td&gt;&lt;code&gt;DRL_ACCOUNTING_SETTINGS_USE_X_FORWARDED_FOR_DIRECTION&lt;/code&gt;&lt;/td&gt;
+&lt;td&gt;&lt;code&gt;left&lt;/code&gt;&lt;/td&gt;
+&lt;td&gt;Which end of the XFF chain to read from: &lt;code&gt;left&lt;/code&gt; (client end) or &lt;code&gt;right&lt;/code&gt; (proxy end). Only evaluated when &lt;code&gt;use-x-forwarded-for&lt;/code&gt; is &lt;code&gt;true&lt;/code&gt;.&lt;/td&gt;
+&lt;/tr&gt;
+&lt;tr&gt;
+&lt;td&gt;&lt;code&gt;use-x-forwarded-for-index&lt;/code&gt;&lt;/td&gt;
+&lt;td&gt;&lt;code&gt;DRL_ACCOUNTING_SETTINGS_USE_X_FORWARDED_FOR_INDEX&lt;/code&gt;&lt;/td&gt;
+&lt;td&gt;&lt;code&gt;0&lt;/code&gt;&lt;/td&gt;
+&lt;td&gt;Zero-based offset from the chosen direction. Only evaluated when &lt;code&gt;use-x-forwarded-for&lt;/code&gt; is &lt;code&gt;true&lt;/code&gt;.&lt;/td&gt;
+&lt;/tr&gt;
 &lt;/tbody&gt;
 &lt;/table&gt;
+&lt;p&gt;&lt;strong&gt;Validation rules (when &lt;code&gt;use-x-forwarded-for&lt;/code&gt; is &lt;code&gt;true&lt;/code&gt;):&lt;/strong&gt;&lt;/p&gt;
+&lt;ul&gt;
+&lt;li&gt;&lt;code&gt;use-x-forwarded-for-direction&lt;/code&gt; must be &lt;code&gt;left&lt;/code&gt; or &lt;code&gt;right&lt;/code&gt; (case-insensitive); defaults to &lt;code&gt;left&lt;/code&gt; if omitted&lt;/li&gt;
+&lt;li&gt;&lt;code&gt;use-x-forwarded-for-index&lt;/code&gt; must be ≥ 0&lt;/li&gt;
+&lt;/ul&gt;
+&lt;hr&gt;
+&lt;h3&gt;X-Forwarded-For (XFF) IP extraction&lt;span class="hx:absolute hx:-mt-20" id="x-forwarded-for-xff-ip-extraction"&gt;&lt;/span&gt;
+&lt;a href="#x-forwarded-for-xff-ip-extraction" class="subheading-anchor" aria-label="Permalink for this section"&gt;&lt;/a&gt;&lt;/h3&gt;&lt;p&gt;When DRL runs behind one or more reverse proxies, the Envoy socket remote address is the proxy IP rather
+than the originating client. Enabling &lt;code&gt;use-x-forwarded-for&lt;/code&gt; tells the accounting engine to parse the
+&lt;code&gt;X-Forwarded-For&lt;/code&gt; header and use a specific entry as the effective source IP for rate-limit accounting and
+entity key construction.&lt;/p&gt;
+&lt;p&gt;&lt;strong&gt;How the header is structured&lt;/strong&gt;&lt;/p&gt;
+&lt;p&gt;Each proxy in the chain appends the address it received the connection from, left to right:&lt;/p&gt;
+&lt;div class="hextra-code-block hx:relative hx:mt-6 hx:first:mt-0 hx:group/code"&gt;
+&lt;div&gt;&lt;pre&gt;&lt;code&gt;X-Forwarded-For: &amp;lt;client&amp;gt;, &amp;lt;proxy1&amp;gt;, &amp;lt;proxy2&amp;gt;&lt;/code&gt;&lt;/pre&gt;&lt;/div&gt;&lt;div class="hextra-code-copy-btn-container hx:opacity-0 hx:transition hx:group-hover/code:opacity-100 hx:flex hx:gap-1 hx:absolute hx:m-[11px] hx:right-0 hx:top-0"&gt;
+&lt;button
+class="hextra-code-copy-btn hx:group/copybtn hx:cursor-pointer hx:transition-all hx:active:opacity-50 hx:bg-primary-700/5 hx:border hx:border-black/5 hx:text-gray-600 hx:hover:text-gray-900 hx:rounded-md hx:p-1.5 hx:dark:bg-primary-300/10 hx:dark:border-white/10 hx:dark:text-gray-400 hx:dark:hover:text-gray-50"
+title="Copy code"
+aria-label="Copy code"
+data-copied-label="Copied!"
+&gt;
+&lt;div class="hextra-copy-icon hx:group-[.copied]/copybtn:hidden hx:pointer-events-none hx:h-4 hx:w-4"&gt;&lt;/div&gt;
+&lt;div class="hextra-success-icon hx:hidden hx:group-[.copied]/copybtn:block hx:pointer-events-none hx:h-4 hx:w-4"&gt;&lt;/div&gt;
+&lt;/button&gt;
+&lt;/div&gt;
+&lt;/div&gt;
+&lt;p&gt;Index &lt;code&gt;0&lt;/code&gt; from the &lt;strong&gt;left&lt;/strong&gt; is the original client IP (cheapest to obtain, but trivially spoofable by the
+client). Index &lt;code&gt;0&lt;/code&gt; from the &lt;strong&gt;right&lt;/strong&gt; is the last proxy.&lt;/p&gt;
+&lt;h4&gt;Recipe 1 — Single trusted proxy, simple setup&lt;span class="hx:absolute hx:-mt-20" id="recipe-1--single-trusted-proxy-simple-setup"&gt;&lt;/span&gt;
+&lt;a href="#recipe-1--single-trusted-proxy-simple-setup" class="subheading-anchor" aria-label="Permalink for this section"&gt;&lt;/a&gt;&lt;/h4&gt;&lt;p&gt;Use the leftmost entry when there is exactly one proxy and you accept that a malicious client could
+forge the header value:&lt;/p&gt;
+&lt;div class="hextra-code-block hx:relative hx:mt-6 hx:first:mt-0 hx:group/code"&gt;
+&lt;div&gt;&lt;div class="highlight"&gt;&lt;pre tabindex="0" class="chroma"&gt;&lt;code class="language-kdl" data-lang="kdl"&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;&lt;span class="nl"&gt;accounting&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="o"&gt;{&lt;/span&gt;&lt;span class="nl"&gt;
+&lt;/span&gt;&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;&lt;span class="nl"&gt; settings&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="o"&gt;{&lt;/span&gt;&lt;span class="nl"&gt;
+&lt;/span&gt;&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;&lt;span class="nl"&gt; use-x-forwarded-for&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="s"&gt;true&lt;/span&gt;&lt;span class="w"&gt;
+&lt;/span&gt;&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;&lt;span class="nl"&gt; use-x-forwarded-for-direction&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="s"&gt;&amp;#34;left&amp;#34;&lt;/span&gt;&lt;span class="w"&gt;
+&lt;/span&gt;&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;&lt;span class="nl"&gt; use-x-forwarded-for-index&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="m"&gt;0&lt;/span&gt;&lt;span class="w"&gt;
+&lt;/span&gt;&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="o"&gt;}&lt;/span&gt;&lt;span class="w"&gt;
+&lt;/span&gt;&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;&lt;span class="o"&gt;}&lt;/span&gt;&lt;/span&gt;&lt;/span&gt;&lt;/code&gt;&lt;/pre&gt;&lt;/div&gt;&lt;/div&gt;&lt;div class="hextra-code-copy-btn-container hx:opacity-0 hx:transition hx:group-hover/code:opacity-100 hx:flex hx:gap-1 hx:absolute hx:m-[11px] hx:right-0 hx:top-0"&gt;
+&lt;button
+class="hextra-code-copy-btn hx:group/copybtn hx:cursor-pointer hx:transition-all hx:active:opacity-50 hx:bg-primary-700/5 hx:border hx:border-black/5 hx:text-gray-600 hx:hover:text-gray-900 hx:rounded-md hx:p-1.5 hx:dark:bg-primary-300/10 hx:dark:border-white/10 hx:dark:text-gray-400 hx:dark:hover:text-gray-50"
+title="Copy code"
+aria-label="Copy code"
+data-copied-label="Copied!"
+&gt;
+&lt;div class="hextra-copy-icon hx:group-[.copied]/copybtn:hidden hx:pointer-events-none hx:h-4 hx:w-4"&gt;&lt;/div&gt;
+&lt;div class="hextra-success-icon hx:hidden hx:group-[.copied]/copybtn:block hx:pointer-events-none hx:h-4 hx:w-4"&gt;&lt;/div&gt;
+&lt;/button&gt;
+&lt;/div&gt;
+&lt;/div&gt;
+&lt;h4&gt;Recipe 2 — Single trusted proxy, anti-spoofing&lt;span class="hx:absolute hx:-mt-20" id="recipe-2--single-trusted-proxy-anti-spoofing"&gt;&lt;/span&gt;
+&lt;a href="#recipe-2--single-trusted-proxy-anti-spoofing" class="subheading-anchor" aria-label="Permalink for this section"&gt;&lt;/a&gt;&lt;/h4&gt;&lt;p&gt;Use &lt;code&gt;direction &amp;quot;right&amp;quot;&lt;/code&gt; with &lt;code&gt;index 1&lt;/code&gt; to read the IP that &lt;strong&gt;your&lt;/strong&gt; outermost controlled proxy recorded
+as the upstream address. This entry is appended by your proxy — the client cannot forge it:&lt;/p&gt;
+&lt;div class="hextra-code-block hx:relative hx:mt-6 hx:first:mt-0 hx:group/code"&gt;
+&lt;div&gt;&lt;pre&gt;&lt;code&gt;X-Forwarded-For: &amp;lt;client-or-spoofed&amp;gt;, &amp;lt;trusted-proxy-appended-this&amp;gt;
+└── right index 1 reads here&lt;/code&gt;&lt;/pre&gt;&lt;/div&gt;&lt;div class="hextra-code-copy-btn-container hx:opacity-0 hx:transition hx:group-hover/code:opacity-100 hx:flex hx:gap-1 hx:absolute hx:m-[11px] hx:right-0 hx:top-0"&gt;
+&lt;button
+class="hextra-code-copy-btn hx:group/copybtn hx:cursor-pointer hx:transition-all hx:active:opacity-50 hx:bg-primary-700/5 hx:border hx:border-black/5 hx:text-gray-600 hx:hover:text-gray-900 hx:rounded-md hx:p-1.5 hx:dark:bg-primary-300/10 hx:dark:border-white/10 hx:dark:text-gray-400 hx:dark:hover:text-gray-50"
+title="Copy code"
+aria-label="Copy code"
+data-copied-label="Copied!"
+&gt;
+&lt;div class="hextra-copy-icon hx:group-[.copied]/copybtn:hidden hx:pointer-events-none hx:h-4 hx:w-4"&gt;&lt;/div&gt;
+&lt;div class="hextra-success-icon hx:hidden hx:group-[.copied]/copybtn:block hx:pointer-events-none hx:h-4 hx:w-4"&gt;&lt;/div&gt;
+&lt;/button&gt;
+&lt;/div&gt;
+&lt;/div&gt;
+&lt;div class="hextra-code-block hx:relative hx:mt-6 hx:first:mt-0 hx:group/code"&gt;
+&lt;div&gt;&lt;div class="highlight"&gt;&lt;pre tabindex="0" class="chroma"&gt;&lt;code class="language-kdl" data-lang="kdl"&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;&lt;span class="nl"&gt;accounting&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="o"&gt;{&lt;/span&gt;&lt;span class="nl"&gt;
+&lt;/span&gt;&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;&lt;span class="nl"&gt; settings&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="o"&gt;{&lt;/span&gt;&lt;span class="nl"&gt;
+&lt;/span&gt;&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;&lt;span class="nl"&gt; use-x-forwarded-for&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="s"&gt;true&lt;/span&gt;&lt;span class="w"&gt;
+&lt;/span&gt;&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;&lt;span class="nl"&gt; use-x-forwarded-for-direction&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="s"&gt;&amp;#34;right&amp;#34;&lt;/span&gt;&lt;span class="w"&gt;
+&lt;/span&gt;&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;&lt;span class="nl"&gt; use-x-forwarded-for-index&lt;/span&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="m"&gt;1&lt;/span&gt;&lt;span class="w"&gt;
+&lt;/span&gt;&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;&lt;span class="w"&gt; &lt;/span&gt;&lt;span class="o"&gt;}&lt;/span&gt;&lt;span class="w"&gt;
+&lt;/span&gt;&lt;/span&gt;&lt;/span&gt;&lt;span class="line"&gt;&lt;span class="cl"&gt;&lt;span class="o"&gt;}&lt;/span&gt;&lt;/span&gt;&lt;/span&gt;&lt;/code&gt;&lt;/pre&gt;&lt;/div&gt;&lt;/div&gt;&lt;div class="hextra-code-copy-btn-container hx:opacity-0 hx:transition hx:group-hover/code:opacity-100 hx:flex hx:gap-1 hx:absolute hx:m-[11px] hx:right-0 hx:top-0"&gt;
+&lt;button
+class="hextra-code-copy-btn hx:group/copybtn hx:cursor-pointer hx:transition-all hx:active:opacity-50 hx:bg-primary-700/5 hx:border hx:border-black/5 hx:text-gray-600 hx:hover:text-gray-900 hx:rounded-md hx:p-1.5 hx:dark:bg-primary-300/10 hx:dark:border-white/10 hx:dark:text-gray-400 hx:dark:hover:text-gray-50"
+title="Copy code"
+aria-label="Copy code"
+data-copied-label="Copied!"
+&gt;
+&lt;div class="hextra-copy-icon hx:group-[.copied]/copybtn:hidden hx:pointer-events-none hx:h-4 hx:w-4"&gt;&lt;/div&gt;
+&lt;div class="hextra-success-icon hx:hidden hx:group-[.copied]/copybtn:block hx:pointer-events-none hx:h-4 hx:w-4"&gt;&lt;/div&gt;
+&lt;/button&gt;
+&lt;/div&gt;
+&lt;/div&gt;
+&lt;h4&gt;Fallback behaviour&lt;span class="hx:absolute hx:-mt-20" id="fallback-behaviour"&gt;&lt;/span&gt;
+&lt;a href="#fallback-behaviour" class="subheading-anchor" aria-label="Permalink for this section"&gt;&lt;/a&gt;&lt;/h4&gt;&lt;p&gt;When &lt;code&gt;use-x-forwarded-for&lt;/code&gt; is &lt;code&gt;true&lt;/code&gt; but the header is absent, empty, or the computed index is out of
+range, DRL falls back silently to the socket remote address without logging a warning.&lt;/p&gt;
 &lt;hr&gt;
 &lt;h3&gt;&lt;code&gt;accounting.rules&lt;/code&gt;&lt;span class="hx:absolute hx:-mt-20" id="accountingrules"&gt;&lt;/span&gt;
 &lt;a href="#accountingrules" class="subheading-anchor" aria-label="Permalink for this section"&gt;&lt;/a&gt;&lt;/h3&gt;&lt;p&gt;Rate-limiting rules are defined as named children under the &lt;code&gt;rules&lt;/code&gt; node. Each rule matches a URI path
