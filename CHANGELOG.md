@@ -1,5 +1,23 @@
 # Changelog
 
+## [0.1.5](https://github.com/gchiesa/drl/compare/v0.1.4...v0.1.5) (2026-05-14)
+
+
+### Features
+
+* add x-forwarded-for suppport ([ec3dc11](https://github.com/gchiesa/drl/commit/ec3dc113d6f46177af8aa1194537b2d014eadd58))
+
+
+### Bug Fixes
+
+* bug evaluating the headers case sensitivity ([e75148c](https://github.com/gchiesa/drl/commit/e75148ca4e7276394be84a21cd70d95a4cc3119a))
+* linting issue ([86e37c5](https://github.com/gchiesa/drl/commit/86e37c5cb7cd9e0422bdc66029ca45504ab114c9))
+
+
+### Docs
+
+* add contribution, license and security markdown + finalized some other docs ([d513034](https://github.com/gchiesa/drl/commit/d51303448646282b5e8c7a93357fa02b525d0a63))
+
 ## [0.1.4](https://github.com/gchiesa/drl/compare/v0.1.3...v0.1.4) (2026-05-06)
 
 
