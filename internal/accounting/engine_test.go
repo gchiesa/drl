@@ -246,20 +246,21 @@ func TestEngine_Process_WithHeaders(t *testing.T) {
 	e, ac := testEngine(t, rules)
 	defer ac.Close()
 
+	// Envoy forwards headers in lowercase (HTTP/2 spec).
 	headers := map[string]string{
-		"X-API-Key":    "abc123",
-		"Content-Type": "application/json",
-		"User-Agent":   "test",
+		"x-api-key":    "abc123",
+		"content-type": "application/json",
+		"user-agent":   "test",
 	}
 
 	e.Process("10.0.0.1", "/api/v1", headers)
 
-	// The entity should only include X-API-Key (from rule headers) and the
-	// bucket key uses the rule's PathPrefix, not the literal request path.
+	// The entity should only include x-api-key (normalised to lowercase per
+	// HTTP/2 spec) and the bucket key uses the rule's PathPrefix.
 	entity := model.Entity{
 		IP:      "10.0.0.1",
 		Path:    "/api",
-		Headers: map[string]string{"X-API-Key": "abc123"},
+		Headers: map[string]string{"x-api-key": "abc123"},
 	}
 	key := entity.Key()
 
@@ -551,17 +552,19 @@ func TestEngine_BulkLoad_DoesNotEvaluateBlocking(t *testing.T) {
 }
 
 func TestFilterHeaders(t *testing.T) {
+	// Incoming headers are always lowercase (Envoy/HTTP2 contract).
+	// Rule-configured keys may be in mixed case and are lowercased before lookup.
 	headers := map[string]string{
-		"X-API-Key":    "key1",
-		"Content-Type": "json",
-		"User-Agent":   "bot",
+		"x-api-key":    "key1",
+		"content-type": "json",
+		"user-agent":   "bot",
 	}
 
-	// Filter to specific keys
+	// Filter to specific keys — result uses lowercase keys.
 	result := filterHeaders(headers, []string{"X-API-Key", "Content-Type"})
 	assert.Len(t, result, 2)
-	assert.Equal(t, "key1", result["X-API-Key"])
-	assert.Equal(t, "json", result["Content-Type"])
+	assert.Equal(t, "key1", result["x-api-key"])
+	assert.Equal(t, "json", result["content-type"])
 
 	// No keys specified
 	result = filterHeaders(headers, nil)
@@ -574,4 +577,14 @@ func TestFilterHeaders(t *testing.T) {
 	// Nil headers
 	result = filterHeaders(nil, []string{"X-API-Key"})
 	assert.Nil(t, result)
+
+	// Mixed-case rule key matched against lowercase Envoy header.
+	envoyHeaders := map[string]string{
+		"apikey":       "testkey",
+		"content-type": "application/json",
+	}
+	result = filterHeaders(envoyHeaders, []string{"ApiKey", "Content-Type"})
+	assert.Len(t, result, 2)
+	assert.Equal(t, "testkey", result["apikey"])
+	assert.Equal(t, "application/json", result["content-type"])
 }

@@ -2,6 +2,7 @@ package accounting
 
 import (
 	"log/slog"
+	"strings"
 	"sync/atomic"
 	"time"
 
@@ -350,15 +351,23 @@ func isPathSegmentMatch(path, prefix string) bool {
 	return path[len(prefix)] == '/'
 }
 
-// filterHeaders returns a new map containing only the specified header keys.
+// filterHeaders returns a new map containing only the header keys named by
+// keys, with both key sides normalised to lowercase.
+//
+// Incoming headers are assumed to already be lowercase — Envoy enforces this
+// via the HTTP/2 specification, so there is no need to re-normalise them.
+// Only the rule-configured key names (which may be authored in mixed case,
+// e.g. "ApiKey") are lowercased before the lookup. This avoids an extra map
+// allocation and an O(H) scan over all incoming headers on every request.
 func filterHeaders(headers map[string]string, keys []string) map[string]string {
 	if len(keys) == 0 || headers == nil {
 		return nil
 	}
 	result := make(map[string]string, len(keys))
 	for _, k := range keys {
-		if v, ok := headers[k]; ok {
-			result[k] = v
+		kLower := strings.ToLower(k)
+		if v, ok := headers[kLower]; ok {
+			result[kLower] = v
 		}
 	}
 	if len(result) == 0 {
