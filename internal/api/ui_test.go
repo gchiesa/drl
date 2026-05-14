@@ -24,13 +24,13 @@ func TestNewUIAuthManager(t *testing.T) {
 	if err != nil {
 		t.Fatalf("newUIAuthManager returned error: %v", err)
 	}
-	if m == nil {
+	if m == nil { // nolint:staticcheck
 		t.Fatal("expected non-nil manager")
 	}
-	if m.serverPrivKey == nil {
+	if m.serverPrivKey == nil { // nolint:staticcheck
 		t.Error("expected server private key to be set")
 	}
-	if len(m.bootstrapSigningKey) == 0 {
+	if len(m.bootstrapSigningKey) == 0 { // nolint:staticcheck
 		t.Error("expected bootstrap signing key to be set")
 	}
 }
