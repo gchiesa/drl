@@ -128,8 +128,9 @@ func (e *Engine) BuildEntityKey(sourceIP, path string, headers map[string]string
 // request under that prefix shares one counter, and the Headers field is
 // filtered to only the keys named by the rule.
 func (e *Engine) buildEntity(sourceIP string, rule *accountingRuleWithName, headers map[string]string) model.Entity {
+	effectiveIP := extractSourceIP(sourceIP, headers, &e.settings)
 	return model.Entity{
-		IP:      sourceIP,
+		IP:      effectiveIP,
 		Path:    rule.PathPrefix,
 		Headers: filterHeaders(headers, rule.Headers),
 	}
@@ -151,8 +152,7 @@ func (e *Engine) resolveEntity(sourceIP, path string, headers map[string]string)
 	if rule == nil {
 		return nil, model.Entity{}, 0, "", false
 	}
-	effectiveIP := extractSourceIP(sourceIP, headers, &e.settings)
-	entity = e.buildEntity(effectiveIP, rule, headers)
+	entity = e.buildEntity(sourceIP, rule, headers)
 	entityHash = entity.Hash()
 	key = model.HashToEntityKey(entityHash)
 	return rule, entity, entityHash, key, true
