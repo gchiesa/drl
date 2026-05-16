@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.6](https://github.com/gchiesa/drl/compare/v0.1.5...v0.1.6) (2026-05-16)
+
+
+### Bug Fixes
+
+* moved retrieval of effectiveIP to buildEntity ([a91ff7a](https://github.com/gchiesa/drl/commit/a91ff7a3d7df7efc2266900d8fed747fa72fbe7c))
+
 ## [0.1.5](https://github.com/gchiesa/drl/compare/v0.1.4...v0.1.5) (2026-05-14)
 
 
