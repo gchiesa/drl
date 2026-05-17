@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.7](https://github.com/gchiesa/drl/compare/v0.1.6...v0.1.7) (2026-05-17)
+
+
+### Bug Fixes
+
+* ensure Host header is reinjected for rule-based filtering ([110db6b](https://github.com/gchiesa/drl/commit/110db6b99c153863fdafa2718d77ef29fd1519cc))
+
 ## [0.1.6](https://github.com/gchiesa/drl/compare/v0.1.5...v0.1.6) (2026-05-16)
 
 
