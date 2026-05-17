@@ -90,6 +90,23 @@ func (s *Server) Check(_ context.Context, req *authv3.CheckRequest) (*authv3.Che
 			if h := httpReq.GetHttp(); h != nil {
 				path = h.GetPath()
 				headers = h.GetHeaders()
+				// Envoy promotes the Host/authority header into a dedicated
+				// first-class field and does NOT duplicate it in the headers
+				// map. Re-inject it so rule-based header filtering can match
+				// a rule entry of "Host".
+				if host := h.GetHost(); host != "" {
+					if headers == nil {
+						headers = make(map[string]string)
+					} else {
+						// Copy to avoid mutating the proto-owned map.
+						copied := make(map[string]string, len(headers)+1)
+						for k, v := range headers {
+							copied[k] = v
+						}
+						headers = copied
+					}
+					headers["host"] = host
+				}
 			}
 		}
 	}
