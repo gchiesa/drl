@@ -2,6 +2,7 @@ package api
 
 import (
 	"fmt"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
@@ -110,12 +111,42 @@ func (s *Server) handleBlockEntityList(c *fiber.Ctx) error {
 		if e.Entity != nil {
 			entry.IP = e.Entity.IP
 			entry.URIPath = e.Entity.Path
-			entry.Headers = e.Entity.Headers
+			redactedHeaders := make(map[string]string, len(e.Entity.Headers))
+			for k, v := range e.Entity.Headers {
+				if expr, ok := s.blocklistHeaderRedactions[k]; ok {
+					redactedHeaders[k] = maskHeader(v, expr)
+				} else {
+					redactedHeaders[k] = v
+				}
+			}
+			entry.Headers = redactedHeaders
 		}
 		result = append(result, entry)
 	}
 
 	return c.Status(fiber.StatusOK).JSON(result)
+}
+
+// maskHeader redacts a header value using the first capturing group of expr.
+// The matched capture group is kept verbatim; every other character in the
+// value is replaced with '*'.
+//
+// Example: value="Bearer sk_test_abc123", expr=`^(.{0,6}).*$`
+//
+//	→ "Bearer***************"
+//
+// If the expression does not match, or contains no capture group, the original
+// value is returned unchanged.
+func maskHeader(headerValue string, expr *regexp.Regexp) string {
+	locs := expr.FindStringSubmatchIndex(headerValue)
+	// locs layout: [fullStart, fullEnd, group1Start, group1End, ...]
+	if len(locs) < 4 || locs[2] < 0 {
+		return headerValue
+	}
+	g1Start, g1End := locs[2], locs[3]
+	return strings.Repeat("*", g1Start) +
+		headerValue[g1Start:g1End] +
+		strings.Repeat("*", len(headerValue)-g1End)
 }
 
 // handleBlockEntityAdd handles POST /v1/blocked-entity/:ip/_path/*.

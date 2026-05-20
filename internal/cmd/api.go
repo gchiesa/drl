@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
+	"regexp"
 	"time"
 
 	"github.com/gchiesa/drl/internal/accounting"
@@ -60,21 +61,42 @@ func newApiServer(
 		}
 
 		apiKey, _ := config.GetPrivateAPIKey()
+
+		// Compile header redactions from all accounting rules into a single map.
+		// When the same header is configured in multiple rules the first definition wins.
+		headerRedactions := make(map[string]*regexp.Regexp)
+		for _, rule := range cfg.Accounting.Rules {
+			for header, pattern := range rule.HeaderRedactions {
+				if _, exists := headerRedactions[header]; exists {
+					continue
+				}
+				compiled, err := regexp.Compile(pattern)
+				if err != nil {
+					// patterns are validated at config load time; this is a safety net
+					log.Warn("skipping invalid header redaction pattern",
+						"header", header, "pattern", pattern, "error", err)
+					continue
+				}
+				headerRedactions[header] = compiled
+			}
+		}
+
 		apiCfg := api.ServerConfig{
-			Address:         cfg.InternalAPI.Address,
-			APIKey:          apiKey,
-			ClusterName:     cfg.Membership.ServiceName,
-			NodeID:          localIP,
-			Cluster:         clusterManager,
-			Logger:          log,
-			Blocklist:       cacheManager.Blocklist,
-			Broadcaster:     clusterManager.GetStateDelegate(),
-			DefaultBlockTTL: time.Duration(cfg.Cache.BlocklistDefaultTTLSeconds) * time.Second,
-			MetricsGatherer: metricsManager,
-			AccountingStats: accountingEngine,
-			BulkLoader:      accountingEngine,
-			Metrics:         metricsManager,
-			StaticConfig:    cfg,
+			Address:                   cfg.InternalAPI.Address,
+			APIKey:                    apiKey,
+			ClusterName:               cfg.Membership.ServiceName,
+			NodeID:                    localIP,
+			Cluster:                   clusterManager,
+			Logger:                    log,
+			Blocklist:                 cacheManager.Blocklist,
+			BlocklistHeaderRedactions: headerRedactions,
+			Broadcaster:               clusterManager.GetStateDelegate(),
+			DefaultBlockTTL:           time.Duration(cfg.Cache.BlocklistDefaultTTLSeconds) * time.Second,
+			MetricsGatherer:           metricsManager,
+			AccountingStats:           accountingEngine,
+			BulkLoader:                accountingEngine,
+			Metrics:                   metricsManager,
+			StaticConfig:              cfg,
 		}
 
 		apiServer, err = api.NewServer(apiCfg)

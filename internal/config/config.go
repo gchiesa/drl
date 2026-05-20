@@ -4,11 +4,13 @@ import (
 	"embed"
 	"fmt"
 	"os"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
 
 	"github.com/caarlos0/env/v11"
+	"github.com/samber/lo"
 	"github.com/sblinch/kdl-go"
 )
 
@@ -86,8 +88,15 @@ type AccountingSettings struct {
 type AccountingRule struct {
 	PathPrefix string   `kdl:"path-prefix" json:"path-prefix"`
 	Headers    []string `kdl:"headers"     json:"headers,omitempty"`
-	Limit      int64    `kdl:"limit"       json:"limit"`
-	Per        string   `kdl:"per"         json:"per"`
+	// HeaderRedactions rules for headers. It uses capturing regexp and capturing groups
+	// so that you can extract a part of the value and omit the non-matching
+	// part.
+	// Examples:
+	// 1 - redact an API Key, e.g. {"Authorization": "^(.{0,3}).*$"}
+	// 2 - extract only the first portion of a FQDN {"Host": "^(\w+).*$"}
+	HeaderRedactions map[string]string `kdl:"redactions"  json:"redactions,omitempty"`
+	Limit            int64             `kdl:"limit"       json:"limit"`
+	Per              string            `kdl:"per"         json:"per"`
 }
 
 // WindowDuration returns the time.Duration for the rule's rate window
@@ -388,6 +397,13 @@ func (c *Config) Validate() error {
 		if !validPer[strings.ToLower(rule.Per)] {
 			errs = append(errs, fmt.Sprintf("accounting.rules[%s].per must be one of second, minute; got %q", key, rule.Per))
 		}
+		lo.MapValues(rule.HeaderRedactions, func(v string, k string) error {
+			_, err := regexp.Compile(v)
+			if err != nil {
+				errs = append(errs, fmt.Sprintf("accounting.rules[%s].header-redactions[%s] is not a valid regular expression: %s", key, k, err))
+			}
+			return nil
+		})
 	}
 
 	if len(errs) > 0 {

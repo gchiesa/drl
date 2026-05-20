@@ -62,6 +62,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
+	"regexp"
 	"strings"
 	"time"
 
@@ -152,24 +153,25 @@ func (noopMetricsGatherer) GatherForUI() map[string]float64 { return map[string]
 
 // Server represents the internal API server
 type Server struct {
-	app             *fiber.App
-	auth            *DigestAuthenticator
-	uiAuth          *uiAuthManager
-	logger          *slog.Logger
-	address         string
-	apiPort         string // port portion of address (e.g. "8082")
-	clusterName     string
-	nodeID          string
-	cluster         ClusterInfo
-	startTime       time.Time
-	blocklist       BlocklistOperator
-	broadcaster     Broadcaster
-	defaultBlockTTL time.Duration
-	accountingStats AccountingStatsProvider
-	bulkLoader      AccountingBulkLoader
-	metrics         BulkLoadMetricsRecorder
-	staticConfig    StaticConfigProvider
-	metricsGatherer MetricsGatherer
+	app                       *fiber.App
+	auth                      *DigestAuthenticator
+	uiAuth                    *uiAuthManager
+	logger                    *slog.Logger
+	address                   string
+	apiPort                   string // port portion of address (e.g. "8082")
+	clusterName               string
+	nodeID                    string
+	cluster                   ClusterInfo
+	startTime                 time.Time
+	blocklist                 BlocklistOperator
+	blocklistHeaderRedactions map[string]*regexp.Regexp
+	broadcaster               Broadcaster
+	defaultBlockTTL           time.Duration
+	accountingStats           AccountingStatsProvider
+	bulkLoader                AccountingBulkLoader
+	metrics                   BulkLoadMetricsRecorder
+	staticConfig              StaticConfigProvider
+	metricsGatherer           MetricsGatherer
 }
 
 // ServerConfig holds configuration for the API server
@@ -182,6 +184,9 @@ type ServerConfig struct {
 	Logger      *slog.Logger
 	// Blocklist is optional; when set, the block-entity endpoints are active.
 	Blocklist BlocklistOperator
+	// BlocklistHeaderRedactions is optional; when set it contains a map of headers
+	// and regexp patterns to use to extract parts of the value
+	BlocklistHeaderRedactions map[string]*regexp.Regexp
 	// Broadcaster is optional; when set, admin block/unblock events are gossiped
 	// to the rest of the cluster.
 	Broadcaster Broadcaster
@@ -226,6 +231,11 @@ func NewServer(cfg ServerConfig) (*Server, error) {
 		defaultTTL = 24 * time.Hour
 	}
 
+	blocklistHeaderRedactions := cfg.BlocklistHeaderRedactions
+	if blocklistHeaderRedactions == nil {
+		blocklistHeaderRedactions = make(map[string]*regexp.Regexp)
+	}
+
 	// Extract port from address (e.g. ":8082" → "8082")
 	apiPort := cfg.Address
 	if idx := strings.LastIndex(apiPort, ":"); idx >= 0 {
@@ -233,24 +243,25 @@ func NewServer(cfg ServerConfig) (*Server, error) {
 	}
 
 	server := &Server{
-		app:             app,
-		auth:            auth,
-		uiAuth:          uiAuth,
-		logger:          cfg.Logger,
-		address:         cfg.Address,
-		apiPort:         apiPort,
-		clusterName:     cfg.ClusterName,
-		nodeID:          cfg.NodeID,
-		cluster:         cfg.Cluster,
-		startTime:       time.Now(),
-		blocklist:       cfg.Blocklist,
-		broadcaster:     cfg.Broadcaster,
-		defaultBlockTTL: defaultTTL,
-		accountingStats: accountingStatsOrNoop(cfg.AccountingStats),
-		bulkLoader:      cfg.BulkLoader,
-		metrics:         cfg.Metrics,
-		staticConfig:    cfg.StaticConfig,
-		metricsGatherer: metricsGathererOrNoop(cfg.MetricsGatherer),
+		app:                       app,
+		auth:                      auth,
+		uiAuth:                    uiAuth,
+		logger:                    cfg.Logger,
+		address:                   cfg.Address,
+		apiPort:                   apiPort,
+		clusterName:               cfg.ClusterName,
+		nodeID:                    cfg.NodeID,
+		cluster:                   cfg.Cluster,
+		startTime:                 time.Now(),
+		blocklist:                 cfg.Blocklist,
+		blocklistHeaderRedactions: blocklistHeaderRedactions,
+		broadcaster:               cfg.Broadcaster,
+		defaultBlockTTL:           defaultTTL,
+		accountingStats:           accountingStatsOrNoop(cfg.AccountingStats),
+		bulkLoader:                cfg.BulkLoader,
+		metrics:                   cfg.Metrics,
+		staticConfig:              cfg.StaticConfig,
+		metricsGatherer:           metricsGathererOrNoop(cfg.MetricsGatherer),
 	}
 
 	// Setup routes

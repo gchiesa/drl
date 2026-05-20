@@ -65,6 +65,10 @@ accounting {
         payments-api {
             path-prefix "/api/v1/payments"
             headers     "X-API-Key" "X-Tenant-ID"
+            redactions {
+                "X-API-Key"   "^(.{0,3}).*$"
+                "X-Tenant-ID" "^(.{0,4}).*$"
+            }
             limit        500
             per          "minute"
         }
@@ -257,6 +261,9 @@ accounting {
         <rule-name> {
             path-prefix "/api/v1/..."
             headers     "Header-Name-1" "Header-Name-2"
+            redactions {
+                "Header-Name-1" "^(.{0,3}).*$"
+            }
             limit        1000
             per          "minute"
         }
@@ -268,11 +275,113 @@ accounting {
 |-------|----------|-------------|
 | `path-prefix` | Yes | URI path prefix to match. Matched using longest-prefix (radix tree). |
 | `headers` | No | One or more header names whose values are included in the entity key |
+| `redactions` | No | Map of header name → regex pattern. Applied when the internal API lists blocked entities. See [Header Redactions](#header-redactions) below. |
 | `limit` | Yes | Request count threshold before the entity is blocked |
 | `per` | Yes | Window unit: `second` or `minute` |
 
 DRL evaluates rules in definition order and applies the **first matching rule** to an entity. Entities that
 match no rule are passed through without accounting.
+
+---
+
+### Header Redactions
+
+The `redactions` block controls how sensitive header values are displayed when listing blocked entities via
+the internal API (`GET /v1/blocked-entity`). It does **not** affect rate-limit accounting — headers are still
+used in full for entity key construction.
+
+Each entry is a `"Header-Name" "regex"` pair. The regex **must contain exactly one capturing group** `(...)`.
+When a blocked entity is listed:
+
+- The portion matched by the first capturing group is kept verbatim.
+- Every other character in the value is replaced with `*`.
+- If the regex does not match, the original value is returned unchanged.
+
+The capture group `(...)` marks exactly the portion of the value to keep visible. Everything before and
+after it is replaced with `*`. The table below shows the four supported patterns:
+
+| Pattern | Example input        | Output                | Notes |
+|---------|----------------------|-----------------------|-------|
+| `^(.{0,3}).*$` | `sk_live_abc123`     | `sk_************`     | Keep first N chars |
+| `^(Bearer .{0,3}).*$` | `Bearer tok_abc123`  | `Bearer to**********` | Keep scheme + first N token chars |
+| `^glpat(.{0,7}).*$` | `glpat_abcdefgh1234` | `*****_abcdef******`  | Keep middle segment (group after a fixed prefix) |
+| `^(\\w+).*$` | `tenant.example.com` | `tenant**********`    | Keep up to the first non-word character |
+
+#### Examples
+
+**Keep only the first 3 characters of an API key:**
+
+```kdl
+redactions {
+    "X-Api-Key" "^(.{0,3}).*$"
+}
+```
+
+`sk_live_abc123xyz` → `sk_**************`
+
+---
+
+**Preserve the Bearer scheme word and the first 3 token characters:**
+
+```kdl
+redactions {
+    "Authorization" "^(Bearer .{0,3}).*$"
+}
+```
+
+`Bearer tok_abc123` → `Bearer to**********`
+
+---
+
+**Expose only the middle segment of a structured token (group after a known prefix):**
+
+The capture group sits in the middle; characters before it are also masked.
+
+```kdl
+redactions {
+    "Private-Token" "^glpat(.{0,7}).*$"
+}
+```
+
+`glpat_abcdefgh1234` → `*****_abcdef******`
+
+---
+
+**Keep only the first hostname label from a multi-part Host header:**
+
+```kdl
+redactions {
+    "Host" "^(\\w+).*$"
+}
+```
+
+`tenant.example.com` → `tenant************`
+
+---
+
+**Full rule example with redactions:**
+
+```kdl
+accounting {
+    rules {
+        payments-api {
+            path-prefix "/api/v1/payments"
+            headers     "X-Api-Key" "X-Tenant-ID"
+            redactions {
+                "X-Api-Key"   "^(.{0,3}).*$"
+                "X-Tenant-ID" "^(.{0,4}).*$"
+            }
+            limit 500
+            per   "minute"
+        }
+    }
+}
+```
+
+**Validation rules:**
+- Each regex value must be a valid Go regular expression (checked at startup).
+- At least one capturing group is required for masking to take effect; a pattern with no group leaves
+  the value unmodified.
 
 ## Docker Compose example
 
