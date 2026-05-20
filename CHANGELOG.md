@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.8](https://github.com/gchiesa/drl/compare/v0.1.7...v0.1.8) (2026-05-20)
+
+
+### Features
+
+* masking header via redactions in accounting rules ([4160721](https://github.com/gchiesa/drl/commit/4160721eb547bfe7ce09262dc1a6c8a1ed3e4bda))
+
 ## [0.1.7](https://github.com/gchiesa/drl/compare/v0.1.6...v0.1.7) (2026-05-17)
 
 
