@@ -5,6 +5,7 @@ import (
 	"io"
 	"log/slog"
 	"net/http/httptest"
+	"regexp"
 	"testing"
 	"time"
 
@@ -503,4 +504,145 @@ func TestBlockEntityList_Unauthenticated(t *testing.T) {
 	resp, err := server.app.Test(req)
 	require.NoError(t, err)
 	assert.Equal(t, 401, resp.StatusCode)
+}
+
+// --- maskHeader unit tests ---
+
+func TestMaskHeader_FirstCaptureGroupKept(t *testing.T) {
+	expr := regexp.MustCompile(`^(.{0,3}).*$`)
+	got := maskHeader("abcdef123", expr)
+	assert.Equal(t, "abc******", got)
+}
+
+func TestMaskHeader_ApiKeyPattern(t *testing.T) {
+	// Typical use-case from the docs: show first 3 chars, mask the rest.
+	expr := regexp.MustCompile(`^(.{0,3}).*$`)
+	got := maskHeader("sk_live_xyz9876", expr)
+	assert.Equal(t, "sk_************", got)
+}
+
+func TestMaskHeader_BearerToken(t *testing.T) {
+	expr := regexp.MustCompile(`^(Bearer .{0,3}).*$`)
+	got := maskHeader("Bearer sk_test_abc123", expr)
+	// "Bearer sk" (9 chars kept) + 11 stars
+	assert.Equal(t, "Bearer sk_***********", got)
+}
+
+func TestMaskHeader_NoMatch_ReturnsOriginal(t *testing.T) {
+	// Pattern requires at least 20 chars; short value won't match.
+	expr := regexp.MustCompile(`^(.{20,}).*$`)
+	got := maskHeader("short", expr)
+	assert.Equal(t, "short", got)
+}
+
+func TestMaskHeader_NoCaptureGroup_ReturnsOriginal(t *testing.T) {
+	// Regex matches but has no capturing group.
+	expr := regexp.MustCompile(`^.*$`)
+	got := maskHeader("somevalue", expr)
+	assert.Equal(t, "somevalue", got)
+}
+
+func TestMaskHeader_EmptyCaptureGroup_FullyMasked(t *testing.T) {
+	// Capture group matches zero characters → entire value is masked.
+	expr := regexp.MustCompile(`^(.{0}).*$`)
+	got := maskHeader("secret", expr)
+	assert.Equal(t, "******", got)
+}
+
+func TestMaskHeader_CaptureGroupCoversFullValue_NothingMasked(t *testing.T) {
+	expr := regexp.MustCompile(`^(.+)$`)
+	got := maskHeader("visible", expr)
+	assert.Equal(t, "visible", got)
+}
+
+// --- integration: handleBlockEntityList with header redactions ---
+
+func newTestServerWithRedactions(t *testing.T, bl BlocklistOperator, redactions map[string]*regexp.Regexp) *Server {
+	t.Helper()
+	server, err := NewServer(ServerConfig{
+		Address:                   ":0",
+		APIKey:                    "thisIsAVerySecureAPIKey123",
+		ClusterName:               "test-cluster",
+		NodeID:                    "node-1",
+		Cluster:                   &mockCluster{ready: true, members: []string{"node-1"}},
+		Logger:                    slog.New(slog.NewTextHandler(io.Discard, nil)),
+		Blocklist:                 bl,
+		BlocklistHeaderRedactions: redactions,
+		DefaultBlockTTL:           1 * time.Hour,
+	})
+	require.NoError(t, err)
+	return server
+}
+
+func TestBlockEntityList_HeaderRedactionApplied(t *testing.T) {
+	bl := newMockBlocklist()
+	redactions := map[string]*regexp.Regexp{
+		"X-Api-Key": regexp.MustCompile(`^(.{0,3}).*$`),
+	}
+	server := newTestServerWithRedactions(t, bl, redactions)
+
+	// Pre-populate blocklist with a sensitive header value.
+	entity := &model.Entity{
+		IP:      "10.0.0.1",
+		Path:    "api/v1/payments",
+		Headers: map[string]string{"X-Api-Key": "abcsecretkey123"},
+	}
+	bl.Block(entity.Key(), time.Hour, entity)
+
+	code, raw := doAuthenticatedRequest(t, server, "GET", "/v1/blocked-entity")
+	require.Equal(t, 200, code, "body: %s", string(raw))
+
+	var entries []models.BlockedEntityEntry
+	require.NoError(t, json.Unmarshal(raw, &entries))
+	require.Len(t, entries, 1)
+
+	got := entries[0].Headers["X-Api-Key"]
+	assert.Equal(t, "abc************", got, "first 3 chars kept, rest masked")
+}
+
+func TestBlockEntityList_UnredactedHeadersPassThrough(t *testing.T) {
+	bl := newMockBlocklist()
+	// Only redact X-Api-Key; User-Agent should pass through unchanged.
+	redactions := map[string]*regexp.Regexp{
+		"X-Api-Key": regexp.MustCompile(`^(.{0,3}).*$`),
+	}
+	server := newTestServerWithRedactions(t, bl, redactions)
+
+	entity := &model.Entity{
+		IP:      "10.0.0.2",
+		Path:    "api/v1",
+		Headers: map[string]string{"X-Api-Key": "abcsecret", "User-Agent": "ScraperBot/1.0"},
+	}
+	bl.Block(entity.Key(), time.Hour, entity)
+
+	code, raw := doAuthenticatedRequest(t, server, "GET", "/v1/blocked-entity")
+	require.Equal(t, 200, code)
+
+	var entries []models.BlockedEntityEntry
+	require.NoError(t, json.Unmarshal(raw, &entries))
+	require.Len(t, entries, 1)
+
+	assert.Equal(t, "abc******", entries[0].Headers["X-Api-Key"])
+	assert.Equal(t, "ScraperBot/1.0", entries[0].Headers["User-Agent"])
+}
+
+func TestBlockEntityList_NoRedactions_AllHeadersPassThrough(t *testing.T) {
+	bl := newMockBlocklist()
+	server := newTestServerWithBlocklist(t, bl, &mockBroadcaster{})
+
+	entity := &model.Entity{
+		IP:      "10.0.0.3",
+		Path:    "api/v1",
+		Headers: map[string]string{"Authorization": "Bearer tok123"},
+	}
+	bl.Block(entity.Key(), time.Hour, entity)
+
+	code, raw := doAuthenticatedRequest(t, server, "GET", "/v1/blocked-entity")
+	require.Equal(t, 200, code)
+
+	var entries []models.BlockedEntityEntry
+	require.NoError(t, json.Unmarshal(raw, &entries))
+	require.Len(t, entries, 1)
+
+	assert.Equal(t, "Bearer tok123", entries[0].Headers["Authorization"])
 }
