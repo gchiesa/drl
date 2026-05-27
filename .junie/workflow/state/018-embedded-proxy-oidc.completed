@@ -1,0 +1,167 @@
+# Milestone 018-embedded-proxy-oidc — Completed
+
+## Summary
+
+Added OpenID Connect (OIDC) JWT Bearer-token verification to the DRL embedded proxy.
+DRL acts exclusively as an OAuth 2.0 Resource Server: it validates tokens using OIDC discovery +
+JWKS, enforces scope requirements per route, and injects verified claims into request context for
+the accounting layer. All OIDC logic is self-contained inside `internal/proxy/` with no changes
+to `internal/cmd/`.
+
+---
+
+## New dependency
+
+- `github.com/coreos/go-oidc/v3 v3.18.0` — OIDC discovery, thread-safe JWKS caching, and
+  cryptographic signature verification. Transitively brings in `golang.org/x/oauth2` and
+  `github.com/go-jose/go-jose/v4`.
+
+---
+
+## Files created / modified
+
+| File | Action |
+|------|--------|
+| `go.mod` / `go.sum` | Added `go-oidc/v3` + transitive deps |
+| `internal/config/config.go` | Added `ProxyOIDCConfig`, `ProxyOIDCClaimsConfig`; extended `ProxyHostConfig` and `ProxyRouteConfig` |
+| `internal/proxy/middleware_oidc.go` | **New** — OIDC verifier, middleware, context helpers |
+| `internal/proxy/middleware_oidc_test.go` | **New** — 28 tests with mock OIDC provider |
+| `internal/proxy/proxy.go` | Extended `buildRouter` to wire OIDC per host/route |
+| `internal/metrics/metrics.go` | Added OIDC counter + histogram and helper methods |
+| `docs/content/docs/embedded-proxy.md` | **New** — engineering guide + Auth0 recipe |
+
+---
+
+## Configuration changes (`internal/config/config.go`)
+
+Added two new types:
+
+```go
+type ProxyOIDCClaimsConfig struct {
+    Scopes string `kdl:"scopes" json:"scopes,omitempty"` // default: "scope"
+    Roles  string `kdl:"roles"  json:"roles,omitempty"`  // default: "roles"
+}
+
+type ProxyOIDCConfig struct {
+    Issuer       string                `kdl:"issuer"         json:"issuer,omitempty"`
+    ClientID     string                `kdl:"client-id"      json:"client-id,omitempty"`
+    Audience     string                `kdl:"audience"       json:"audience,omitempty"`
+    Claims       ProxyOIDCClaimsConfig `kdl:"claims"         json:"claims,omitempty"`
+    JWKSCacheTTL time.Duration         `kdl:"jwks-cache-ttl" json:"jwks-cache-ttl,omitempty"`
+}
+```
+
+Extended `ProxyHostConfig` with `OIDC ProxyOIDCConfig kdl:"oidc"` and
+`ProxyRouteConfig` with `Scopes []string kdl:"scopes"` (populated from positional KDL args:
+`scopes "read" "write"`).
+
+---
+
+## OIDC Middleware (`internal/proxy/middleware_oidc.go`)
+
+### Exported surface
+
+- `OIDCClaims{Subject, Scopes, Roles}` — verified token identity stored in request context.
+- `OIDCClaimsFromContext(ctx) (OIDCClaims, bool)` — retrieves claims for downstream handlers.
+
+### Internal components
+
+- `newOIDCVerifier(ctx, cfg)` — calls `oidc.NewProvider` to fetch the OIDC discovery document
+  and configure a `*oidc.IDTokenVerifier`. Returns `nil, nil` when issuer is empty.
+- `Server.oidcMiddleware(hostname, verifier, requiredScopes, next)` — per-request pipeline:
+
+  | Step | Action | On failure |
+  |------|--------|-----------|
+  | 1 | Extract `Authorization: Bearer <token>` | `401` |
+  | 2 | Verify RS256/ES256 signature + `exp` claim | `401` |
+  | 3 | Audience check (`cfg.Audience != ""`) | `403` |
+  | 4 | Unmarshal custom claims | `401` |
+  | 5 | Scope enforcement (route `scopes` list) | `403` |
+  | 6 | Inject `OIDCClaims` into `r.Context()` | — |
+  | 7 | Call `next` (rateLimit → reverseProxy) | — |
+
+- `extractStringSliceClaim` — handles space-delimited strings (`"read write"`),
+  comma-delimited strings (`"read,write"`), and JSON arrays (`["read","write"]`).
+- `hasRequiredScopes` — O(n) set membership check.
+- `classifyOIDCError` — maps go-oidc error messages to metric label values:
+  `token_expired`, `invalid_signature`, `invalid_token`.
+
+---
+
+## Proxy Router (`internal/proxy/proxy.go`)
+
+`buildRouter` was extended to:
+
+1. Initialise one `oidcVerifier` per host that has `oidc.issuer` configured. A failed provider
+   init is non-fatal — DRL logs a warning and skips OIDC for that host (availability > security).
+2. Wrap routes with `require-auth true` in the order: OIDC → rateLimitMiddleware → reverseProxy.
+   Routes with `require-auth false` are unchanged.
+3. Warn when `require-auth true` is set but no OIDC issuer is configured for the host.
+
+---
+
+## Metrics (`internal/metrics/metrics.go`)
+
+Two new metric families added to `NewMetrics()` and registered with the shared Prometheus registry:
+
+| Metric | Type | Labels |
+|--------|------|--------|
+| `drl_proxy_oidc_requests_total` | Counter | `host`, `path`, `status` |
+| `drl_proxy_oidc_verification_duration_seconds` | Histogram | `host`, `path` |
+
+Status label values: `success`, `missing_token`, `token_expired`, `invalid_signature`,
+`forbidden_scope`, `invalid_token`.
+
+Helper methods: `IncOIDCRequest(host, path, status)`, `ObserveOIDCLatency(host, path, seconds)`.
+
+---
+
+## Tests (`internal/proxy/middleware_oidc_test.go`)
+
+28 new tests in package `proxy` (white-box). A self-contained mock OIDC provider is implemented
+using `net/http/httptest` + `crypto/rsa` + manual RS256 JWT construction (no external test
+dependencies). The mock exposes `/.well-known/openid-configuration` and `/jwks`.
+
+| Test | Scenario |
+|------|----------|
+| `TestOIDCMiddleware_MissingToken` | No Authorization header → 401 |
+| `TestOIDCMiddleware_InvalidSignature` | JWT signed with a different key → 401 |
+| `TestOIDCMiddleware_ExpiredToken` | `exp` in the past → 401 |
+| `TestOIDCMiddleware_AudienceMismatch` | Wrong `aud` claim → 403 |
+| `TestOIDCMiddleware_MissingRequiredScope` | Token has `read`, route needs `write` → 403 |
+| `TestOIDCMiddleware_ValidToken_PassThrough` | Valid token with correct scopes → 200 |
+| `TestOIDCMiddleware_RequireAuthFalse_NoCheck` | Public route, no token needed → 200 |
+| `TestOIDCMiddleware_ClaimsInjectedInContext` | `sub` and `scopes` available downstream |
+| `TestOIDCMiddleware_ArrayScopesClaim` | JSON-array scope claim satisfies requirements |
+| `TestOIDCMetrics_Registered` | New metrics fields non-nil, methods don't panic |
+| `TestExtractStringSliceClaim_*` (×4) | Space / comma / array / missing field |
+| `TestHasRequiredScopes_*` (×3) | All present / missing / empty required |
+| `TestClassifyOIDCError` (×3 subtests) | expired / signature / generic error mapping |
+
+All 37 proxy tests pass (35 pre-existing + 2 new from this milestone's test additions via
+integration run).
+
+---
+
+## Documentation (`docs/content/docs/embedded-proxy.md`)
+
+New file covering:
+- Architecture diagram (embedded proxy + OIDC RS role).
+- Basic proxy KDL configuration reference (TLS, routes).
+- Full OIDC KDL schema with all fields documented.
+- Verification pipeline table.
+- Scope claim format handling (space / comma / array).
+- Claims mapping table by IdP (Keycloak, Okta, Auth0, Entra ID).
+- Prometheus metrics reference table.
+- Auth0 step-by-step guide (create API, retrieve `.well-known`, configure scopes, write KDL, test
+  with client credentials flow).
+- Non-fatal OIDC failure behaviour explanation.
+
+---
+
+## Verification
+
+```
+mise run lint  → 0 issues
+mise run test  → 455 tests, 0 failures across all packages
+```

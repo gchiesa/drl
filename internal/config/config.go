@@ -188,6 +188,7 @@ type EmbeddedProxyTLSConfig struct {
 // ProxyHostConfig maps a virtual hostname to its routing rules.
 type ProxyHostConfig struct {
 	Hostname string             `kdl:",arg"   json:"hostname"`
+	OIDC     ProxyOIDCConfig    `kdl:"oidc"   json:"oidc,omitempty"`
 	Routes   ProxyRoutesWrapper `kdl:"routes" json:"routes"`
 }
 
@@ -204,6 +205,26 @@ type ProxyRouteConfig struct {
 	BalanceStrategy    string        `kdl:"balance-strategy"      json:"balance-strategy,omitempty"`
 	DNSRefreshInterval time.Duration `kdl:"dns-refresh-interval"  json:"dns-refresh-interval,omitempty"`
 	RequireAuth        bool          `kdl:"require-auth"          json:"require-auth"`
+	// Scopes lists the OAuth2 scopes required to access this route (used with require-auth true).
+	// Populated from a single KDL node with positional args: scopes "read" "write"
+	Scopes []string `kdl:"scopes" json:"scopes,omitempty"`
+}
+
+// ProxyOIDCClaimsConfig overrides the JWT claim field names used for scope/role extraction.
+// Useful for providers like Okta or Azure that use non-standard claim names.
+type ProxyOIDCClaimsConfig struct {
+	Scopes string `kdl:"scopes" json:"scopes,omitempty"` // default: "scope"
+	Roles  string `kdl:"roles"  json:"roles,omitempty"`  // default: "roles"
+}
+
+// ProxyOIDCConfig declares the OIDC Resource Server settings for a virtual host.
+// DRL acts as a Resource Server only — it validates Bearer tokens but never issues them.
+type ProxyOIDCConfig struct {
+	Issuer       string                `kdl:"issuer"         json:"issuer,omitempty"`
+	ClientID     string                `kdl:"client-id"      json:"client-id,omitempty"`
+	Audience     string                `kdl:"audience"       json:"audience,omitempty"`
+	Claims       ProxyOIDCClaimsConfig `kdl:"claims"         json:"claims,omitempty"`
+	JWKSCacheTTL time.Duration         `kdl:"jwks-cache-ttl" json:"jwks-cache-ttl,omitempty"`
 }
 
 func NewConfig() *Config {
