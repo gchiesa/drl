@@ -1,10 +1,39 @@
 <script>
   import RuleTable from '../components/RuleTable.svelte';
+  import ProxyTable from '../components/ProxyTable.svelte';
 
-  export let cfgAccounting = null;
-  export let cfgMembership = null;
-  export let cfgCache = null;
+  export let cfgAccounting    = null;
+  export let cfgMembership    = null;
+  export let cfgCache         = null;
+  export let cfgEmbeddedProxy = null;
   export let loading = false;
+
+  // Keys whose values are Go time.Duration (int64 nanoseconds) and should be
+  // rendered as human-readable strings.
+  const DURATION_KEYS = new Set([
+    'flush-interval',
+    'startup-delay',
+    'gossip-interval',
+    'dns-refresh-interval',
+  ]);
+
+  function isDurationKey(key) {
+    const last = key.split('.').pop();
+    return DURATION_KEYS.has(last);
+  }
+
+  function fmtDuration(ns) {
+    const n = Number(ns);
+    if (!n || isNaN(n)) return String(ns ?? '');
+    const ms = n / 1_000_000;
+    if (ms < 1) return `${Math.round(n / 1000)}µs`;
+    if (ms < 1000) return `${ms % 1 === 0 ? ms : ms.toFixed(1)}ms`;
+    const s = ms / 1000;
+    if (s < 60) return `${s % 1 === 0 ? s : s.toFixed(1)}s`;
+    const m = Math.floor(s / 60);
+    const rem = s % 60;
+    return rem === 0 ? `${m}m` : `${m}m ${Math.round(rem)}s`;
+  }
 
   // Flatten nested objects into key-value pairs for display
   function flattenObj(obj, prefix = '') {
@@ -16,7 +45,12 @@
     });
   }
 
-  // Extract rules array from accounting config
+  function fmtVal(key, v) {
+    if (v === null || v === undefined) return '—';
+    if (isDurationKey(key)) return fmtDuration(v);
+    return v;
+  }
+
   $: accountingKV = flattenObj(cfgAccounting);
 
   // Extract rules — check common paths
@@ -32,12 +66,17 @@
       : [];
 
   $: membershipKV = flattenObj(cfgMembership);
-  $: cacheKV = flattenObj(cfgCache);
+  $: cacheKV      = flattenObj(cfgCache);
 
-  function fmtVal(v) {
-    if (v === null || v === undefined) return '—';
-    return v;
-  }
+  // Derived values for the Embedded Proxy info card (non-route fields)
+  $: proxyEnabled = cfgEmbeddedProxy?.enabled ?? false;
+  $: proxyInfoKV  = cfgEmbeddedProxy
+    ? [
+        ['enabled', String(cfgEmbeddedProxy.enabled ?? false)],
+        ['listen',  cfgEmbeddedProxy.listen ?? '—'],
+        ['tls.enabled', String(cfgEmbeddedProxy.tls?.enabled ?? false)],
+      ]
+    : [];
 </script>
 
 <div class="config-wrap">
@@ -52,7 +91,7 @@
         <div class="kv-grid">
           {#each accountingKV.filter(([k]) => k !== 'rules' && !k.startsWith('rules.')) as [key, val]}
             <span class="kv-key">{key}</span>
-            <span class="kv-val">{fmtVal(val)}</span>
+            <span class="kv-val">{fmtVal(key, val)}</span>
           {/each}
         </div>
       {/if}
@@ -66,7 +105,7 @@
         <div class="kv-grid">
           {#each membershipKV as [key, val]}
             <span class="kv-key">{key}</span>
-            <span class="kv-val">{fmtVal(val)}</span>
+            <span class="kv-val">{fmtVal(key, val)}</span>
           {/each}
         </div>
       {/if}
@@ -79,7 +118,7 @@
       <div class="kv-grid">
         {#each cacheKV as [key, val]}
           <span class="kv-key">{key}</span>
-          <span class="kv-val">{fmtVal(val)}</span>
+          <span class="kv-val">{fmtVal(key, val)}</span>
         {/each}
       </div>
     </div>
@@ -87,13 +126,33 @@
 
   <!-- Rate limit rules (separate section, flat table) -->
   <div class="section-title">Rate Limit Rules</div>
-  <div class="card">
+  <div class="card mb-4">
     {#if !cfgAccounting}
       <p class="empty">{loading ? 'Loading…' : 'No configuration loaded'}</p>
     {:else if rules.length === 0}
       <p class="empty">No rate limit rules configured</p>
     {:else}
       <RuleTable {rules} />
+    {/if}
+  </div>
+
+  <!-- Embedded Proxy -->
+  <div class="section-title">Embedded Proxy</div>
+  <div class="card">
+    {#if !cfgEmbeddedProxy}
+      <p class="empty">{loading ? 'Loading…' : 'No embedded-proxy configuration loaded'}</p>
+    {:else if !proxyEnabled}
+      <p class="empty">Embedded proxy is disabled</p>
+    {:else}
+      <div class="proxy-header mb-4">
+        <div class="kv-grid kv-grid-inline">
+          {#each proxyInfoKV as [key, val]}
+            <span class="kv-key">{key}</span>
+            <span class="kv-val">{val}</span>
+          {/each}
+        </div>
+      </div>
+      <ProxyTable cfg={cfgEmbeddedProxy} />
     {/if}
   </div>
 </div>
@@ -129,8 +188,14 @@
     font-size: 12px;
     overflow: hidden;
   }
+  .kv-grid-inline {
+    grid-template-columns: auto 1fr;
+    max-width: 420px;
+  }
   .kv-key { color: var(--text2); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .kv-val { color: var(--text); font-family: monospace; word-break: break-all; }
+
+  .proxy-header { border-bottom: 1px solid var(--border); padding-bottom: 12px; }
 
   .empty { color: var(--text2); font-size: 13px; padding: 8px 0; }
 </style>

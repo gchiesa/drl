@@ -16,8 +16,10 @@
     let lastUpdated = '';
 
     // ── Config ─────────────────────────────────────────────────────────────────
-    let cfgAccounting = null;
-    let cfgMembership = null;
+    let cfgAccounting    = null;
+    let cfgMembership    = null;
+    let cfgCache         = null;
+    let cfgEmbeddedProxy = null;
 
     // ── Token modal ────────────────────────────────────────────────────────────
     let tokenInput = '';
@@ -126,9 +128,11 @@
     }
 
     async function loadConfig() {
-        [cfgAccounting, cfgMembership] = await Promise.all([
+        [cfgAccounting, cfgMembership, cfgCache, cfgEmbeddedProxy] = await Promise.all([
             apiFetch('/v1/configuration/static/accounting').catch(() => null),
             apiFetch('/v1/configuration/static/membership').catch(() => null),
+            apiFetch('/v1/configuration/static/cache').catch(() => null),
+            apiFetch('/v1/configuration/static/embedded-proxy').catch(() => null),
         ]);
     }
 
@@ -255,6 +259,8 @@
         <Configuration
                 {cfgAccounting}
                 {cfgMembership}
+                {cfgCache}
+                {cfgEmbeddedProxy}
                 {loading}
         />
     {/if}

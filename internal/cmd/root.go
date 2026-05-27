@@ -17,6 +17,7 @@ import (
 	"github.com/gchiesa/drl/internal/grpc"
 	"github.com/gchiesa/drl/internal/membership"
 	"github.com/gchiesa/drl/internal/metrics"
+	"github.com/gchiesa/drl/internal/proxy"
 	"github.com/gchiesa/drl/internal/utils"
 )
 
@@ -136,11 +137,19 @@ func Execute(version string) {
 		os.Exit(1)
 	}
 
-	log.Info("DRL is running")
-
-	// Wait for a shutdown signal
+	// Wait for a shutdown signal before starting the embedded proxy so that
+	// the signal context can be passed to the proxy's background workers.
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
+
+	// Initialize embedded proxy (no-op when disabled in config)
+	var proxyServer *proxy.Server
+	if proxyServer, err = newEmbeddedProxy(ctx, cfg, cacheManager, accountingEngine, metricsManager, log); err != nil {
+		fmt.Println("embedded-proxy: >" + err.Error() + "<")
+		os.Exit(1)
+	}
+
+	log.Info("DRL is running")
 
 	<-ctx.Done()
 	log.Info("shutdown signal received")
@@ -149,6 +158,13 @@ func Execute(version string) {
 	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer shutdownCancel()
 
+	// Stop embedded proxy
+	if proxyServer != nil {
+		if err := proxyServer.Stop(shutdownCtx); err != nil {
+			log.Error("failed to stop embedded proxy", "error", err)
+		}
+	}
+
 	// Stop Api Server
 	if apiServer != nil {
 		if err := apiServer.Stop(shutdownCtx); err != nil {
@@ -156,7 +172,7 @@ func Execute(version string) {
 		}
 	}
 
-	// Stop GRPS Server
+	// Stop GRPC Server
 	grpcServer.Stop(shutdownCtx)
 
 	// Stop Accounting Engine Flusher (final flush of pending batches)

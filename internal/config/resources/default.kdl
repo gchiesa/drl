@@ -40,3 +40,15 @@ accounting {
         max-batch-size 1000
     }
 }
+
+// Embedded reverse proxy (disabled by default).
+// Enable to replace an Envoy sidecar for simple architectures.
+embedded-proxy {
+    enabled false
+    listen ":8443"
+    tls {
+        enabled false
+        cert ""
+        key ""
+    }
+}

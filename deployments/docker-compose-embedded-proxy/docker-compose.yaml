@@ -1,0 +1,72 @@
+services:
+  echo-server:
+    image: mccutchen/go-httpbin:latest
+    # Three replicas so the dns-round-robin director in the embedded proxy has
+    # a meaningful pool to distribute across.
+    deploy:
+      replicas: 3
+    networks:
+      - drl-network
+
+  drl:
+    build:
+      context: ../..
+      dockerfile: Dockerfile
+    volumes:
+      - ./drl/config.kdl:/etc/drl/config.kdl:ro
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://localhost:9091/health"]
+      interval: 5s
+      timeout: 3s
+      retries: 3
+      start_period: 10s
+    # Three replicas for the P2P rate-limit fleet (blocklist gossip still works
+    # across all nodes).  The embedded proxy on each node listens on :8080.
+    # Host-port publishing is intentionally omitted here so Docker can run
+    # multiple replicas without port conflicts; k6 and jumpbox reach the fleet
+    # via the internal DNS name "drl" which Compose load-balances automatically.
+    deploy:
+      replicas: 3
+    environment:
+      DRL_CONFIG_PATH: /etc/drl/config.kdl
+      DRL_PRIVATE_API_KEY: "Test5ecretPrivateAPIKey!"
+      DRL_MEMBERSHIP_PRIMARY_KEY: "abcdef0123456789"
+      DRL_MEMBERSHIP_SECONDARY_KEYS: "0123456789012345"
+    depends_on:
+      - echo-server
+    networks:
+      - drl-network
+
+  k6:
+    image: grafana/k6:latest
+    container_name: k6
+    profiles:
+      - loadtest
+    volumes:
+      - ./k6:/scripts:ro
+    environment:
+      # k6 talks directly to the DRL embedded proxy; Docker Compose DNS
+      # round-robins across the three DRL replicas automatically.
+      - TARGET_URL=http://drl:8080
+      # Ramp parameters – tune these via docker compose run -e overrides.
+      - K6_VUS_MAX=20
+      - K6_DURATION=60s
+      - K6_RAMPUP=15s
+    command: ["run", "/scripts/load-test.js"]
+    depends_on:
+      - drl
+    networks:
+      - drl-network
+
+  jumpbox:
+    image: apteno/alpine-jq:latest
+    container_name: jumpbox
+    command: ["sleep", "infinity"]
+    environment:
+      DRL_PRIVATE_API_KEY: "Test5ecretPrivateAPIKey!"
+    networks:
+      - drl-network
+
+networks:
+  drl-network:
+    driver: bridge
