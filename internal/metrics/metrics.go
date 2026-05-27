@@ -56,6 +56,10 @@ type Metrics struct {
 	ProxyErrorsTotal    *prometheus.CounterVec
 	ProxyLatencySeconds *prometheus.HistogramVec
 
+	// OIDC authentication metrics
+	OIDCRequestsTotal        *prometheus.CounterVec   // labels: host, path, status
+	OIDCVerificationDuration *prometheus.HistogramVec // labels: host, path
+
 	registry *prometheus.Registry
 	server   *http.Server
 }
@@ -197,6 +201,17 @@ func NewMetrics() *Metrics {
 			Buckets: prometheus.DefBuckets,
 		}, []string{"host", "route"}),
 
+		// OIDC authentication metrics
+		OIDCRequestsTotal: prometheus.NewCounterVec(prometheus.CounterOpts{
+			Name: "drl_proxy_oidc_requests_total",
+			Help: "Total OIDC authentication attempts, labelled by outcome (success, missing_token, invalid_signature, token_expired, forbidden_scope, invalid_token)",
+		}, []string{"host", "path", "status"}),
+		OIDCVerificationDuration: prometheus.NewHistogramVec(prometheus.HistogramOpts{
+			Name:    "drl_proxy_oidc_verification_duration_seconds",
+			Help:    "Latency of the OIDC JWT crypto-verification cycle (JWKS cache hit path)",
+			Buckets: prometheus.ExponentialBuckets(0.0001, 2, 12), // 100µs → ~400ms
+		}, []string{"host", "path"}),
+
 		registry: registry,
 	}
 
@@ -228,6 +243,8 @@ func NewMetrics() *Metrics {
 	registry.MustRegister(m.ProxyRequestsTotal)
 	registry.MustRegister(m.ProxyErrorsTotal)
 	registry.MustRegister(m.ProxyLatencySeconds)
+	registry.MustRegister(m.OIDCRequestsTotal)
+	registry.MustRegister(m.OIDCVerificationDuration)
 
 	return m
 }
@@ -447,6 +464,18 @@ func (m *Metrics) IncProxyError(host, route, reason string) {
 // host and route prefix.
 func (m *Metrics) ObserveProxyLatency(host, route string, seconds float64) {
 	m.ProxyLatencySeconds.WithLabelValues(host, route).Observe(seconds)
+}
+
+// IncOIDCRequest increments the OIDC authentication request counter for the given
+// host, path, and outcome status (e.g. "success", "missing_token", "token_expired").
+func (m *Metrics) IncOIDCRequest(host, path, status string) {
+	m.OIDCRequestsTotal.WithLabelValues(host, path, status).Inc()
+}
+
+// ObserveOIDCLatency records the duration of a single OIDC JWT verification cycle
+// (signature check + claim extraction) for the given host and path.
+func (m *Metrics) ObserveOIDCLatency(host, path string, seconds float64) {
+	m.OIDCVerificationDuration.WithLabelValues(host, path).Observe(seconds)
 }
 
 // CacheType constants for metrics labels

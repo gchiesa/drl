@@ -127,8 +127,28 @@ func (s *Server) Stop(ctx context.Context) error {
 
 // buildRouter constructs the chi.Mux with one route handler per configured
 // virtual-host + route-prefix combination.
+// When a host has an OIDC issuer configured, routes with require-auth=true are
+// wrapped with the OIDC middleware (outermost) before rate-limiting and proxying.
 func (s *Server) buildRouter(ctx context.Context) (http.Handler, error) {
 	r := chi.NewRouter()
+
+	// Initialise one OIDC verifier per host that has an issuer configured.
+	// A failed provider init is non-fatal: DRL logs a warning and skips auth for that host.
+	verifiers := make(map[string]*oidcVerifier, len(s.cfg.Hosts))
+	for _, hostCfg := range s.cfg.Hosts {
+		if hostCfg.OIDC.Issuer == "" {
+			continue
+		}
+		v, err := newOIDCVerifier(ctx, hostCfg.OIDC)
+		if err != nil {
+			s.logger.Warn("oidc: provider init failed, skipping auth for host",
+				"host", hostCfg.Hostname, "err", err)
+			continue
+		}
+		if v != nil {
+			verifiers[hostCfg.Hostname] = v
+		}
+	}
 
 	for _, hostCfg := range s.cfg.Hosts {
 		hostCfg := hostCfg // capture loop variable
@@ -148,7 +168,19 @@ func (s *Server) buildRouter(ctx context.Context) (http.Handler, error) {
 				pattern = strings.TrimSuffix(pattern, "/") + "/*"
 			}
 
-			r.Handle(pattern, s.rateLimitMiddleware(hostCfg.Hostname, routeCfg.Prefix, rp))
+			// Middleware chain (outermost → innermost): OIDC → rateLimit → reverseProxy
+			handler := s.rateLimitMiddleware(hostCfg.Hostname, routeCfg.Prefix, rp)
+
+			if routeCfg.RequireAuth {
+				if v, ok := verifiers[hostCfg.Hostname]; ok {
+					handler = s.oidcMiddleware(hostCfg.Hostname, v, routeCfg.Scopes, handler)
+				} else {
+					s.logger.Warn("embedded-proxy: require-auth=true but no OIDC issuer configured",
+						"host", hostCfg.Hostname, "route", routeCfg.Prefix)
+				}
+			}
+
+			r.Handle(pattern, handler)
 		}
 	}
 
