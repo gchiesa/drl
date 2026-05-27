@@ -1,0 +1,83 @@
+// DRL - Distributed Rate Limiter Configuration
+// Embedded-proxy deployment — Envoy is not required.
+//
+// DRL listens on :8080 (HTTP) and acts as the edge proxy in front of the
+// echo-server fleet.  All traffic passes through DRL's rate-limit accounting
+// rules before being forwarded upstream.  The dns-round-robin balance strategy
+// resolves the "echo-server" Docker Compose service name to all replica IPs
+// and steps through them sequentially on every request.
+
+listen {
+    grpc ":8081"
+    metrics ":9091"
+}
+
+membership {
+    service-name "drl"
+    port 7946
+    bind-addr "0.0.0.0"
+    startup-delay "3s"
+}
+
+logging {
+    level "debug"
+    format "json"
+}
+
+internal-api {
+    enabled true
+    address ":8082"
+}
+
+cache {
+    blocklist-size-mb 64
+    accounting-size-mb 128
+    sync-timeout-seconds 30
+    blocklist-default-ttl-seconds 300
+}
+
+accounting {
+    settings {
+        algorithm "sliding-window"
+        retry-after-type "delay-seconds"
+    }
+    rules {
+        "catch-all" {
+            path-prefix "/"
+            limit 100
+            per "minute"
+        }
+        "anything" {
+            path-prefix "/anything"
+            limit 10
+            per "minute"
+        }
+    }
+}
+
+// Embedded reverse proxy — replaces the Envoy sidecar.
+embedded-proxy {
+    enabled true
+    listen ":8080"
+
+    tls {
+        enabled false
+        cert ""
+        key ""
+    }
+
+    // Single virtual host that catches all inbound traffic and forwards it to
+    // the echo-server fleet.  The dns-round-robin strategy re-resolves the
+    // Docker Compose service DNS every 5 s so newly started echo-server
+    // replicas are picked up automatically.
+    host "echo-server" {
+        routes {
+            route "/" {
+                upstream "http://echo-server:8080"
+                balance-strategy "dns-round-robin"
+                dns-refresh-interval "5s"
+                require-auth false
+            }
+        }
+    }
+}

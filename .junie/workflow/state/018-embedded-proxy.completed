@@ -1,0 +1,67 @@
+# 018-embedded-proxy — Completion Report
+
+Completed: 2026-05-27
+
+## What was implemented
+
+### New files
+
+**`internal/proxy/balancer.go`**
+- `RoundRobinDirector` struct with thread-safe RWMutex-guarded IP pool
+- `WatchDNS(ctx, host, interval)` — background ticker that polls `net.DefaultResolver.LookupHost` to keep the pool fresh (bypassing Go's DNS cache)
+- `DirectRequest(req)` — atomic `sync/atomic.AddUint64` counter for lockless index stepping across live endpoints
+- `SetIPs` / `IPs` helpers for testing and pool replacement
+
+**`internal/proxy/proxy.go`**
+- `BlocklistChecker` interface — satisfied by `cache.BlocklistCache` (`IsBlockedWithExpiration`)
+- `AccountingProcessor` interface — satisfied by `accounting.Engine` (`Process`, `BuildEntityKey`)
+- `Metrics` struct — three Prometheus families registered against the shared `*prometheus.Registry`:
+  - `drl_proxy_requests_total` (labels: host, route, status)
+  - `drl_proxy_errors_total` (labels: host, route, reason)
+  - `drl_proxy_latency_seconds` histogram (labels: host, route)
+- `Server` — built on `net/http/httputil.ReverseProxy` + `github.com/go-chi/chi/v5`
+  - `Start(ctx)` — starts plain HTTP (`ListenAndServe`) or TLS (`ListenAndServeTLS`) depending on `tls.enabled`; shuts down gracefully on ctx cancellation
+  - `buildRouter(ctx)` — constructs chi.Mux with one handler per `host × route` combination
+  - `buildReverseProxy(ctx, hostname, route)` — standard Director for single upstreams; `RoundRobinDirector`-backed Director when `balance-strategy = "dns-round-robin"`
+  - `rateLimitMiddleware` — checks blocklist before forwarding, fires async `accounting.Process` after; returns 429 on blocked entities
+  - `buildTLSConfig(cfg)` — base64-decodes inline PEM cert and key, loads via `crypto/tls.X509KeyPair`; no disk writes
+
+**`internal/proxy/balancer_test.go`** (7 tests)
+- Empty pool leaves URL unchanged
+- Single-IP pool always targets that IP
+- Multi-IP pool distributes across all addresses
+- Atomic counter correctness under 50 concurrent goroutines (race detector)
+- `SetIPs` replaces the pool atomically
+- Missing-port fallback to `:80` (HTTP) and `:443` (HTTPS)
+
+**`internal/proxy/proxy_test.go`** (7 tests)
+- Invalid base64 cert → error with `"decode base64 cert"`
+- Invalid base64 key → error with `"decode base64 key"`
+- Valid base64 but bad PEM → error with `"parse X509 key pair"`
+- Valid self-signed cert/key round-trip → `tls.Config` with one certificate, TLS 1.2 minimum
+- Virtual-host isolation: request to `/a/*` reaches backend A, `/b/*` reaches backend B
+- Blocked entity returns HTTP 429
+- Allowed entity passes through to upstream (HTTP 200)
+- Prometheus metrics families present and observable after first observation
+- `nil` registry → server usable with `metrics == nil`
+
+### Modified files
+
+**`internal/config/config.go`**
+- Added `EmbeddedProxyConfig` (fields: `Enabled`, `Listen`, `TLS`, `Hosts`) wired into `Config` struct as `embedded-proxy` KDL stanza with `DRL_EMBEDDED_PROXY_` env prefix
+- Added `EmbeddedProxyTLSConfig` (`Enabled`, `Cert`, `Key`)
+- Added `ProxyHostConfig` — positional `,arg` for hostname, nested `ProxyRoutesWrapper`
+- Added `ProxyRoutesWrapper` — slice of `ProxyRouteConfig` under `kdl:"route"`
+- Added `ProxyRouteConfig` — `Prefix` (positional arg), `Upstream`, `BalanceStrategy`, `DNSRefreshInterval`, `RequireAuth`
+- Extended `GetConfigSection` to handle `"embedded-proxy"`
+
+**`internal/config/resources/default.kdl`**
+- Added `embedded-proxy` block with `enabled false`, `listen ":8443"`, and a `tls { enabled false }` sub-block
+
+**`go.mod` / `go.sum`**
+- Added `github.com/go-chi/chi/v5 v5.3.0`
+
+## Verification
+
+- `mise run lint` — 0 issues
+- `mise run test` — all 424 tests pass across 10 packages (proxy package: 16/16 PASS, 54.2% coverage)

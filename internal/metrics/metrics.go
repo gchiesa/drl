@@ -51,6 +51,11 @@ type Metrics struct {
 	RateLimitBucketExhaustedTotal *prometheus.CounterVec
 	RateLimitTokensCurrent        *prometheus.GaugeVec
 
+	// Embedded proxy metrics
+	ProxyRequestsTotal  *prometheus.CounterVec
+	ProxyErrorsTotal    *prometheus.CounterVec
+	ProxyLatencySeconds *prometheus.HistogramVec
+
 	registry *prometheus.Registry
 	server   *http.Server
 }
@@ -177,6 +182,21 @@ func NewMetrics() *Metrics {
 			Help: "Remaining tokens in the bucket after the most recent request (sampled, token-bucket algorithm)",
 		}, []string{"rule_name"}),
 
+		// Embedded proxy metrics
+		ProxyRequestsTotal: prometheus.NewCounterVec(prometheus.CounterOpts{
+			Name: "drl_proxy_requests_total",
+			Help: "Total number of requests handled by the embedded proxy",
+		}, []string{"host", "route", "status"}),
+		ProxyErrorsTotal: prometheus.NewCounterVec(prometheus.CounterOpts{
+			Name: "drl_proxy_errors_total",
+			Help: "Total number of errors encountered by the embedded proxy",
+		}, []string{"host", "route", "reason"}),
+		ProxyLatencySeconds: prometheus.NewHistogramVec(prometheus.HistogramOpts{
+			Name:    "drl_proxy_latency_seconds",
+			Help:    "Latency of upstream round-trips handled by the embedded proxy",
+			Buckets: prometheus.DefBuckets,
+		}, []string{"host", "route"}),
+
 		registry: registry,
 	}
 
@@ -205,6 +225,9 @@ func NewMetrics() *Metrics {
 	registry.MustRegister(m.RateLimitTokensConsumedTotal)
 	registry.MustRegister(m.RateLimitBucketExhaustedTotal)
 	registry.MustRegister(m.RateLimitTokensCurrent)
+	registry.MustRegister(m.ProxyRequestsTotal)
+	registry.MustRegister(m.ProxyErrorsTotal)
+	registry.MustRegister(m.ProxyLatencySeconds)
 
 	return m
 }
@@ -406,6 +429,24 @@ func (m *Metrics) GatherForUI() map[string]float64 {
 		}
 	}
 	return result
+}
+
+// IncProxyRequest increments the proxy request counter for the given host,
+// route prefix, and HTTP status code string (e.g. "200", "429").
+func (m *Metrics) IncProxyRequest(host, route, status string) {
+	m.ProxyRequestsTotal.WithLabelValues(host, route, status).Inc()
+}
+
+// IncProxyError increments the proxy error counter for the given host, route,
+// and reason (e.g. "upstream").
+func (m *Metrics) IncProxyError(host, route, reason string) {
+	m.ProxyErrorsTotal.WithLabelValues(host, route, reason).Inc()
+}
+
+// ObserveProxyLatency records an upstream round-trip duration for the given
+// host and route prefix.
+func (m *Metrics) ObserveProxyLatency(host, route string, seconds float64) {
+	m.ProxyLatencySeconds.WithLabelValues(host, route).Observe(seconds)
 }
 
 // CacheType constants for metrics labels

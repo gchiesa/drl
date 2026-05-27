@@ -43,6 +43,9 @@ type Config struct {
 	// Accounting configuration
 	Accounting AccountingConfig `kdl:"accounting" envPrefix:"DRL_ACCOUNTING_" json:"accounting"`
 
+	// EmbeddedProxy configuration
+	EmbeddedProxy EmbeddedProxyConfig `kdl:"embedded-proxy" envPrefix:"DRL_EMBEDDED_PROXY_" json:"embedded-proxy,omitempty"`
+
 	// meta
 	externalConfigFilePath string
 }
@@ -163,6 +166,44 @@ type CacheConfig struct {
 	SyncTimeoutSeconds int `kdl:"sync-timeout-seconds" env:"SYNC_TIMEOUT_SECONDS" json:"sync-timeout-seconds"`
 	// BlocklistDefaultTTLSeconds is the default TTL in seconds for admin-API blocks
 	BlocklistDefaultTTLSeconds int `kdl:"blocklist-default-ttl-seconds" env:"BLOCKLIST_DEFAULT_TTL_SECONDS" json:"blocklist-default-ttl-seconds"`
+}
+
+// EmbeddedProxyConfig holds configuration for the embedded reverse proxy.
+type EmbeddedProxyConfig struct {
+	Enabled bool                   `kdl:"enabled" env:"ENABLED" json:"enabled"`
+	Listen  string                 `kdl:"listen"  env:"LISTEN"  json:"listen"`
+	TLS     EmbeddedProxyTLSConfig `kdl:"tls"                   json:"tls"`
+	// ",multiple" tells kdl-go to append one ProxyHostConfig per "host" node
+	// rather than treating the node's positional arguments as slice elements.
+	Hosts []ProxyHostConfig `kdl:"host,multiple" json:"hosts,omitempty"`
+}
+
+// EmbeddedProxyTLSConfig holds TLS settings for the embedded proxy.
+type EmbeddedProxyTLSConfig struct {
+	Enabled bool   `kdl:"enabled" env:"TLS_ENABLED" json:"enabled"`
+	Cert    string `kdl:"cert"    env:"TLS_CERT"    json:"cert,omitempty"`
+	Key     string `kdl:"key"     env:"TLS_KEY"     json:"key,omitempty"`
+}
+
+// ProxyHostConfig maps a virtual hostname to its routing rules.
+type ProxyHostConfig struct {
+	Hostname string             `kdl:",arg"   json:"hostname"`
+	Routes   ProxyRoutesWrapper `kdl:"routes" json:"routes"`
+}
+
+// ProxyRoutesWrapper is the "routes { }" block wrapping individual route entries.
+type ProxyRoutesWrapper struct {
+	// ",multiple" appends one ProxyRouteConfig per "route" node.
+	Routes []ProxyRouteConfig `kdl:"route,multiple" json:"routes,omitempty"`
+}
+
+// ProxyRouteConfig defines a single upstream route entry.
+type ProxyRouteConfig struct {
+	Prefix             string        `kdl:",arg"                  json:"prefix"`
+	Upstream           string        `kdl:"upstream"              json:"upstream"`
+	BalanceStrategy    string        `kdl:"balance-strategy"      json:"balance-strategy,omitempty"`
+	DNSRefreshInterval time.Duration `kdl:"dns-refresh-interval"  json:"dns-refresh-interval,omitempty"`
+	RequireAuth        bool          `kdl:"require-auth"          json:"require-auth"`
 }
 
 func NewConfig() *Config {
@@ -449,6 +490,8 @@ func (c *Config) GetConfigSection(section string) (any, bool) {
 		return c.Logging, true
 	case "internal-api":
 		return c.InternalAPI, true
+	case "embedded-proxy":
+		return c.EmbeddedProxy, true
 	default:
 		return nil, false
 	}
