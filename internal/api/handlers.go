@@ -42,6 +42,7 @@ func (s *Server) handleStatus(c *fiber.Ctx) error {
 	return c.JSON(models.StatusResponse{
 		ClusterName:         s.clusterName,
 		NodeID:              s.nodeID,
+		Version:             s.version,
 		ActivePeers:         activePeers,
 		ActivePeerAddresses: peerAPIAddresses,
 		Uptime:              uptime.String(),

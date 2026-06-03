@@ -161,6 +161,7 @@ type Server struct {
 	apiPort                   string // port portion of address (e.g. "8082")
 	clusterName               string
 	nodeID                    string
+	version                   string
 	cluster                   ClusterInfo
 	startTime                 time.Time
 	blocklist                 BlocklistOperator
@@ -180,6 +181,7 @@ type ServerConfig struct {
 	APIKey      string
 	ClusterName string
 	NodeID      string
+	Version     string
 	Cluster     ClusterInfo
 	Logger      *slog.Logger
 	// Blocklist is optional; when set, the block-entity endpoints are active.
@@ -251,6 +253,7 @@ func NewServer(cfg ServerConfig) (*Server, error) {
 		apiPort:                   apiPort,
 		clusterName:               cfg.ClusterName,
 		nodeID:                    cfg.NodeID,
+		version:                   cfg.Version,
 		cluster:                   cfg.Cluster,
 		startTime:                 time.Now(),
 		blocklist:                 cfg.Blocklist,

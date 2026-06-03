@@ -27,6 +27,7 @@ import (
 func newApiServer(
 	cfg *config.Config,
 	localIP string,
+	version string,
 	cacheManager *cache.Manager,
 	clusterManager *membership.Cluster,
 	accountingEngine *accounting.Engine,
@@ -86,6 +87,7 @@ func newApiServer(
 			APIKey:                    apiKey,
 			ClusterName:               cfg.Membership.ServiceName,
 			NodeID:                    localIP,
+			Version:                   version,
 			Cluster:                   clusterManager,
 			Logger:                    log,
 			Blocklist:                 cacheManager.Blocklist,

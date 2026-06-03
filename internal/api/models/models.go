@@ -16,6 +16,7 @@ type ErrorResponse struct {
 type StatusResponse struct {
 	ClusterName         string   `json:"cluster_name"`
 	NodeID              string   `json:"node_id"`
+	Version             string   `json:"version"`
 	ActivePeers         []string `json:"active_peers"`
 	ActivePeerAddresses []string `json:"active_peer_addresses"`
 	Uptime              string   `json:"uptime"`

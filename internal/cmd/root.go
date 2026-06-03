@@ -125,7 +125,7 @@ func Execute(version string) {
 
 	// Initialize internal API if enabled
 	var apiServer *api.Server
-	if apiServer, err = newApiServer(cfg, localIP, cacheManager, clusterManager, accountingEngine, metricsManager, log); err != nil {
+	if apiServer, err = newApiServer(cfg, localIP, version, cacheManager, clusterManager, accountingEngine, metricsManager, log); err != nil {
 		fmt.Println("api-server: >" + err.Error() + "<")
 		os.Exit(1)
 	}

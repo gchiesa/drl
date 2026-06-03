@@ -58,7 +58,7 @@ services:
       retries: 3
       start_period: 10s
     deploy:
-      replicas: 2
+      replicas: 1
     environment:
       DRL_CONFIG_PATH: /etc/drl/config.kdl
       DRL_PRIVATE_API_KEY: "Test5ecretPrivateAPIKey!"
