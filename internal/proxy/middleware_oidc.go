@@ -103,9 +103,7 @@ func (s *Server) oidcMiddleware(
 		// Step 1: token extraction
 		authHeader := r.Header.Get("Authorization")
 		if !strings.HasPrefix(authHeader, "Bearer ") {
-			if s.metrics != nil {
-				s.metrics.IncOIDCRequest(hostname, r.URL.Path, "missing_token")
-			}
+			s.metrics.IncOIDCRequest(hostname, r.URL.Path, "missing_token")
 			http.Error(w, "Unauthorized", http.StatusUnauthorized)
 			return
 		}
@@ -115,17 +113,13 @@ func (s *Server) oidcMiddleware(
 		idToken, err := v.verifier.Verify(r.Context(), rawToken)
 		if err != nil {
 			status := classifyOIDCError(err)
-			if s.metrics != nil {
-				s.metrics.IncOIDCRequest(hostname, r.URL.Path, status)
-			}
+			s.metrics.IncOIDCRequest(hostname, r.URL.Path, status)
 			http.Error(w, "Unauthorized", http.StatusUnauthorized)
 			return
 		}
 
 		// Record verification latency (crypto round-trip only)
-		if s.metrics != nil {
-			s.metrics.ObserveOIDCLatency(hostname, r.URL.Path, time.Since(start).Seconds())
-		}
+		s.metrics.ObserveOIDCLatency(hostname, r.URL.Path, time.Since(start).Seconds())
 
 		// Step 3: audience check
 		if v.cfg.Audience != "" {
@@ -137,9 +131,7 @@ func (s *Server) oidcMiddleware(
 				}
 			}
 			if !found {
-				if s.metrics != nil {
-					s.metrics.IncOIDCRequest(hostname, r.URL.Path, "forbidden_scope")
-				}
+				s.metrics.IncOIDCRequest(hostname, r.URL.Path, "forbidden_scope")
 				http.Error(w, "Forbidden", http.StatusForbidden)
 				return
 			}
@@ -148,9 +140,7 @@ func (s *Server) oidcMiddleware(
 		// Step 4: unmarshal custom claims
 		var rawClaims map[string]interface{}
 		if err := idToken.Claims(&rawClaims); err != nil {
-			if s.metrics != nil {
-				s.metrics.IncOIDCRequest(hostname, r.URL.Path, "invalid_token")
-			}
+			s.metrics.IncOIDCRequest(hostname, r.URL.Path, "invalid_token")
 			http.Error(w, "Unauthorized", http.StatusUnauthorized)
 			return
 		}
@@ -160,17 +150,13 @@ func (s *Server) oidcMiddleware(
 
 		// Step 5: scope enforcement
 		if len(requiredScopes) > 0 && !hasRequiredScopes(tokenScopes, requiredScopes) {
-			if s.metrics != nil {
-				s.metrics.IncOIDCRequest(hostname, r.URL.Path, "forbidden_scope")
-			}
+			s.metrics.IncOIDCRequest(hostname, r.URL.Path, "forbidden_scope")
 			http.Error(w, "Forbidden", http.StatusForbidden)
 			return
 		}
 
 		// Step 6: record success and inject claims
-		if s.metrics != nil {
-			s.metrics.IncOIDCRequest(hostname, r.URL.Path, "success")
-		}
+		s.metrics.IncOIDCRequest(hostname, r.URL.Path, "success")
 
 		claims := OIDCClaims{
 			Subject: idToken.Subject,
