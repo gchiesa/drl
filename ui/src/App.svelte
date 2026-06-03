@@ -54,6 +54,7 @@
     // ── Derived display values ─────────────────────────────────────────────────
     $: clusterName = data?.status?.cluster_name ?? $bootstrapInfo?.clusterName ?? '—';
     $: nodeId = data?.status?.node_id ?? $bootstrapInfo?.nodeId ?? '—';
+    $: version = data?.status?.version ?? null;
     $: clusterStatus = data ? 'ok' : ($authStatus === 'ready' ? 'ok' : 'unknown');
 
     // ── Data loading ───────────────────────────────────────────────────────────
@@ -226,6 +227,9 @@
       <span>{clusterName}</span>
     </span>
         <span class="meta-item node-id" title="Node ID">{nodeId}</span>
+        {#if version}
+            <span class="meta-item version-badge" title="DRL version">{version}</span>
+        {/if}
         {#if lastUpdated}
             <span class="meta-item dim">Updated {lastUpdated}</span>
         {/if}
@@ -484,6 +488,16 @@
     .node-id {
         font-family: monospace;
         font-size: 11px;
+    }
+
+    .version-badge {
+        font-family: monospace;
+        font-size: 11px;
+        background: var(--bg3);
+        border: 1px solid var(--border);
+        border-radius: 4px;
+        padding: 1px 6px;
+        color: var(--accent2);
     }
 
     .dim {
