@@ -1,5 +1,34 @@
 # Changelog
 
+## [1.0.0](https://github.com/gchiesa/drl/compare/v0.1.8...v1.0.0) (2026-06-03)
+
+
+### ⚠ BREAKING CHANGES
+
+* stabilising public API and configuration format for the 1.0.0 release
+
+### Features
+
+* **ms018:** embedded proxy implementation ([7692e90](https://github.com/gchiesa/drl/commit/7692e903416a459d1f58e5770f1fba59af6eb706))
+* **ms019:** oidc implementation ([d76e30d](https://github.com/gchiesa/drl/commit/d76e30d4b66acf98e7bf40f281c2c7dd9e5de7db))
+* promote to stable 1.0.0 ([f55e808](https://github.com/gchiesa/drl/commit/f55e8080eb81b4e14aaa2b0492a5d4c423186bd2))
+* UI and private API support for version printing ([596405b](https://github.com/gchiesa/drl/commit/596405b5ee9419d3dd5a677bf7dae5781ade85e0))
+
+
+### Bug Fixes
+
+* linting issues in codebase ([5cd3e7f](https://github.com/gchiesa/drl/commit/5cd3e7f596c005677da980d48621d73e2079999e))
+
+
+### Refactoring
+
+* simplified code ([763aefc](https://github.com/gchiesa/drl/commit/763aefce255ef72c399b032a1260c3fbcda3fbe0))
+
+
+### Docs
+
+* update documentation ([243e348](https://github.com/gchiesa/drl/commit/243e3482013dfdbdf6cf47cd965a6d65f71fcbc8))
+
 ## [0.1.8](https://github.com/gchiesa/drl/compare/v0.1.7...v0.1.8) (2026-05-20)
 
 
