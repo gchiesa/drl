@@ -157,7 +157,7 @@ func (s *Server) buildRouter(ctx context.Context) (http.Handler, error) {
 	// Initialize one OIDC verifier per host that has an issuer configured.
 	// A failed provider init will disable the routing for that host: DRL logs a warning and skips routing for that host
 	verifiers := make(map[string]*oidcVerifier, len(s.cfg.Hosts))
-	var skippedHosts map[string]bool
+	skippedHosts := make(map[string]bool, len(s.cfg.Hosts))
 	for _, hostCfg := range s.cfg.Hosts {
 		if hostCfg.OIDC.Issuer == "" {
 			continue
