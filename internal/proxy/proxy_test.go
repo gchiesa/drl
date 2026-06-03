@@ -257,12 +257,13 @@ func TestMetrics_ProxyFieldsRegistered(t *testing.T) {
 	assert.NotPanics(t, func() { m.ObserveProxyLatency("h", "r", 0.01) })
 }
 
-// TestNewServer_NilMetricsManager verifies the server is usable without a metrics manager.
-func TestNewServer_NilMetricsManager(t *testing.T) {
+// TestNewServer_NotNilMetricsManager verifies the server is usable without a metrics manager.
+func TestNewServer_NotNilMetricsManager(t *testing.T) {
 	cfg := config.EmbeddedProxyConfig{Enabled: true, Listen: "127.0.0.1:0"}
 	srv, err := NewServer(cfg, nil, nil, nil)
 	require.NoError(t, err)
-	assert.Nil(t, srv.metrics)
+	assert.NotNil(t, srv.metrics)
+	assert.Equal(t, &NoOpMetrics{}, srv.metrics)
 }
 
 // --- Self-signed cert generator for TLS tests ---

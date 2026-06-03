@@ -8,6 +8,7 @@ import (
 	"context"
 	"crypto/tls"
 	"encoding/base64"
+	"errors"
 	"fmt"
 	"log/slog"
 	"net"
@@ -20,7 +21,6 @@ import (
 	"github.com/go-chi/chi/v5"
 
 	"github.com/gchiesa/drl/internal/config"
-	"github.com/gchiesa/drl/internal/metrics"
 )
 
 // BlocklistChecker checks whether an entity key is currently blocked.
@@ -37,12 +37,27 @@ type AccountingProcessor interface {
 	BuildEntityKey(sourceIP, path string, headers map[string]string) string
 }
 
+type MetricsProvider interface {
+	IncProxyRequest(hostname, routePrefix, status string)
+	IncProxyError(hostname, routePrefix, reason string)
+	ObserveProxyLatency(host, route string, seconds float64)
+	IncOIDCRequest(host, path, status string)
+	ObserveOIDCLatency(host, path string, seconds float64)
+}
+type NoOpMetrics struct{}
+
+func (m *NoOpMetrics) IncProxyRequest(hostname, routePrefix, status string)    {}
+func (m *NoOpMetrics) IncProxyError(hostname, routePrefix, reason string)      {}
+func (m *NoOpMetrics) ObserveProxyLatency(host, route string, seconds float64) {}
+func (m *NoOpMetrics) IncOIDCRequest(host, path, status string)                {}
+func (m *NoOpMetrics) ObserveOIDCLatency(host, path string, seconds float64)   {}
+
 // Server is the embedded reverse proxy server.
 type Server struct {
 	cfg        config.EmbeddedProxyConfig
 	blocklist  BlocklistChecker
 	accounting AccountingProcessor
-	metrics    *metrics.Metrics
+	metrics    MetricsProvider
 	server     *http.Server
 	cancel     context.CancelFunc
 	logger     *slog.Logger
@@ -56,15 +71,22 @@ func NewServer(
 	cfg config.EmbeddedProxyConfig,
 	blocklist BlocklistChecker,
 	accounting AccountingProcessor,
-	metricsManager *metrics.Metrics,
+	metricsManager MetricsProvider,
 ) (*Server, error) {
 	return &Server{
 		cfg:        cfg,
 		blocklist:  blocklist,
 		accounting: accounting,
-		metrics:    metricsManager,
+		metrics:    metricsProviderOrNoOp(metricsManager),
 		logger:     slog.With("component", "embedded-proxy"),
 	}, nil
+}
+
+func metricsProviderOrNoOp(mp MetricsProvider) MetricsProvider {
+	if mp == nil {
+		return &NoOpMetrics{}
+	}
+	return mp
 }
 
 // Start builds the chi router, starts the HTTP/HTTPS listener in a background
@@ -97,14 +119,14 @@ func (s *Server) Start(ctx context.Context) error {
 		go func() {
 			s.logger.Info("starting embedded proxy (TLS)", "listen", s.cfg.Listen)
 			// Cert/key are already loaded into TLSConfig; pass empty strings.
-			if err := s.server.ListenAndServeTLS("", ""); err != nil && err != http.ErrServerClosed {
+			if err := s.server.ListenAndServeTLS("", ""); err != nil && !errors.Is(err, http.ErrServerClosed) {
 				s.logger.Error("embedded proxy TLS listener error", "err", err)
 			}
 		}()
 	} else {
 		go func() {
 			s.logger.Info("starting embedded proxy (plain HTTP)", "listen", s.cfg.Listen)
-			if err := s.server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+			if err := s.server.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
 				s.logger.Error("embedded proxy listener error", "err", err)
 			}
 		}()
@@ -132,17 +154,19 @@ func (s *Server) Stop(ctx context.Context) error {
 func (s *Server) buildRouter(ctx context.Context) (http.Handler, error) {
 	r := chi.NewRouter()
 
-	// Initialise one OIDC verifier per host that has an issuer configured.
-	// A failed provider init is non-fatal: DRL logs a warning and skips auth for that host.
+	// Initialize one OIDC verifier per host that has an issuer configured.
+	// A failed provider init will disable the routing for that host: DRL logs a warning and skips routing for that host
 	verifiers := make(map[string]*oidcVerifier, len(s.cfg.Hosts))
+	var skippedHosts map[string]bool
 	for _, hostCfg := range s.cfg.Hosts {
 		if hostCfg.OIDC.Issuer == "" {
 			continue
 		}
 		v, err := newOIDCVerifier(ctx, hostCfg.OIDC)
 		if err != nil {
-			s.logger.Warn("oidc: provider init failed, skipping auth for host",
+			s.logger.Warn("oidc: provider init failed, skipping configuration for host",
 				"host", hostCfg.Hostname, "err", err)
+			skippedHosts[hostCfg.Hostname] = true
 			continue
 		}
 		if v != nil {
@@ -151,32 +175,35 @@ func (s *Server) buildRouter(ctx context.Context) (http.Handler, error) {
 	}
 
 	for _, hostCfg := range s.cfg.Hosts {
-		hostCfg := hostCfg // capture loop variable
-		for _, routeCfg := range hostCfg.Routes.Routes {
-			routeCfg := routeCfg
+		if _, ok := skippedHosts[hostCfg.Hostname]; ok {
+			continue
+		}
+		hc := hostCfg // capture loop variable
+		for _, routeCfg := range hc.Routes.Routes {
+			rc := routeCfg
 
-			rp, err := s.buildReverseProxy(ctx, hostCfg.Hostname, routeCfg)
+			rp, err := s.buildReverseProxy(ctx, hc.Hostname, rc)
 			if err != nil {
 				return nil, fmt.Errorf(
 					"embedded-proxy: build route %s%s: %w",
-					hostCfg.Hostname, routeCfg.Prefix, err,
+					hc.Hostname, rc.Prefix, err,
 				)
 			}
 
-			pattern := routeCfg.Prefix
+			pattern := rc.Prefix
 			if !strings.HasSuffix(pattern, "*") {
 				pattern = strings.TrimSuffix(pattern, "/") + "/*"
 			}
 
 			// Middleware chain (outermost → innermost): OIDC → rateLimit → reverseProxy
-			handler := s.rateLimitMiddleware(hostCfg.Hostname, routeCfg.Prefix, rp)
+			handler := s.rateLimitMiddleware(hc.Hostname, rc.Prefix, rp)
 
-			if routeCfg.RequireAuth {
-				if v, ok := verifiers[hostCfg.Hostname]; ok {
-					handler = s.oidcMiddleware(hostCfg.Hostname, v, routeCfg.Scopes, handler)
+			if rc.RequireAuth {
+				if v, ok := verifiers[hc.Hostname]; ok {
+					handler = s.oidcMiddleware(hc.Hostname, v, rc.Scopes, handler)
 				} else {
 					s.logger.Warn("embedded-proxy: require-auth=true but no OIDC issuer configured",
-						"host", hostCfg.Hostname, "route", routeCfg.Prefix)
+						"host", hc.Hostname, "route", rc.Prefix)
 				}
 			}
 
@@ -212,6 +239,18 @@ func (s *Server) buildReverseProxy(ctx context.Context, hostname string, route c
 			req.URL.Host = upstreamURL.Host
 			req.Host = upstreamURL.Host
 			director.DirectRequest(req)
+			/*
+				Go's httputil.ReverseProxy does strip a standard set of hop-by-hop headers (Connection, Keep-Alive, Upgrade, etc.)
+				automatically — but only when using its default Director. Here, both branches replace the Director entirely
+				with a custom closure, so the built-in hop-by-hop cleanup no longer runs. Te and Trailers are two hop-by-hop
+				headers that aren't in httputil's hardcoded list but are in the RFC-defined list, so they must be removed explicitly.
+
+				Forwarding them to the upstream could:
+
+				Violate the HTTP spec (sending connection-scoped metadata across a hop boundary)
+				Confuse upstream servers or HTTP/2 backends (which handle transfer encoding entirely differently)
+				Cause subtle protocol errors with strict servers
+			*/
 			req.Header.Del("Te")
 			req.Header.Del("Trailers")
 		}
@@ -220,25 +259,24 @@ func (s *Server) buildReverseProxy(ctx context.Context, hostname string, route c
 			req.URL.Scheme = upstreamURL.Scheme
 			req.URL.Host = upstreamURL.Host
 			req.Host = upstreamURL.Host
+			// stripping headers because of custom director, see above.
 			req.Header.Del("Te")
 			req.Header.Del("Trailers")
 		}
 	}
 
-	if s.metrics != nil {
-		routePrefix := route.Prefix
-		rp.ModifyResponse = func(resp *http.Response) error {
-			start, _ := resp.Request.Context().Value(requestStartKey{}).(time.Time)
-			if !start.IsZero() {
-				s.metrics.ObserveProxyLatency(hostname, routePrefix, time.Since(start).Seconds())
-			}
-			s.metrics.IncProxyRequest(hostname, routePrefix, fmt.Sprintf("%d", resp.StatusCode))
-			return nil
+	routePrefix := route.Prefix
+	rp.ModifyResponse = func(resp *http.Response) error {
+		start, _ := resp.Request.Context().Value(requestStartKey{}).(time.Time)
+		if !start.IsZero() {
+			s.metrics.ObserveProxyLatency(hostname, routePrefix, time.Since(start).Seconds())
 		}
-		rp.ErrorHandler = func(w http.ResponseWriter, r *http.Request, err error) {
-			s.metrics.IncProxyError(hostname, routePrefix, "upstream")
-			http.Error(w, "Bad Gateway", http.StatusBadGateway)
-		}
+		s.metrics.IncProxyRequest(hostname, routePrefix, fmt.Sprintf("%d", resp.StatusCode))
+		return nil
+	}
+	rp.ErrorHandler = func(w http.ResponseWriter, r *http.Request, err error) {
+		s.metrics.IncProxyError(hostname, routePrefix, "upstream")
+		http.Error(w, "Bad Gateway", http.StatusBadGateway)
 	}
 
 	return rp, nil
@@ -269,9 +307,7 @@ func (s *Server) rateLimitMiddleware(hostname, routePrefix string, next http.Han
 		if s.blocklist != nil && s.accounting != nil {
 			key := s.accounting.BuildEntityKey(ip, r.URL.Path, headers)
 			if _, blocked := s.blocklist.IsBlockedWithExpiration(key); blocked {
-				if s.metrics != nil {
-					s.metrics.IncProxyRequest(hostname, routePrefix, "429")
-				}
+				s.metrics.IncProxyRequest(hostname, routePrefix, "429")
 				http.Error(w, "Too Many Requests", http.StatusTooManyRequests)
 				return
 			}
