@@ -253,6 +253,86 @@ func (x *UnblockEvent) GetKey() string {
 	return ""
 }
 
+// BlockEventWithExpiresAt is the successor to BlockEvent that carries an absolute
+// expiration timestamp (Unix nanoseconds) instead of a relative TTL. This avoids
+// clock-skew drift when the event is relayed across nodes: the sender computes
+// "now + ttl" once and all receivers apply exactly the same deadline.
+type BlockEventWithExpiresAt struct {
+	state          protoimpl.MessageState `protogen:"open.v1"`
+	Key            string                 `protobuf:"bytes,1,opt,name=key,proto3" json:"key,omitempty"`
+	ExpiresAtNanos int64                  `protobuf:"varint,2,opt,name=expires_at_nanos,json=expiresAtNanos,proto3" json:"expires_at_nanos,omitempty"` // Unix nanoseconds (time.Time.UnixNano)
+	EntityIp       string                 `protobuf:"bytes,3,opt,name=entity_ip,json=entityIp,proto3" json:"entity_ip,omitempty"`
+	EntityPath     string                 `protobuf:"bytes,4,opt,name=entity_path,json=entityPath,proto3" json:"entity_path,omitempty"`
+	EntityHdrs     map[string]string      `protobuf:"bytes,5,rep,name=entity_hdrs,json=entityHdrs,proto3" json:"entity_hdrs,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"bytes,2,opt,name=value"`
+	unknownFields  protoimpl.UnknownFields
+	sizeCache      protoimpl.SizeCache
+}
+
+func (x *BlockEventWithExpiresAt) Reset() {
+	*x = BlockEventWithExpiresAt{}
+	mi := &file_internal_proto_accounting_proto_msgTypes[4]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *BlockEventWithExpiresAt) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*BlockEventWithExpiresAt) ProtoMessage() {}
+
+func (x *BlockEventWithExpiresAt) ProtoReflect() protoreflect.Message {
+	mi := &file_internal_proto_accounting_proto_msgTypes[4]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use BlockEventWithExpiresAt.ProtoReflect.Descriptor instead.
+func (*BlockEventWithExpiresAt) Descriptor() ([]byte, []int) {
+	return file_internal_proto_accounting_proto_rawDescGZIP(), []int{4}
+}
+
+func (x *BlockEventWithExpiresAt) GetKey() string {
+	if x != nil {
+		return x.Key
+	}
+	return ""
+}
+
+func (x *BlockEventWithExpiresAt) GetExpiresAtNanos() int64 {
+	if x != nil {
+		return x.ExpiresAtNanos
+	}
+	return 0
+}
+
+func (x *BlockEventWithExpiresAt) GetEntityIp() string {
+	if x != nil {
+		return x.EntityIp
+	}
+	return ""
+}
+
+func (x *BlockEventWithExpiresAt) GetEntityPath() string {
+	if x != nil {
+		return x.EntityPath
+	}
+	return ""
+}
+
+func (x *BlockEventWithExpiresAt) GetEntityHdrs() map[string]string {
+	if x != nil {
+		return x.EntityHdrs
+	}
+	return nil
+}
+
 type HandoverPayload struct {
 	state             protoimpl.MessageState `protogen:"open.v1"`
 	SenderId          uint64                 `protobuf:"varint,1,opt,name=sender_id,json=senderId,proto3" json:"sender_id,omitempty"`
@@ -265,7 +345,7 @@ type HandoverPayload struct {
 
 func (x *HandoverPayload) Reset() {
 	*x = HandoverPayload{}
-	mi := &file_internal_proto_accounting_proto_msgTypes[4]
+	mi := &file_internal_proto_accounting_proto_msgTypes[5]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -277,7 +357,7 @@ func (x *HandoverPayload) String() string {
 func (*HandoverPayload) ProtoMessage() {}
 
 func (x *HandoverPayload) ProtoReflect() protoreflect.Message {
-	mi := &file_internal_proto_accounting_proto_msgTypes[4]
+	mi := &file_internal_proto_accounting_proto_msgTypes[5]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -290,7 +370,7 @@ func (x *HandoverPayload) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use HandoverPayload.ProtoReflect.Descriptor instead.
 func (*HandoverPayload) Descriptor() ([]byte, []int) {
-	return file_internal_proto_accounting_proto_rawDescGZIP(), []int{4}
+	return file_internal_proto_accounting_proto_rawDescGZIP(), []int{5}
 }
 
 func (x *HandoverPayload) GetSenderId() uint64 {
@@ -329,6 +409,7 @@ type DrlMessage struct {
 	//	*DrlMessage_Block
 	//	*DrlMessage_Unblock
 	//	*DrlMessage_Handover
+	//	*DrlMessage_BlockWithExpiresAt
 	Content       isDrlMessage_Content `protobuf_oneof:"content"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -336,7 +417,7 @@ type DrlMessage struct {
 
 func (x *DrlMessage) Reset() {
 	*x = DrlMessage{}
-	mi := &file_internal_proto_accounting_proto_msgTypes[5]
+	mi := &file_internal_proto_accounting_proto_msgTypes[6]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -348,7 +429,7 @@ func (x *DrlMessage) String() string {
 func (*DrlMessage) ProtoMessage() {}
 
 func (x *DrlMessage) ProtoReflect() protoreflect.Message {
-	mi := &file_internal_proto_accounting_proto_msgTypes[5]
+	mi := &file_internal_proto_accounting_proto_msgTypes[6]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -361,7 +442,7 @@ func (x *DrlMessage) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DrlMessage.ProtoReflect.Descriptor instead.
 func (*DrlMessage) Descriptor() ([]byte, []int) {
-	return file_internal_proto_accounting_proto_rawDescGZIP(), []int{5}
+	return file_internal_proto_accounting_proto_rawDescGZIP(), []int{6}
 }
 
 func (x *DrlMessage) GetContent() isDrlMessage_Content {
@@ -407,6 +488,15 @@ func (x *DrlMessage) GetHandover() *HandoverPayload {
 	return nil
 }
 
+func (x *DrlMessage) GetBlockWithExpiresAt() *BlockEventWithExpiresAt {
+	if x != nil {
+		if x, ok := x.Content.(*DrlMessage_BlockWithExpiresAt); ok {
+			return x.BlockWithExpiresAt
+		}
+	}
+	return nil
+}
+
 type isDrlMessage_Content interface {
 	isDrlMessage_Content()
 }
@@ -427,6 +517,10 @@ type DrlMessage_Handover struct {
 	Handover *HandoverPayload `protobuf:"bytes,4,opt,name=handover,proto3,oneof"`
 }
 
+type DrlMessage_BlockWithExpiresAt struct {
+	BlockWithExpiresAt *BlockEventWithExpiresAt `protobuf:"bytes,5,opt,name=block_with_expires_at,json=blockWithExpiresAt,proto3,oneof"`
+}
+
 func (*DrlMessage_Counters) isDrlMessage_Content() {}
 
 func (*DrlMessage_Block) isDrlMessage_Content() {}
@@ -434,6 +528,8 @@ func (*DrlMessage_Block) isDrlMessage_Content() {}
 func (*DrlMessage_Unblock) isDrlMessage_Content() {}
 
 func (*DrlMessage_Handover) isDrlMessage_Content() {}
+
+func (*DrlMessage_BlockWithExpiresAt) isDrlMessage_Content() {}
 
 var File_internal_proto_accounting_proto protoreflect.FileDescriptor
 
@@ -461,18 +557,30 @@ const file_internal_proto_accounting_proto_rawDesc = "" +
 	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
 	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01\" \n" +
 	"\fUnblockEvent\x12\x10\n" +
-	"\x03key\x18\x01 \x01(\tR\x03key\"\x9e\x01\n" +
+	"\x03key\x18\x01 \x01(\tR\x03key\"\xa4\x02\n" +
+	"\x17BlockEventWithExpiresAt\x12\x10\n" +
+	"\x03key\x18\x01 \x01(\tR\x03key\x12(\n" +
+	"\x10expires_at_nanos\x18\x02 \x01(\x03R\x0eexpiresAtNanos\x12\x1b\n" +
+	"\tentity_ip\x18\x03 \x01(\tR\bentityIp\x12\x1f\n" +
+	"\ventity_path\x18\x04 \x01(\tR\n" +
+	"entityPath\x12P\n" +
+	"\ventity_hdrs\x18\x05 \x03(\v2/.drl.v1.BlockEventWithExpiresAt.EntityHdrsEntryR\n" +
+	"entityHdrs\x1a=\n" +
+	"\x0fEntityHdrsEntry\x12\x10\n" +
+	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
+	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01\"\x9e\x01\n" +
 	"\x0fHandoverPayload\x12\x1b\n" +
 	"\tsender_id\x18\x01 \x01(\x04R\bsenderId\x12\x1c\n" +
 	"\ttimestamp\x18\x02 \x01(\x04R\ttimestamp\x12-\n" +
 	"\x12compressed_entries\x18\x03 \x01(\fR\x11compressedEntries\x12!\n" +
-	"\fentity_count\x18\x04 \x01(\x04R\ventityCount\"\xe0\x01\n" +
+	"\fentity_count\x18\x04 \x01(\x04R\ventityCount\"\xb6\x02\n" +
 	"\n" +
 	"DrlMessage\x122\n" +
 	"\bcounters\x18\x01 \x01(\v2\x14.drl.v1.CounterBatchH\x00R\bcounters\x12*\n" +
 	"\x05block\x18\x02 \x01(\v2\x12.drl.v1.BlockEventH\x00R\x05block\x120\n" +
 	"\aunblock\x18\x03 \x01(\v2\x14.drl.v1.UnblockEventH\x00R\aunblock\x125\n" +
-	"\bhandover\x18\x04 \x01(\v2\x17.drl.v1.HandoverPayloadH\x00R\bhandoverB\t\n" +
+	"\bhandover\x18\x04 \x01(\v2\x17.drl.v1.HandoverPayloadH\x00R\bhandover\x12T\n" +
+	"\x15block_with_expires_at\x18\x05 \x01(\v2\x1f.drl.v1.BlockEventWithExpiresAtH\x00R\x12blockWithExpiresAtB\t\n" +
 	"\acontentB'Z%github.com/gchiesa/drl/internal/protob\x06proto3"
 
 var (
@@ -487,28 +595,32 @@ func file_internal_proto_accounting_proto_rawDescGZIP() []byte {
 	return file_internal_proto_accounting_proto_rawDescData
 }
 
-var file_internal_proto_accounting_proto_msgTypes = make([]protoimpl.MessageInfo, 7)
+var file_internal_proto_accounting_proto_msgTypes = make([]protoimpl.MessageInfo, 9)
 var file_internal_proto_accounting_proto_goTypes = []any{
-	(*CounterEntry)(nil),    // 0: drl.v1.CounterEntry
-	(*CounterBatch)(nil),    // 1: drl.v1.CounterBatch
-	(*BlockEvent)(nil),      // 2: drl.v1.BlockEvent
-	(*UnblockEvent)(nil),    // 3: drl.v1.UnblockEvent
-	(*HandoverPayload)(nil), // 4: drl.v1.HandoverPayload
-	(*DrlMessage)(nil),      // 5: drl.v1.DrlMessage
-	nil,                     // 6: drl.v1.BlockEvent.EntityHdrsEntry
+	(*CounterEntry)(nil),            // 0: drl.v1.CounterEntry
+	(*CounterBatch)(nil),            // 1: drl.v1.CounterBatch
+	(*BlockEvent)(nil),              // 2: drl.v1.BlockEvent
+	(*UnblockEvent)(nil),            // 3: drl.v1.UnblockEvent
+	(*BlockEventWithExpiresAt)(nil), // 4: drl.v1.BlockEventWithExpiresAt
+	(*HandoverPayload)(nil),         // 5: drl.v1.HandoverPayload
+	(*DrlMessage)(nil),              // 6: drl.v1.DrlMessage
+	nil,                             // 7: drl.v1.BlockEvent.EntityHdrsEntry
+	nil,                             // 8: drl.v1.BlockEventWithExpiresAt.EntityHdrsEntry
 }
 var file_internal_proto_accounting_proto_depIdxs = []int32{
 	0, // 0: drl.v1.CounterBatch.entries:type_name -> drl.v1.CounterEntry
-	6, // 1: drl.v1.BlockEvent.entity_hdrs:type_name -> drl.v1.BlockEvent.EntityHdrsEntry
-	1, // 2: drl.v1.DrlMessage.counters:type_name -> drl.v1.CounterBatch
-	2, // 3: drl.v1.DrlMessage.block:type_name -> drl.v1.BlockEvent
-	3, // 4: drl.v1.DrlMessage.unblock:type_name -> drl.v1.UnblockEvent
-	4, // 5: drl.v1.DrlMessage.handover:type_name -> drl.v1.HandoverPayload
-	6, // [6:6] is the sub-list for method output_type
-	6, // [6:6] is the sub-list for method input_type
-	6, // [6:6] is the sub-list for extension type_name
-	6, // [6:6] is the sub-list for extension extendee
-	0, // [0:6] is the sub-list for field type_name
+	7, // 1: drl.v1.BlockEvent.entity_hdrs:type_name -> drl.v1.BlockEvent.EntityHdrsEntry
+	8, // 2: drl.v1.BlockEventWithExpiresAt.entity_hdrs:type_name -> drl.v1.BlockEventWithExpiresAt.EntityHdrsEntry
+	1, // 3: drl.v1.DrlMessage.counters:type_name -> drl.v1.CounterBatch
+	2, // 4: drl.v1.DrlMessage.block:type_name -> drl.v1.BlockEvent
+	3, // 5: drl.v1.DrlMessage.unblock:type_name -> drl.v1.UnblockEvent
+	5, // 6: drl.v1.DrlMessage.handover:type_name -> drl.v1.HandoverPayload
+	4, // 7: drl.v1.DrlMessage.block_with_expires_at:type_name -> drl.v1.BlockEventWithExpiresAt
+	8, // [8:8] is the sub-list for method output_type
+	8, // [8:8] is the sub-list for method input_type
+	8, // [8:8] is the sub-list for extension type_name
+	8, // [8:8] is the sub-list for extension extendee
+	0, // [0:8] is the sub-list for field type_name
 }
 
 func init() { file_internal_proto_accounting_proto_init() }
@@ -516,11 +628,12 @@ func file_internal_proto_accounting_proto_init() {
 	if File_internal_proto_accounting_proto != nil {
 		return
 	}
-	file_internal_proto_accounting_proto_msgTypes[5].OneofWrappers = []any{
+	file_internal_proto_accounting_proto_msgTypes[6].OneofWrappers = []any{
 		(*DrlMessage_Counters)(nil),
 		(*DrlMessage_Block)(nil),
 		(*DrlMessage_Unblock)(nil),
 		(*DrlMessage_Handover)(nil),
+		(*DrlMessage_BlockWithExpiresAt)(nil),
 	}
 	type x struct{}
 	out := protoimpl.TypeBuilder{
@@ -528,7 +641,7 @@ func file_internal_proto_accounting_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_internal_proto_accounting_proto_rawDesc), len(file_internal_proto_accounting_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   7,
+			NumMessages:   9,
 			NumExtensions: 0,
 			NumServices:   0,
 		},

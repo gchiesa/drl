@@ -5,6 +5,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/gchiesa/drl/internal/model"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"google.golang.org/protobuf/proto"
@@ -138,6 +139,46 @@ func TestStateDelegate_NotifyMsg_BlockEvent(t *testing.T) {
 	assert.Equal(t, map[string]string{"X-Bot": "true"}, entries[0].Entity.Headers)
 }
 
+func TestStateDelegate_NotifyMsg_BlockEventWithExpiresAt(t *testing.T) {
+	bc, err := cache.NewBlocklistCache(cache.BlocklistConfig{MaxSizeMB: 1})
+	require.NoError(t, err)
+	defer bc.Close()
+
+	delegate := NewStateDelegate(DelegateConfig{
+		Blocklist:   bc,
+		SyncTimeout: 30 * time.Second,
+	})
+
+	expiresAt := time.Now().Add(10 * time.Minute)
+
+	msg := &drlproto.DrlMessage{
+		Content: &drlproto.DrlMessage_BlockWithExpiresAt{
+			BlockWithExpiresAt: &drlproto.BlockEventWithExpiresAt{
+				Key:            "testkey003",
+				ExpiresAtNanos: expiresAt.UnixNano(),
+				EntityIp:       "10.0.0.2",
+				EntityPath:     "/api/v2",
+				EntityHdrs:     map[string]string{"X-Bot": "true"},
+			},
+		},
+	}
+	data, err := proto.Marshal(msg)
+	require.NoError(t, err)
+
+	delegate.NotifyMsg(data)
+
+	assert.True(t, bc.IsBlocked("testkey003"))
+
+	entries := bc.ListEntries()
+	require.Len(t, entries, 1)
+	require.NotNil(t, entries[0].Entity)
+	assert.Equal(t, "10.0.0.2", entries[0].Entity.IP)
+	assert.Equal(t, "/api/v2", entries[0].Entity.Path)
+	assert.Equal(t, map[string]string{"X-Bot": "true"}, entries[0].Entity.Headers)
+	// ExpiresAt should be within 1 ms of the sent timestamp
+	assert.WithinDuration(t, expiresAt, entries[0].ExpiresAt, time.Millisecond)
+}
+
 func TestStateDelegate_NotifyMsg_UnblockEvent(t *testing.T) {
 	bc, err := cache.NewBlocklistCache(cache.BlocklistConfig{MaxSizeMB: 1})
 	require.NoError(t, err)
@@ -219,8 +260,18 @@ func TestStateDelegate_MergeRemoteState(t *testing.T) {
 	require.NoError(t, err)
 	defer sourceBC.Close()
 
-	sourceBC.Block("192.168.1.1", 5*time.Second, nil)
-	sourceBC.Block("192.168.1.2", 5*time.Second, nil)
+	e1 := model.Entity{
+		IP:      "192.168.1.1",
+		Path:    "/",
+		Headers: nil,
+	}
+	e2 := model.Entity{
+		IP:      "192.168.1.2",
+		Path:    "/",
+		Headers: nil,
+	}
+	sourceBC.Block(e1.Key(), 5*time.Second, &e1)
+	sourceBC.Block(e2.Key(), 5*time.Second, &e2)
 
 	// Get state from source
 	state, err := sourceBC.GetState()
@@ -242,8 +293,8 @@ func TestStateDelegate_MergeRemoteState(t *testing.T) {
 	delegate.MergeRemoteState(state, true)
 
 	// Verify IPs are blocked in destination
-	assert.True(t, destBC.IsBlocked("192.168.1.1"))
-	assert.True(t, destBC.IsBlocked("192.168.1.2"))
+	assert.True(t, destBC.IsBlocked(e1.Key()))
+	assert.True(t, destBC.IsBlocked(e2.Key()))
 
 	// Delegate should be ready
 	assert.True(t, delegate.IsReady())

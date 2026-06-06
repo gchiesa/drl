@@ -135,6 +135,8 @@ func (d *StateDelegate) NotifyMsg(buf []byte) {
 		d.handleAccountingMsg(content.Counters)
 	case *drlproto.DrlMessage_Block:
 		d.handleBlockEvent(content.Block)
+	case *drlproto.DrlMessage_BlockWithExpiresAt:
+		d.handleBlockEventWithExpiresAt(content.BlockWithExpiresAt)
 	case *drlproto.DrlMessage_Unblock:
 		d.handleUnblockEvent(content.Unblock)
 	case *drlproto.DrlMessage_Handover:
@@ -165,7 +167,7 @@ func (d *StateDelegate) handleAccountingMsg(batch *drlproto.CounterBatch) {
 	)
 }
 
-// handleBlockEvent processes an incoming block event from a peer.
+// handleBlockEvent processes an incoming legacy block event (TTL-based) from a peer.
 func (d *StateDelegate) handleBlockEvent(evt *drlproto.BlockEvent) {
 	if evt == nil {
 		return
@@ -192,6 +194,35 @@ func (d *StateDelegate) handleBlockEvent(evt *drlproto.BlockEvent) {
 	d.logger.Debug("applied remote block event",
 		"key", evt.Key,
 		"ttl", ttl,
+		"has_entity", entity != nil,
+	)
+}
+
+// handleBlockEventWithExpiresAt processes an incoming block event that carries an
+// absolute expiration timestamp. It delegates to BlockWithExpiresAt so the local
+// cache always keeps the freshest deadline, regardless of when the event arrives.
+func (d *StateDelegate) handleBlockEventWithExpiresAt(evt *drlproto.BlockEventWithExpiresAt) {
+	if evt == nil {
+		return
+	}
+
+	d.metrics.IncMembershipReliable()
+
+	expiresAt := time.Unix(0, evt.ExpiresAtNanos)
+	var entity *model.Entity
+	if evt.EntityIp != "" || evt.EntityPath != "" {
+		entity = &model.Entity{
+			IP:      evt.EntityIp,
+			Path:    evt.EntityPath,
+			Headers: evt.EntityHdrs,
+		}
+	}
+
+	d.blocklist.BlockWithExpiresAt(evt.Key, expiresAt, entity)
+
+	d.logger.Debug("applied remote block event (expires_at)",
+		"key", evt.Key,
+		"expires_at", expiresAt,
 		"has_entity", entity != nil,
 	)
 }
@@ -269,13 +300,16 @@ func (d *StateDelegate) MergeRemoteState(buf []byte, join bool) {
 	)
 }
 
-// QueueBlockEvent builds a DrlMessage with a BlockEvent and sends it
-// immediately to all cluster peers via SendReliable (TCP) for lowest latency.
-// Sends are dispatched concurrently to avoid blocking the caller.
+// QueueBlockEvent converts the given TTL to an absolute expiration timestamp
+// (time.Now().Add(ttl)) and broadcasts a BlockEventWithExpiresAt to all peers.
+// Using a static timestamp instead of a relative TTL ensures every node applies
+// the exact same deadline regardless of when the message is delivered.
+// Sends are dispatched concurrently via SendReliable (TCP) to avoid blocking the caller.
 func (d *StateDelegate) QueueBlockEvent(key string, ttl time.Duration, entity *model.Entity) error {
-	evt := &drlproto.BlockEvent{
-		Key:      key,
-		TtlNanos: int64(ttl),
+	expiresAt := time.Now().Add(ttl)
+	evt := &drlproto.BlockEventWithExpiresAt{
+		Key:            key,
+		ExpiresAtNanos: expiresAt.UnixNano(),
 	}
 	if entity != nil {
 		evt.EntityIp = entity.IP
@@ -284,7 +318,7 @@ func (d *StateDelegate) QueueBlockEvent(key string, ttl time.Duration, entity *m
 	}
 
 	msg := &drlproto.DrlMessage{
-		Content: &drlproto.DrlMessage_Block{Block: evt},
+		Content: &drlproto.DrlMessage_BlockWithExpiresAt{BlockWithExpiresAt: evt},
 	}
 
 	data, err := proto.Marshal(msg)
