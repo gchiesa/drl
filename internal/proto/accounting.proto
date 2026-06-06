@@ -25,6 +25,18 @@ message UnblockEvent {
   string key = 1;
 }
 
+// BlockEventWithExpiresAt is the successor to BlockEvent that carries an absolute
+// expiration timestamp (Unix nanoseconds) instead of a relative TTL. This avoids
+// clock-skew drift when the event is relayed across nodes: the sender computes
+// "now + ttl" once and all receivers apply exactly the same deadline.
+message BlockEventWithExpiresAt {
+  string key = 1;
+  int64 expires_at_nanos = 2;  // Unix nanoseconds (time.Time.UnixNano)
+  string entity_ip = 3;
+  string entity_path = 4;
+  map<string, string> entity_hdrs = 5;
+}
+
 message HandoverPayload {
   uint64 sender_id = 1;
   uint64 timestamp = 2;
@@ -38,5 +50,6 @@ message DrlMessage {
     BlockEvent block = 2;
     UnblockEvent unblock = 3;
     HandoverPayload handover = 4;
+    BlockEventWithExpiresAt block_with_expires_at = 5;
   }
 }

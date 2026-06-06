@@ -16,7 +16,7 @@ import (
 // New fields use `omitempty` so that nodes running older code can still
 // deserialise the payload without errors.
 type BlocklistEntry struct {
-	IP         string            `msgpack:"ip"`                    // cache key (entity hash)
+	Key        string            `msgpack:"key"`                   // cache key (entity hash)
 	ExpiresAt  time.Time         `msgpack:"expires_at"`            // absolute expiration
 	EntityIP   string            `msgpack:"entity_ip,omitempty"`   // original IP
 	EntityPath string            `msgpack:"entity_path,omitempty"` // original URI path
@@ -135,6 +135,28 @@ func (b *BlocklistCache) IsBlocked(key string) bool {
 	return found
 }
 
+// BlockWithExpiresAt adds a key with a specific expiration time and an optional entity to the blocklist.
+// Updates the entry if the existing expiration time is older than the provided one.
+func (b *BlocklistCache) BlockWithExpiresAt(key string, expiresAt time.Time, entity *model.Entity) {
+	blCacheEntry := &blocklistEntryData{expiresAt: expiresAt, entity: entity}
+	localEntity, isNew := b.cache.SetIfAbsent(key, blCacheEntry)
+	if !isNew && localEntity != nil {
+		if localEntity.expiresAt.Before(expiresAt) {
+			b.cache.Set(key, blCacheEntry)
+			b.logger.Debug("entity blocked",
+				"key", key,
+				"expires_at", expiresAt,
+			)
+		} else {
+			b.logger.Debug("entity already blocked, with fresher expiration time, skipping update",
+				"key", key,
+				"expires_at", expiresAt,
+				"local_expires_at", localEntity.expiresAt,
+			)
+		}
+	}
+}
+
 // Block adds a key to the blocklist with a TTL and optional entity metadata.
 // The metadata is preserved so that ListEntries can reconstruct the original
 // entity for the admin GET endpoint.
@@ -184,7 +206,7 @@ func (b *BlocklistCache) GetState() ([]byte, error) {
 	for key, data := range b.cache.All() {
 		if data.expiresAt.After(now) {
 			entry := BlocklistEntry{
-				IP:        key,
+				Key:       key,
 				ExpiresAt: data.expiresAt,
 			}
 			if data.entity != nil {
@@ -208,7 +230,17 @@ func (b *BlocklistCache) GetState() ([]byte, error) {
 	return data, nil
 }
 
-// MergeState merges received state into the local blocklist
+// MergeState merges received state into the local blocklist.
+//
+// # Merging Strategy
+//
+// when merging the state, the strategy is the following:
+//
+//   - when a new entity has to be merged and the expiration associated with the incoming entity is newer than the cached
+//     one, then the new expiration time is used to update the cached entity.
+//
+// In some cases indeed, the block event can be triggered locally on a node and after it receives the reconciliation event. In that case
+// the longer expiration time wins.
 func (b *BlocklistCache) MergeState(data []byte) error {
 	if len(data) == 0 {
 		return nil
@@ -224,28 +256,35 @@ func (b *BlocklistCache) MergeState(data []byte) error {
 
 	for _, entry := range entries {
 		if entry.ExpiresAt.After(now) {
-			ed := &blocklistEntryData{expiresAt: entry.ExpiresAt}
+			// `receivedEntity` is the received entity
+			receivedEntity := &blocklistEntryData{expiresAt: entry.ExpiresAt}
 			if entry.EntityIP != "" || entry.EntityPath != "" {
-				ed.entity = &model.Entity{
+				receivedEntity.entity = &model.Entity{
 					IP:      entry.EntityIP,
 					Path:    entry.EntityPath,
 					Headers: entry.EntityHdrs,
 				}
 			}
-
-			// Preserve local entity metadata when the remote entry lacks it.
-			// This prevents Push/Pull sync from erasing metadata that was
-			// set by the admin API on this node.
-			if ed.entity == nil {
-				if existing, ok := b.cache.GetIfPresent(entry.IP); ok {
-					if existing.entity != nil {
-						ed.entity = existing.entity
-					}
-				}
+			if receivedEntity.entity == nil {
+				b.logger.Warn("received entity without IP/Path/Headers, skipping merging", "entry", entry)
+				continue
 			}
 
-			b.cache.Set(entry.IP, ed)
-			merged++
+			cacheKey := receivedEntity.entity.Key()
+
+			// if entity does not exist then cache it
+			var existing *blocklistEntryData
+			var ok bool
+			if existing, ok = b.cache.GetIfPresent(cacheKey); !ok {
+				b.cache.Set(cacheKey, receivedEntity)
+				merged++
+				continue
+			}
+			// if existed, then validate if it's fresher than the cached one
+			if existing.expiresAt.Before(receivedEntity.expiresAt) {
+				b.cache.Set(cacheKey, receivedEntity)
+				merged++
+			}
 		}
 	}
 
@@ -270,7 +309,7 @@ func (b *BlocklistCache) Entries() []BlocklistEntry {
 	for key, data := range b.cache.All() {
 		if data.expiresAt.After(now) {
 			entry := BlocklistEntry{
-				IP:        key,
+				Key:       key,
 				ExpiresAt: data.expiresAt,
 			}
 			if data.entity != nil {

@@ -141,8 +141,18 @@ func TestBlocklistCache_MergeState(t *testing.T) {
 	defer dest.Close()
 
 	// Block IPs in source
-	source.Block("192.168.1.1", 5*time.Second, nil)
-	source.Block("192.168.1.2", 5*time.Second, nil)
+	e1 := model.Entity{
+		IP:      "192.168.1.1",
+		Path:    "/",
+		Headers: nil,
+	}
+	e2 := model.Entity{
+		IP:      "192.168.1.2",
+		Path:    "/",
+		Headers: nil,
+	}
+	source.Block(e1.Key(), 5*time.Second, &e1)
+	source.Block(e2.Key(), 5*time.Second, &e2)
 
 	// Get state from source
 	state, err := source.GetState()
@@ -153,8 +163,8 @@ func TestBlocklistCache_MergeState(t *testing.T) {
 	require.NoError(t, err)
 
 	// Verify IPs are blocked in destination
-	assert.True(t, dest.IsBlocked("192.168.1.1"))
-	assert.True(t, dest.IsBlocked("192.168.1.2"))
+	assert.True(t, dest.IsBlocked(e1.Key()))
+	assert.True(t, dest.IsBlocked(e2.Key()))
 }
 
 func TestBlocklistCache_MergeState_Empty(t *testing.T) {
@@ -235,9 +245,19 @@ func TestBlocklistCache_Entries(t *testing.T) {
 	require.NoError(t, err)
 	defer bc.Close()
 
+	e1 := model.Entity{
+		IP:      "192.168.1.1",
+		Path:    "/",
+		Headers: nil,
+	}
+	e2 := model.Entity{
+		IP:      "192.168.1.2",
+		Path:    "/",
+		Headers: nil,
+	}
 	// Block some IPs
-	bc.Block("192.168.1.1", 5*time.Second, nil)
-	bc.Block("192.168.1.2", 5*time.Second, nil)
+	bc.Block(e1.Key(), 5*time.Second, &e1)
+	bc.Block(e2.Key(), 5*time.Second, &e2)
 
 	entries := bc.Entries()
 	assert.Len(t, entries, 2)
@@ -245,7 +265,7 @@ func TestBlocklistCache_Entries(t *testing.T) {
 	// Check that IPs are in entries
 	ips := make(map[string]bool)
 	for _, e := range entries {
-		ips[e.IP] = true
+		ips[e.EntityIP] = true
 	}
 	assert.True(t, ips["192.168.1.1"])
 	assert.True(t, ips["192.168.1.2"])
