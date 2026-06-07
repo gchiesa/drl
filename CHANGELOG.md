@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.0.2](https://github.com/gchiesa/drl/compare/v1.0.1...v1.0.2) (2026-06-07)
+
+
+### Bug Fixes
+
+* remove set if absent implementation ([8a7c116](https://github.com/gchiesa/drl/commit/8a7c1167e684072aa7a04fe23a68a25016fb1933))
+
 ## [1.0.1](https://github.com/gchiesa/drl/compare/v1.0.0...v1.0.1) (2026-06-07)
 
 
