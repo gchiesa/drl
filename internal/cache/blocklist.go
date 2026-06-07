@@ -137,24 +137,35 @@ func (b *BlocklistCache) IsBlocked(key string) bool {
 
 // BlockWithExpiresAt adds a key with a specific expiration time and an optional entity to the blocklist.
 // Updates the entry if the existing expiration time is older than the provided one.
+//
+// Uses Set (not SetIfAbsent) so that otter's ExpiryCreatingFunc fires and the entry
+// is assigned the correct TTL. SetIfAbsent does not reliably trigger the expiry
+// calculator in otter v2, which would cause the entry to be invisible to reads.
 func (b *BlocklistCache) BlockWithExpiresAt(key string, expiresAt time.Time, entity *model.Entity) {
-	blCacheEntry := &blocklistEntryData{expiresAt: expiresAt, entity: entity}
-	localEntity, isNew := b.cache.SetIfAbsent(key, blCacheEntry)
-	if !isNew && localEntity != nil {
-		if localEntity.expiresAt.Before(expiresAt) {
-			b.cache.Set(key, blCacheEntry)
-			b.logger.Debug("entity blocked",
-				"key", key,
-				"expires_at", expiresAt,
-			)
-		} else {
+	// If a fresher entry already exists, keep it and skip the write.
+	if existing, ok := b.cache.GetIfPresent(key); ok {
+		if !existing.expiresAt.Before(expiresAt) {
 			b.logger.Debug("entity already blocked, with fresher expiration time, skipping update",
 				"key", key,
 				"expires_at", expiresAt,
-				"local_expires_at", localEntity.expiresAt,
+				"local_expires_at", existing.expiresAt,
 			)
+			return
 		}
+		b.cache.Set(key, &blocklistEntryData{expiresAt: expiresAt, entity: entity})
+		b.logger.Debug("entity blocked, updated with fresher expiration",
+			"key", key,
+			"expires_at", expiresAt,
+			"prev_expires_at", existing.expiresAt,
+		)
+		return
 	}
+
+	b.cache.Set(key, &blocklistEntryData{expiresAt: expiresAt, entity: entity})
+	b.logger.Debug("entity blocked",
+		"key", key,
+		"expires_at", expiresAt,
+	)
 }
 
 // Block adds a key to the blocklist with a TTL and optional entity metadata.
