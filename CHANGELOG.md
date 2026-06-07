@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.0.1](https://github.com/gchiesa/drl/compare/v1.0.0...v1.0.1) (2026-06-07)
+
+
+### Bug Fixes
+
+* merge state should preserve newer expirations ([af05580](https://github.com/gchiesa/drl/commit/af0558003f1258606b94651898dcd10dd93e1851))
+
 ## [1.0.0](https://github.com/gchiesa/drl/compare/v0.1.8...v1.0.0) (2026-06-03)
 
 
