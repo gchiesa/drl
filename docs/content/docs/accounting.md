@@ -122,3 +122,31 @@ accounting {
 ```
 
 Multiple rules can co-exist. DRL evaluates rules in order and applies the **first matching** rule to an entity.
+
+## Overriding rules via environment variables
+
+Individual rules can be injected or overridden without a config file using `DRL_RULE_<rule-name>_JSON`.
+The variable value is a JSON object with the same fields as the KDL rule block.
+
+```bash
+# Override a single rule limit for staging
+DRL_RULE_payments_api_JSON='{"path-prefix":"/api/v1/payments","limit":50,"per":"minute"}'
+
+# Add a rule that does not exist in the base KDL config
+DRL_RULE_health_JSON='{"path-prefix":"/health","limit":10,"per":"second"}'
+```
+
+**Merge semantics:** env-var rules are applied after the KDL file is parsed. A rule name present in an
+env var overwrites the corresponding KDL rule; all other KDL rules remain unchanged. This makes it
+straightforward to ship a shared base config and tune per-environment limits without duplicating the
+full rule set.
+
+**Field reference (JSON keys):**
+
+| JSON key | Required | Description |
+|----------|----------|-------------|
+| `path-prefix` | Yes | URI path prefix to match |
+| `headers` | No | Array of header names to include in the entity key |
+| `redactions` | No | Object mapping header name → redaction regex |
+| `limit` | Yes | Request count threshold |
+| `per` | Yes | Window unit: `"second"` or `"minute"` |

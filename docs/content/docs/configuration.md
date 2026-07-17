@@ -282,6 +282,26 @@ accounting {
 DRL evaluates rules in definition order and applies the **first matching rule** to an entity. Entities that
 match no rule are passed through without accounting.
 
+#### Environment variable override
+
+Individual rules can be injected or overridden without a config file via `DRL_RULE_<rule-name>_JSON`.
+The value is a JSON object matching the rule fields above.
+
+```bash
+DRL_RULE_payments_api_JSON='{"path-prefix":"/api/v1/payments","headers":["X-API-Key","X-Tenant-ID"],"redactions":{"X-API-Key":"^(.{0,3}).*$"},"limit":500,"per":"minute"}'
+DRL_RULE_users_api_JSON='{"path-prefix":"/api/v1/users","limit":2000,"per":"minute"}'
+```
+
+**Merge semantics:** env-var rules are merged on top of any KDL-defined rules. A rule whose name appears
+in an env var overwrites the KDL rule with the same name; rules not mentioned in env vars are kept
+as-is. This lets you ship a base rule set in a KDL file and patch specific limits per environment
+(e.g. lower limits in staging).
+
+> **Note:** The `<rule-name>` portion of the env var key is used verbatim as the map key. It must
+> exactly match the name used in the KDL `rules {}` block when you intend to override an existing rule.
+> Because POSIX shell variable names cannot contain hyphens, prefer underscores in rule names
+> (e.g. `payments_api` rather than `payments-api`) when env-var overrides are required.
+
 ---
 
 ### Header Redactions
@@ -395,6 +415,56 @@ full architecture and OIDC reference.
 | `tls.enabled` | `DRL_EMBEDDED_PROXY_TLS_ENABLED` | `false` | Enable TLS on the proxy listener |
 | `tls.cert` | `DRL_EMBEDDED_PROXY_TLS_CERT` | — | Base64-encoded PEM certificate |
 | `tls.key` | `DRL_EMBEDDED_PROXY_TLS_KEY` | — | Base64-encoded PEM private key |
+
+#### Host and route override
+
+The `host` / `routes` tree is too deeply nested for flat env vars. The entire hosts array can be
+replaced via `DRL_EMBEDDED_PROXY_HOSTS_JSON` (full replace, not merge):
+
+```bash
+DRL_EMBEDDED_PROXY_HOSTS_JSON='[
+  {
+    "hostname": "api.example.com",
+    "oidc": {
+      "issuer": "https://auth.example.com/realms/myapp",
+      "client-id": "drl-gateway",
+      "audience": "https://api.example.com"
+    },
+    "routes": {
+      "routes": [
+        {
+          "prefix": "/v1",
+          "upstream": "http://backend:8080",
+          "require-auth": true,
+          "scopes": ["read"]
+        },
+        {
+          "prefix": "/health",
+          "upstream": "http://backend:8080",
+          "require-auth": false
+        }
+      ]
+    }
+  }
+]'
+```
+
+JSON field names follow the `json:"..."` struct tags (same as the keys reported by the internal API).
+The `routes` wrapper is a nested object — see the example above for the correct shape.
+
+**Terraform** users can produce the value with `jsonencode(...)`:
+
+```hcl
+environment = [
+  {
+    name  = "DRL_EMBEDDED_PROXY_HOSTS_JSON"
+    value = jsonencode([{
+      hostname = "api.example.com"
+      routes   = { routes = [{ prefix = "/", upstream = "http://backend:8080", "require-auth" = false }] }
+    }])
+  }
+]
+```
 
 #### `embedded-proxy.host.<hostname>.routes.route`
 

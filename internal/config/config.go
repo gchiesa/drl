@@ -2,6 +2,7 @@ package config
 
 import (
 	"embed"
+	"encoding/json"
 	"fmt"
 	"os"
 	"regexp"
@@ -286,6 +287,14 @@ func Load(configPath string) (*Config, error) {
 	// (DRL_MEMBERSHIP_PRIMARY_KEY + DRL_MEMBERSHIP_SECONDARY_KEYS)
 	cfg.applyEncryptionKeyEnvOverrides()
 
+	// Apply JSON blob overrides for complex structures not representable as flat env vars
+	if err = cfg.applyRuleJSONOverrides(); err != nil {
+		return nil, err
+	}
+	if err = cfg.applyProxyHostsJSONOverride(); err != nil {
+		return nil, err
+	}
+
 	// Validate the final configuration
 	if err = cfg.Validate(); err != nil {
 		return nil, fmt.Errorf("configuration validation failed: %w", err)
@@ -307,6 +316,52 @@ func (c *Config) loadFromEnvironment() error {
 	if err := env.Parse(c); err != nil {
 		return fmt.Errorf("failed to parse Environment config: %w", err)
 	}
+	return nil
+}
+
+// ruleJSONEnvRe matches DRL_RULE_<name>_JSON env var names and captures the rule name.
+// The name may contain underscores; the greedy .+ stops at the trailing _JSON suffix.
+var ruleJSONEnvRe = regexp.MustCompile(`^DRL_RULE_(.+)_JSON$`)
+
+// applyRuleJSONOverrides scans the environment for DRL_RULE_<name>_JSON variables and
+// merges each decoded AccountingRule into c.Accounting.Rules, overwriting any
+// KDL-configured rule with the same name. Rules not mentioned in env vars are preserved.
+func (c *Config) applyRuleJSONOverrides() error {
+	for _, kv := range os.Environ() {
+		idx := strings.IndexByte(kv, '=')
+		if idx < 0 {
+			continue
+		}
+		key, val := kv[:idx], kv[idx+1:]
+		m := ruleJSONEnvRe.FindStringSubmatch(key)
+		if m == nil {
+			continue
+		}
+		name := m[1]
+		var rule AccountingRule
+		if err := json.Unmarshal([]byte(val), &rule); err != nil {
+			return fmt.Errorf("%s is not valid JSON: %w", key, err)
+		}
+		if c.Accounting.Rules == nil {
+			c.Accounting.Rules = make(map[string]AccountingRule)
+		}
+		c.Accounting.Rules[name] = rule
+	}
+	return nil
+}
+
+// applyProxyHostsJSONOverride applies DRL_EMBEDDED_PROXY_HOSTS_JSON, fully replacing
+// the hosts slice when the variable is set.
+func (c *Config) applyProxyHostsJSONOverride() error {
+	raw := os.Getenv("DRL_EMBEDDED_PROXY_HOSTS_JSON")
+	if raw == "" {
+		return nil
+	}
+	var hosts []ProxyHostConfig
+	if err := json.Unmarshal([]byte(raw), &hosts); err != nil {
+		return fmt.Errorf("DRL_EMBEDDED_PROXY_HOSTS_JSON is not valid JSON: %w", err)
+	}
+	c.EmbeddedProxy.Hosts = hosts
 	return nil
 }
 
