@@ -383,6 +383,47 @@ accounting {
 - At least one capturing group is required for masking to take effect; a pattern with no group leaves
   the value unmodified.
 
+### `embedded-proxy`
+
+Enables DRL's optional built-in reverse proxy. See the [Embedded Proxy]({{< ref "embedded-proxy" >}}) page for the
+full architecture and OIDC reference.
+
+| KDL key | Env var | Default | Description |
+|---------|---------|---------|-------------|
+| `enabled` | `DRL_EMBEDDED_PROXY_ENABLED` | `false` | Enable the embedded reverse proxy |
+| `listen` | `DRL_EMBEDDED_PROXY_LISTEN` | `:8443` | Bind address for the proxy listener |
+| `tls.enabled` | `DRL_EMBEDDED_PROXY_TLS_ENABLED` | `false` | Enable TLS on the proxy listener |
+| `tls.cert` | `DRL_EMBEDDED_PROXY_TLS_CERT` | — | Base64-encoded PEM certificate |
+| `tls.key` | `DRL_EMBEDDED_PROXY_TLS_KEY` | — | Base64-encoded PEM private key |
+
+#### `embedded-proxy.host.<hostname>.routes.route`
+
+Each `route` node inside a `host` block maps a URI prefix to an upstream service.
+
+| KDL key | Default | Description |
+|---------|---------|-------------|
+| `upstream` | — | Full upstream URL, e.g. `http://backend:8080` |
+| `balance-strategy` | — | `dns-round-robin` rotates across all A-record IPs for the upstream hostname |
+| `dns-refresh-interval` | `5s` | How often the DNS resolver refreshes the IP pool (only for `dns-round-robin`) |
+| `require-auth` | `false` | Enforce OIDC Bearer-token verification on this route |
+| `scopes` | — | One or more OAuth 2.0 scopes required (only evaluated when `require-auth true`) |
+
+##### Connection pool settings (per route)
+
+Each route maintains its own upstream connection pool, isolated from other routes and from internal DRL HTTP clients
+(Memberlist, OIDC discovery). The defaults below are intentionally more generous than Go's `http.DefaultTransport`
+(`MaxIdleConnsPerHost: 2`) to avoid connection churn under proxy workloads.
+
+| KDL key | Default | Description |
+|---------|---------|-------------|
+| `max-idle-conns-per-host` | `32` | Maximum idle keep-alive connections held per upstream host |
+| `max-conns-per-host` | `0` (unlimited) | Total connection cap per upstream host (dialing + active + idle) |
+| `idle-conn-timeout` | `90s` | How long an idle keep-alive connection is kept open before closing |
+| `response-header-timeout` | `30s` | Maximum wait for an upstream response header after the request is sent |
+| `dial-timeout` | `30s` | Maximum time to establish a new TCP connection to the upstream |
+
+---
+
 ## Docker Compose example
 
 ```yaml
