@@ -1,5 +1,18 @@
 # Changelog
 
+## [1.1.0](https://github.com/gchiesa/drl/compare/v1.0.2...v1.1.0) (2026-07-17)
+
+
+### Features
+
+* separate connection pool per proxy route on the embedded proxy ([5a73e4a](https://github.com/gchiesa/drl/commit/5a73e4aee8bd2dac41ab4a38ffa9767dba261a1b))
+* support for _JSON overrides for rules and embedded proxy ([d2b97b4](https://github.com/gchiesa/drl/commit/d2b97b44e6baa54d9c8da34213a06f57d99fd389))
+
+
+### Bug Fixes
+
+* made case-insensitive header lookup for masking ([e1ca090](https://github.com/gchiesa/drl/commit/e1ca090c52d4dd98d4c334583e17c6e013c7d1e0))
+
 ## [1.0.2](https://github.com/gchiesa/drl/compare/v1.0.1...v1.0.2) (2026-06-07)
 
 
