@@ -19,6 +19,7 @@ import (
 	"time"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/samber/lo"
 
 	"github.com/gchiesa/drl/internal/config"
 )
@@ -214,6 +215,38 @@ func (s *Server) buildRouter(ctx context.Context) (http.Handler, error) {
 	return r, nil
 }
 
+// buildUpstreamTransport constructs a dedicated *http.Transport for a single
+// route.  Using a per-route transport (instead of http.DefaultTransport) gives
+// us three important properties:
+//
+//  1. Isolation — a slow or saturated upstream cannot starve the idle-conn pool
+//     shared with other routes or with in-process HTTP clients (Memberlist, OIDC).
+//  2. Correct pool sizing — http.DefaultTransport caps idle conns per host at 2,
+//     which is far too low for a proxy under any real load.  We default to 32.
+//  3. Configurability — operators can tune every knob per route via KDL config.
+func buildUpstreamTransport(route config.ProxyRouteConfig) *http.Transport {
+	maxIdleConnsPerHost := lo.CoalesceOrEmpty(route.MaxIdleConnsPerHost, 32)
+	idleConnTimeout := lo.CoalesceOrEmpty(route.IdleConnTimeout, 90*time.Second)
+	responseHeaderTimeout := lo.CoalesceOrEmpty(route.ResponseHeaderTimeout, 30*time.Second)
+	dialTimeout := lo.CoalesceOrEmpty(route.DialTimeout, 30*time.Second)
+
+	return &http.Transport{
+		Proxy: http.ProxyFromEnvironment,
+		DialContext: (&net.Dialer{
+			Timeout:   dialTimeout,
+			KeepAlive: 30 * time.Second,
+		}).DialContext,
+		ForceAttemptHTTP2:     true,
+		MaxIdleConns:          100,
+		MaxIdleConnsPerHost:   maxIdleConnsPerHost,
+		MaxConnsPerHost:       route.MaxConnsPerHost, // 0 = unlimited
+		IdleConnTimeout:       idleConnTimeout,
+		ResponseHeaderTimeout: responseHeaderTimeout,
+		TLSHandshakeTimeout:   10 * time.Second,
+		ExpectContinueTimeout: 1 * time.Second,
+	}
+}
+
 // buildReverseProxy creates an httputil.ReverseProxy for the given route.
 // When balance-strategy is "dns-round-robin" a RoundRobinDirector is started
 // in the background to keep the IP pool fresh.
@@ -223,7 +256,9 @@ func (s *Server) buildReverseProxy(ctx context.Context, hostname string, route c
 		return nil, fmt.Errorf("invalid upstream URL %q: %w", route.Upstream, err)
 	}
 
-	rp := &httputil.ReverseProxy{}
+	rp := &httputil.ReverseProxy{
+		Transport: buildUpstreamTransport(route),
+	}
 
 	if strings.EqualFold(route.BalanceStrategy, "dns-round-robin") {
 		interval := route.DNSRefreshInterval

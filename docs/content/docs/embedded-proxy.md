@@ -46,9 +46,55 @@ embedded-proxy {
                 balance-strategy "dns-round-robin"
                 dns-refresh-interval "5s"
                 require-auth false
+
+                // Connection pool (all optional — sensible defaults apply)
+                // max-idle-conns-per-host 32
+                // max-conns-per-host      0      // 0 = unlimited
+                // idle-conn-timeout       "90s"
+                // response-header-timeout "30s"
+                // dial-timeout            "30s"
             }
         }
     }
+}
+```
+
+---
+
+## Connection Pool
+
+Each route maintains its own upstream HTTP connection pool. This provides two guarantees:
+
+- **Isolation** — a slow or saturated upstream cannot exhaust the pool shared with other routes or
+  with DRL's internal HTTP clients (Memberlist gossip, OIDC JWKS fetching).
+- **Correct sizing** — Go's `http.DefaultTransport` caps idle connections per host at **2**, which
+  causes constant TCP churn under proxy workloads. DRL defaults to **32** idle connections per host.
+
+### Pool settings reference
+
+| KDL key | Default | Description |
+|---------|---------|-------------|
+| `max-idle-conns-per-host` | `32` | Idle keep-alive connections held per upstream host |
+| `max-conns-per-host` | `0` (unlimited) | Hard cap on total connections per host (dialing + active + idle). Set this to protect upstream services from overload. |
+| `idle-conn-timeout` | `90s` | How long an idle connection is kept before being closed |
+| `response-header-timeout` | `30s` | Maximum wait for an upstream to send response headers after the request body is written. Prevents slow upstreams from holding goroutines indefinitely. |
+| `dial-timeout` | `30s` | Maximum time allowed to establish a new TCP connection |
+
+### Tuning example
+
+High-throughput route with a bounded connection cap to protect the upstream:
+
+```kdl
+route "/api" {
+    upstream "http://api-service:8080"
+    require-auth true
+    scopes "read"
+
+    max-idle-conns-per-host 64
+    max-conns-per-host      200
+    idle-conn-timeout       "60s"
+    response-header-timeout "10s"
+    dial-timeout            "5s"
 }
 ```
 

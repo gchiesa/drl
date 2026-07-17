@@ -208,6 +208,25 @@ type ProxyRouteConfig struct {
 	// Scopes lists the OAuth2 scopes required to access this route (used with require-auth true).
 	// Populated from a single KDL node with positional args: scopes "read" "write"
 	Scopes []string `kdl:"scopes" json:"scopes,omitempty"`
+
+	// Connection pool settings for the upstream transport.
+	// Zero values fall back to sensible proxy-oriented defaults (not http.DefaultTransport).
+
+	// MaxIdleConnsPerHost caps the number of idle keep-alive connections held open per
+	// upstream host. Defaults to 32 when zero.
+	MaxIdleConnsPerHost int `kdl:"max-idle-conns-per-host" json:"max-idle-conns-per-host,omitempty"`
+	// MaxConnsPerHost limits the total number of connections per host (dialing + active +
+	// idle). Zero means no limit.
+	MaxConnsPerHost int `kdl:"max-conns-per-host" json:"max-conns-per-host,omitempty"`
+	// IdleConnTimeout is the maximum time an idle keep-alive connection stays open before
+	// being closed. Defaults to 90s when zero.
+	IdleConnTimeout time.Duration `kdl:"idle-conn-timeout" json:"idle-conn-timeout,omitempty"`
+	// ResponseHeaderTimeout is the maximum time to wait for an upstream response header
+	// after the request has been fully written. Defaults to 30s when zero.
+	ResponseHeaderTimeout time.Duration `kdl:"response-header-timeout" json:"response-header-timeout,omitempty"`
+	// DialTimeout is the maximum time allowed to establish a new TCP connection to the
+	// upstream. Defaults to 30s when zero.
+	DialTimeout time.Duration `kdl:"dial-timeout" json:"dial-timeout,omitempty"`
 }
 
 // ProxyOIDCClaimsConfig overrides the JWT claim field names used for scope/role extraction.
