@@ -113,7 +113,7 @@ func (s *Server) handleBlockEntityList(c *fiber.Ctx) error {
 			entry.URIPath = e.Entity.Path
 			redactedHeaders := make(map[string]string, len(e.Entity.Headers))
 			for k, v := range e.Entity.Headers {
-				if expr, ok := s.blocklistHeaderRedactions[k]; ok {
+				if expr, ok := s.blocklistHeaderRedactions[strings.ToLower(k)]; ok {
 					redactedHeaders[k] = maskHeader(v, expr)
 				} else {
 					redactedHeaders[k] = v

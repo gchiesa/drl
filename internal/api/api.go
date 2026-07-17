@@ -233,9 +233,13 @@ func NewServer(cfg ServerConfig) (*Server, error) {
 		defaultTTL = 24 * time.Hour
 	}
 
-	blocklistHeaderRedactions := cfg.BlocklistHeaderRedactions
-	if blocklistHeaderRedactions == nil {
-		blocklistHeaderRedactions = make(map[string]*regexp.Regexp)
+	// Normalize redaction map keys to lowercase so lookups are case-insensitive.
+	// HTTP/2 and gRPC canonicalize header names to lowercase, so a config entry
+	// keyed as "Authorization" must still match an entity header stored as
+	// "authorization".
+	blocklistHeaderRedactions := make(map[string]*regexp.Regexp, len(cfg.BlocklistHeaderRedactions))
+	for k, v := range cfg.BlocklistHeaderRedactions {
+		blocklistHeaderRedactions[strings.ToLower(k)] = v
 	}
 
 	// Extract port from address (e.g. ":8082" → "8082")

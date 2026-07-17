@@ -626,6 +626,78 @@ func TestBlockEntityList_UnredactedHeadersPassThrough(t *testing.T) {
 	assert.Equal(t, "ScraperBot/1.0", entries[0].Headers["User-Agent"])
 }
 
+// TestBlockEntityList_HeaderRedactionCaseInsensitive verifies that header
+// redaction works even when the case of the header name in the entity differs
+// from the case used in the BlocklistHeaderRedactions config.
+// HTTP/2 and gRPC normalize header names to lowercase, so a config entry like
+// "Authorization" must still mask a stored header keyed as "authorization".
+func TestBlockEntityList_HeaderRedactionCaseInsensitive(t *testing.T) {
+	tests := []struct {
+		name         string
+		configKey    string // key as written in the redaction config (e.g. from YAML)
+		entityKey    string // key as stored in the entity (e.g. after gRPC normalization)
+		headerValue  string
+		wantMasked   bool
+		wantContains string // substring that must appear in the masked output
+	}{
+		{
+			name:         "config canonical, entity lowercase (gRPC normalization)",
+			configKey:    "Authorization",
+			entityKey:    "authorization",
+			headerValue:  "Bearer sk_live_abc123",
+			wantMasked:   true,
+			wantContains: "Bearer",
+		},
+		{
+			name:         "config lowercase, entity canonical",
+			configKey:    "x-api-key",
+			entityKey:    "X-Api-Key",
+			headerValue:  "sk_live_xyz9876",
+			wantMasked:   true,
+			wantContains: "sk_",
+		},
+		{
+			name:         "config uppercase, entity lowercase",
+			configKey:    "X-API-KEY",
+			entityKey:    "x-api-key",
+			headerValue:  "abcsecret",
+			wantMasked:   true,
+			wantContains: "abc",
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			bl := newMockBlocklist()
+			redactions := map[string]*regexp.Regexp{
+				tc.configKey: regexp.MustCompile(`^(.{0,6}).*$`),
+			}
+			server := newTestServerWithRedactions(t, bl, redactions)
+
+			entity := &model.Entity{
+				IP:      "10.0.0.10",
+				Path:    "api/v1/secure",
+				Headers: map[string]string{tc.entityKey: tc.headerValue},
+			}
+			bl.Block(entity.Key(), time.Hour, entity)
+
+			code, raw := doAuthenticatedRequest(t, server, "GET", "/v1/blocked-entity")
+			require.Equal(t, 200, code, "body: %s", string(raw))
+
+			var entries []models.BlockedEntityEntry
+			require.NoError(t, json.Unmarshal(raw, &entries))
+			require.Len(t, entries, 1)
+
+			got := entries[0].Headers[tc.entityKey]
+			if tc.wantMasked {
+				assert.Contains(t, got, tc.wantContains, "redacted value should keep visible prefix")
+				assert.Contains(t, got, "*", "redacted value should contain mask characters")
+				assert.NotEqual(t, tc.headerValue, got, "original value must not be returned verbatim")
+			}
+		})
+	}
+}
+
 func TestBlockEntityList_NoRedactions_AllHeadersPassThrough(t *testing.T) {
 	bl := newMockBlocklist()
 	server := newTestServerWithBlocklist(t, bl, &mockBroadcaster{})
