@@ -26,6 +26,67 @@ them. Token issuance remains the responsibility of your IdP.
 
 ---
 
+## Environment variable override
+
+The `host` / `routes` tree is too deeply nested for flat env vars. Set
+`DRL_EMBEDDED_PROXY_HOSTS_JSON` to replace the entire hosts array at runtime — useful for
+container environments (Docker Compose, Kubernetes, ECS) where mounting a config file is
+inconvenient.
+
+```bash
+DRL_EMBEDDED_PROXY_HOSTS_JSON='[
+  {
+    "hostname": "api.example.com",
+    "oidc": {
+      "issuer": "https://auth.example.com/realms/myapp",
+      "client-id": "drl-gateway",
+      "audience": "https://api.example.com"
+    },
+    "routes": {
+      "routes": [
+        {
+          "prefix": "/v1",
+          "upstream": "http://backend:8080",
+          "require-auth": true,
+          "scopes": ["read"]
+        },
+        {
+          "prefix": "/health",
+          "upstream": "http://backend:8080",
+          "require-auth": false
+        }
+      ]
+    }
+  }
+]'
+```
+
+> **Shape note:** `routes` is a wrapper object — the inner array is at `routes.routes`. This mirrors
+> the internal JSON representation returned by the config API.
+
+**Terraform:**
+
+```hcl
+environment = [
+  {
+    name  = "DRL_EMBEDDED_PROXY_HOSTS_JSON"
+    value = jsonencode([{
+      hostname = "api.example.com"
+      routes   = { routes = [
+        { prefix = "/v1",    upstream = "http://backend:8080", "require-auth" = true,  scopes = ["read"] },
+        { prefix = "/health", upstream = "http://backend:8080", "require-auth" = false }
+      ]}
+    }])
+  }
+]
+```
+
+Scalar settings (`enabled`, `listen`, `tls.*`) continue to be overridable via their individual
+`DRL_EMBEDDED_PROXY_*` env vars. `DRL_EMBEDDED_PROXY_HOSTS_JSON` only controls the hosts/routes
+tree.
+
+---
+
 ## Basic Configuration
 
 ```kdl
