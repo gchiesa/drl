@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.1.1](https://github.com/gchiesa/drl/compare/v1.1.0...v1.1.1) (2026-07-18)
+
+
+### Bug Fixes
+
+* ellipsis on long masked values ([f65ab97](https://github.com/gchiesa/drl/commit/f65ab9726e462cfe0319d774aca2a7d021d61070))
+
 ## [1.1.0](https://github.com/gchiesa/drl/compare/v1.0.2...v1.1.0) (2026-07-17)
 
 
