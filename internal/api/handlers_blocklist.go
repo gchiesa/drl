@@ -15,7 +15,8 @@ import (
 
 const (
 	// headerMarker separates the URI path from the optional header list in the URL.
-	headerMarker = "/_headers/"
+	headerMarker   = "/_headers/"
+	maxMaskedChars = 10
 )
 
 // parseEntityFromWildcard splits the Fiber wildcard parameter (everything after
@@ -144,9 +145,16 @@ func maskHeader(headerValue string, expr *regexp.Regexp) string {
 		return headerValue
 	}
 	g1Start, g1End := locs[2], locs[3]
+	// if the masked portion is > 10 chars, then we cut it and add `...`
+	threeDots := ""
+	endRepeat := len(headerValue) - g1End
+	if endRepeat > maxMaskedChars {
+		endRepeat = maxMaskedChars
+		threeDots = "..."
+	}
 	return strings.Repeat("*", g1Start) +
 		headerValue[g1Start:g1End] +
-		strings.Repeat("*", len(headerValue)-g1End)
+		strings.Repeat("*", endRepeat) + threeDots
 }
 
 // handleBlockEntityAdd handles POST /v1/blocked-entity/:ip/_path/*.
