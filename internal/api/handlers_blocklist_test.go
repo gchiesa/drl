@@ -518,14 +518,14 @@ func TestMaskHeader_ApiKeyPattern(t *testing.T) {
 	// Typical use-case from the docs: show first 3 chars, mask the rest.
 	expr := regexp.MustCompile(`^(.{0,3}).*$`)
 	got := maskHeader("sk_live_xyz9876", expr)
-	assert.Equal(t, "sk_************", got)
+	assert.Equal(t, "sk_**********...", got)
 }
 
 func TestMaskHeader_BearerToken(t *testing.T) {
 	expr := regexp.MustCompile(`^(Bearer .{0,3}).*$`)
 	got := maskHeader("Bearer sk_test_abc123", expr)
 	// "Bearer sk" (9 chars kept) + 11 stars
-	assert.Equal(t, "Bearer sk_***********", got)
+	assert.Equal(t, "Bearer sk_**********...", got)
 }
 
 func TestMaskHeader_NoMatch_ReturnsOriginal(t *testing.T) {
@@ -597,7 +597,7 @@ func TestBlockEntityList_HeaderRedactionApplied(t *testing.T) {
 	require.Len(t, entries, 1)
 
 	got := entries[0].Headers["X-Api-Key"]
-	assert.Equal(t, "abc************", got, "first 3 chars kept, rest masked")
+	assert.Equal(t, "abc**********...", got, "first 3 chars kept, rest masked")
 }
 
 func TestBlockEntityList_UnredactedHeadersPassThrough(t *testing.T) {
