@@ -301,10 +301,14 @@ func (d *StateDelegate) MergeRemoteState(buf []byte, join bool) {
 }
 
 // QueueBlockEvent converts the given TTL to an absolute expiration timestamp
-// (time.Now().Add(ttl)) and broadcasts a BlockEventWithExpiresAt to all peers.
+// (time.Now().Add(ttl)) and propagates a BlockEventWithExpiresAt to all peers.
 // Using a static timestamp instead of a relative TTL ensures every node applies
 // the exact same deadline regardless of when the message is delivered.
-// Sends are dispatched concurrently via SendReliable (TCP) to avoid blocking the caller.
+//
+// When the persistent gRPC channel is enabled (config.Membership.
+// UseHiPrioPersistentChannel) and established, the event is sent over that
+// channel; otherwise it falls back to the legacy memberlist SendReliable
+// (TCP) path. Sends are dispatched concurrently so the caller is not blocked.
 func (d *StateDelegate) QueueBlockEvent(key string, ttl time.Duration, entity *model.Entity) error {
 	expiresAt := time.Now().Add(ttl)
 	evt := &drlproto.BlockEventWithExpiresAt{
@@ -317,6 +321,13 @@ func (d *StateDelegate) QueueBlockEvent(key string, ttl time.Duration, entity *m
 		evt.EntityHdrs = entity.Headers
 	}
 
+	if d.useChannel() {
+		d.sendToAllPeersViaChannel(&drlproto.ChannelMessage{
+			Content: &drlproto.ChannelMessage_BlockWithExpiresAt{BlockWithExpiresAt: evt},
+		})
+		return nil
+	}
+
 	msg := &drlproto.DrlMessage{
 		Content: &drlproto.DrlMessage_BlockWithExpiresAt{BlockWithExpiresAt: evt},
 	}
@@ -326,15 +337,26 @@ func (d *StateDelegate) QueueBlockEvent(key string, ttl time.Duration, entity *m
 		return fmt.Errorf("failed to marshal block DrlMessage: %w", err)
 	}
 
+	d.warnLegacyPath("block")
 	d.sendToAllPeersAsync(data)
 	return nil
 }
 
-// QueueUnblockEvent builds a DrlMessage with an UnblockEvent and sends it
-// immediately to all cluster peers via SendReliable (TCP).
+// QueueUnblockEvent sends an UnblockEvent to all cluster peers, preferring
+// the persistent gRPC channel when enabled and falling back to memberlist
+// SendReliable (TCP) otherwise.
 func (d *StateDelegate) QueueUnblockEvent(key string) error {
+	evt := &drlproto.UnblockEvent{Key: key}
+
+	if d.useChannel() {
+		d.sendToAllPeersViaChannel(&drlproto.ChannelMessage{
+			Content: &drlproto.ChannelMessage_Unblock{Unblock: evt},
+		})
+		return nil
+	}
+
 	msg := &drlproto.DrlMessage{
-		Content: &drlproto.DrlMessage_Unblock{Unblock: &drlproto.UnblockEvent{Key: key}},
+		Content: &drlproto.DrlMessage_Unblock{Unblock: evt},
 	}
 
 	data, err := proto.Marshal(msg)
@@ -342,8 +364,29 @@ func (d *StateDelegate) QueueUnblockEvent(key string) error {
 		return fmt.Errorf("failed to marshal unblock DrlMessage: %w", err)
 	}
 
+	d.warnLegacyPath("unblock")
 	d.sendToAllPeersAsync(data)
 	return nil
+}
+
+// useChannel reports whether hi-priority events should be routed over the
+// persistent gRPC channel instead of memberlist SendReliable.
+func (d *StateDelegate) useChannel() bool {
+	return d.cluster != nil &&
+		d.cluster.config != nil &&
+		d.cluster.config.Membership.UseHiPrioPersistentChannel &&
+		d.cluster.GetChannelManager() != nil
+}
+
+// warnLegacyPath logs a WARN-level event whenever a hi-priority (block/unblock)
+// message is propagated over the legacy on-demand memberlist SendReliable
+// (TCP) path instead of the persistent gRPC channel. This surfaces cases
+// where the persistent channel is disabled or not yet established to peers,
+// per the milestone requirement to flag use of the legacy transport.
+func (d *StateDelegate) warnLegacyPath(eventType string) {
+	d.logger.Warn("using legacy on-demand TCP path for hi-priority event; persistent gRPC channel disabled or unavailable",
+		"event_type", eventType,
+	)
 }
 
 // sendToAllPeersAsync sends data to all cluster peers via SendReliable concurrently.
@@ -366,6 +409,47 @@ func (d *StateDelegate) sendToAllPeersAsync(data []byte) {
 			}
 		}(addr)
 	}
+}
+
+// sendToAllPeersViaChannel sends a ChannelMessage to all cluster peers over
+// the persistent gRPC channel. Failures (e.g. no channel yet established to
+// a given peer) are logged but never fail the caller, consistent with the
+// "availability over consistency" principle applied to the legacy
+// SendReliable path.
+func (d *StateDelegate) sendToAllPeersViaChannel(msg *drlproto.ChannelMessage) {
+	if d.cluster == nil {
+		return
+	}
+	cm := d.cluster.GetChannelManager()
+	if cm == nil {
+		return
+	}
+	localAddr := d.cluster.LocalAddr()
+	for _, addr := range d.cluster.MemberAddrs() {
+		if addr == localAddr {
+			continue
+		}
+		if err := cm.Send(addr, msg); err != nil {
+			d.logger.Warn("failed to send persistent channel msg to peer",
+				"addr", addr,
+				"error", err,
+			)
+		}
+	}
+}
+
+// handleChannelBlockWithExpiresAt applies a block event received over the
+// persistent gRPC channel, reusing the same apply logic as the memberlist
+// SendReliable path.
+func (d *StateDelegate) handleChannelBlockWithExpiresAt(evt *drlproto.BlockEventWithExpiresAt) {
+	d.handleBlockEventWithExpiresAt(evt)
+}
+
+// handleChannelUnblock applies an unblock event received over the
+// persistent gRPC channel, reusing the same apply logic as the memberlist
+// SendReliable path.
+func (d *StateDelegate) handleChannelUnblock(evt *drlproto.UnblockEvent) {
+	d.handleUnblockEvent(evt)
 }
 
 // SetHandover sets the handover handler for graceful state evacuation.

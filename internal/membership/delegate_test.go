@@ -1,6 +1,8 @@
 package membership
 
 import (
+	"bytes"
+	"log/slog"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -11,6 +13,7 @@ import (
 	"google.golang.org/protobuf/proto"
 
 	"github.com/gchiesa/drl/internal/cache"
+	"github.com/gchiesa/drl/internal/config"
 	"github.com/gchiesa/drl/internal/metrics"
 	drlproto "github.com/gchiesa/drl/internal/proto"
 )
@@ -479,4 +482,189 @@ func TestStateDelegate_ConcurrentAccess(t *testing.T) {
 	// Run for a short time
 	time.Sleep(100 * time.Millisecond)
 	done.Store(true)
+}
+
+// TestStateDelegate_UseChannel covers the gating logic that decides whether
+// hi-priority events are routed over the persistent gRPC channel (added for
+// milestone 020) instead of the legacy memberlist SendReliable path.
+func TestStateDelegate_UseChannel(t *testing.T) {
+	enabledCfg := &config.Config{
+		Membership: config.MembershipConfig{UseHiPrioPersistentChannel: true},
+	}
+	disabledCfg := &config.Config{
+		Membership: config.MembershipConfig{UseHiPrioPersistentChannel: false},
+	}
+
+	t.Run("nil cluster", func(t *testing.T) {
+		delegate := NewStateDelegate(DelegateConfig{SyncTimeout: time.Second})
+		assert.False(t, delegate.useChannel())
+	})
+
+	t.Run("nil config", func(t *testing.T) {
+		delegate := NewStateDelegate(DelegateConfig{SyncTimeout: time.Second})
+		delegate.SetCluster(&Cluster{})
+		assert.False(t, delegate.useChannel())
+	})
+
+	t.Run("feature disabled", func(t *testing.T) {
+		delegate := NewStateDelegate(DelegateConfig{SyncTimeout: time.Second})
+		delegate.SetCluster(&Cluster{config: disabledCfg})
+		assert.False(t, delegate.useChannel())
+	})
+
+	t.Run("enabled but no channel manager established", func(t *testing.T) {
+		delegate := NewStateDelegate(DelegateConfig{SyncTimeout: time.Second})
+		delegate.SetCluster(&Cluster{config: enabledCfg})
+		assert.False(t, delegate.useChannel())
+	})
+
+	t.Run("enabled and channel manager established", func(t *testing.T) {
+		delegate := NewStateDelegate(DelegateConfig{SyncTimeout: time.Second})
+		cluster := &Cluster{config: enabledCfg}
+		cluster.SetChannelManager(NewChannelManager(ChannelManagerConfig{
+			LocalAddr: "127.0.0.1",
+			Port:      0,
+			Metrics:   metrics.NewMetrics(),
+			Logger:    testChannelLogger(),
+		}))
+		delegate.SetCluster(cluster)
+		assert.True(t, delegate.useChannel())
+	})
+}
+
+// TestStateDelegate_HandleChannelBlockWithExpiresAt verifies the persistent
+// channel's block handler applies the event to the blocklist identically to
+// the legacy NotifyMsg path.
+func TestStateDelegate_HandleChannelBlockWithExpiresAt(t *testing.T) {
+	bc, err := cache.NewBlocklistCache(cache.BlocklistConfig{MaxSizeMB: 1})
+	require.NoError(t, err)
+	defer bc.Close()
+
+	delegate := NewStateDelegate(DelegateConfig{
+		Blocklist:   bc,
+		SyncTimeout: 30 * time.Second,
+	})
+
+	expiresAt := time.Now().Add(10 * time.Minute)
+	delegate.handleChannelBlockWithExpiresAt(&drlproto.BlockEventWithExpiresAt{
+		Key:            "channel-block-key",
+		ExpiresAtNanos: expiresAt.UnixNano(),
+		EntityIp:       "10.0.0.3",
+		EntityPath:     "/api/v3",
+	})
+
+	assert.True(t, bc.IsBlocked("channel-block-key"))
+	entries := bc.ListEntries()
+	require.Len(t, entries, 1)
+	require.NotNil(t, entries[0].Entity)
+	assert.Equal(t, "10.0.0.3", entries[0].Entity.IP)
+}
+
+// TestStateDelegate_HandleChannelUnblock verifies the persistent channel's
+// unblock handler removes the entity from the blocklist.
+func TestStateDelegate_HandleChannelUnblock(t *testing.T) {
+	bc, err := cache.NewBlocklistCache(cache.BlocklistConfig{MaxSizeMB: 1})
+	require.NoError(t, err)
+	defer bc.Close()
+
+	const key = "channel-unblock-key"
+	bc.Block(key, time.Hour, nil)
+	require.True(t, bc.IsBlocked(key))
+
+	delegate := NewStateDelegate(DelegateConfig{
+		Blocklist:   bc,
+		SyncTimeout: 30 * time.Second,
+	})
+
+	delegate.handleChannelUnblock(&drlproto.UnblockEvent{Key: key})
+
+	assert.False(t, bc.IsBlocked(key))
+}
+
+// TestStateDelegate_QueueBlockEvent_ViaChannel_NoPanic exercises the new
+// useChannel()==true branch of QueueBlockEvent/QueueUnblockEvent. With no
+// cluster members beyond self, sendToAllPeersViaChannel has nothing to
+// deliver, but the call must not panic or fall back to the legacy path.
+func TestStateDelegate_QueueBlockEvent_ViaChannel_NoPanic(t *testing.T) {
+	cfg := &config.Config{
+		Membership: config.MembershipConfig{UseHiPrioPersistentChannel: true},
+	}
+	cluster := &Cluster{config: cfg, localIP: "127.0.0.1"}
+	cluster.SetChannelManager(NewChannelManager(ChannelManagerConfig{
+		LocalAddr: "127.0.0.1",
+		Port:      0,
+		Metrics:   metrics.NewMetrics(),
+		Logger:    testChannelLogger(),
+	}))
+
+	delegate := NewStateDelegate(DelegateConfig{SyncTimeout: time.Second})
+	delegate.SetCluster(cluster)
+
+	assert.NotPanics(t, func() {
+		assert.NoError(t, delegate.QueueBlockEvent("key1", time.Hour, nil))
+	})
+	assert.NotPanics(t, func() {
+		assert.NoError(t, delegate.QueueUnblockEvent("key1"))
+	})
+}
+
+// TestStateDelegate_QueueBlockEvent_LegacyPath_LogsWarn verifies that a WARN
+// log is emitted whenever a hi-priority event is propagated via the legacy
+// on-demand memberlist SendReliable (TCP) path, i.e. whenever useChannel()
+// is false. This covers the milestone requirement to flag use of the old
+// transport.
+func TestStateDelegate_QueueBlockEvent_LegacyPath_LogsWarn(t *testing.T) {
+	var buf bytes.Buffer
+	logger := slog.New(slog.NewTextHandler(&buf, &slog.HandlerOptions{Level: slog.LevelWarn}))
+
+	delegate := NewStateDelegate(DelegateConfig{SyncTimeout: time.Second, Logger: logger})
+	// No cluster set -> useChannel() is false -> legacy path is taken.
+
+	require.NoError(t, delegate.QueueBlockEvent("key1", time.Hour, nil))
+
+	logOutput := buf.String()
+	assert.Contains(t, logOutput, "legacy on-demand TCP path")
+	assert.Contains(t, logOutput, "event_type=block")
+}
+
+// TestStateDelegate_QueueUnblockEvent_LegacyPath_LogsWarn mirrors the block
+// case above for QueueUnblockEvent.
+func TestStateDelegate_QueueUnblockEvent_LegacyPath_LogsWarn(t *testing.T) {
+	var buf bytes.Buffer
+	logger := slog.New(slog.NewTextHandler(&buf, &slog.HandlerOptions{Level: slog.LevelWarn}))
+
+	delegate := NewStateDelegate(DelegateConfig{SyncTimeout: time.Second, Logger: logger})
+	// No cluster set -> useChannel() is false -> legacy path is taken.
+
+	require.NoError(t, delegate.QueueUnblockEvent("key1"))
+
+	logOutput := buf.String()
+	assert.Contains(t, logOutput, "legacy on-demand TCP path")
+	assert.Contains(t, logOutput, "event_type=unblock")
+}
+
+// TestStateDelegate_QueueBlockEvent_ChannelPath_NoLegacyWarn verifies that
+// no legacy-path WARN is logged when the persistent gRPC channel is enabled
+// and established, i.e. useChannel() is true.
+func TestStateDelegate_QueueBlockEvent_ChannelPath_NoLegacyWarn(t *testing.T) {
+	var buf bytes.Buffer
+	logger := slog.New(slog.NewTextHandler(&buf, &slog.HandlerOptions{Level: slog.LevelWarn}))
+
+	cfg := &config.Config{
+		Membership: config.MembershipConfig{UseHiPrioPersistentChannel: true},
+	}
+	cluster := &Cluster{config: cfg, localIP: "127.0.0.1"}
+	cluster.SetChannelManager(NewChannelManager(ChannelManagerConfig{
+		LocalAddr: "127.0.0.1",
+		Port:      0,
+		Metrics:   metrics.NewMetrics(),
+		Logger:    testChannelLogger(),
+	}))
+
+	delegate := NewStateDelegate(DelegateConfig{SyncTimeout: time.Second, Logger: logger})
+	delegate.SetCluster(cluster)
+
+	require.NoError(t, delegate.QueueBlockEvent("key1", time.Hour, nil))
+
+	assert.NotContains(t, buf.String(), "legacy on-demand TCP path")
 }

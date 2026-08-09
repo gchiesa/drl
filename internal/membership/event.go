@@ -26,6 +26,14 @@ func (e *eventDelegate) NotifyJoin(node *memberlist.Node) {
 		e.cluster.updateClusterSize()
 		e.cluster.cacheManager.UpdateNodes(e.cluster.MemberAddrs())
 	}()
+
+	// Establish the persistent gRPC channel to the newly-known peer, if
+	// enabled. EstablishForPeer decides deterministically whether the local
+	// node dials or waits to be dialed, so this is safe to call from both
+	// the joiner's and the existing members' perspective.
+	if cm := e.cluster.GetChannelManager(); cm != nil {
+		cm.EstablishForPeer(node.Addr.String())
+	}
 }
 
 func (e *eventDelegate) NotifyLeave(node *memberlist.Node) {
@@ -39,6 +47,11 @@ func (e *eventDelegate) NotifyLeave(node *memberlist.Node) {
 		e.cluster.updateClusterSize()
 		e.cluster.cacheManager.UpdateNodes(e.cluster.MemberAddrs())
 	}()
+
+	// Close the persistent gRPC channel to the departed peer, if any.
+	if cm := e.cluster.GetChannelManager(); cm != nil {
+		cm.Close(node.Addr.String())
+	}
 }
 
 func (e *eventDelegate) NotifyUpdate(node *memberlist.Node) {

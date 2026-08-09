@@ -1,0 +1,201 @@
+# Milestone 020: Persistent gRPC Channel for Hi-Priority Messaging - Completed
+
+## Original Plan
+
+### Goal
+Replace the on-demand memberlist `SendReliable` (TCP) path used to propagate hi-priority
+blocking/unblocking events with a single, persistent, bidirectional gRPC channel established
+once between each unique pair of cluster nodes, on TCP port `7956`.
+
+### Design Decisions
+- **Option B adopted** (per the milestone's architectural decision): a single bidirectional
+  gRPC connection per node pair, rather than two independent unidirectional connections. This
+  halves open file descriptors, simplifies join/leave lifecycle management, and allows HTTP/2
+  multiplexing of concurrent block/unblock streams over one socket.
+- **Deterministic dial direction**: of any two peers, only the node with the lexicographically
+  smaller address dials; the other accepts. Both sides observe memberlist's `NotifyJoin`
+  symmetrically and call `EstablishForPeer`, which independently reaches the same conclusion on
+  each side without any coordination handshake.
+- **New file `internal/membership/channel.go`** (equivalent to the milestone's suggested
+  `grpc_channel.go`) hosts the `ChannelManager` — the persistent channel's lifecycle owner: gRPC
+  server, per-peer client streams, connect/reconnect/teardown, and message dispatch.
+- **New proto `internal/proto/channel.proto`** (equivalent to the milestone's suggested
+  `hiprio.proto`) defines `ChannelMessage` as a `oneof` of `BlockEventWithExpiresAt` /
+  `UnblockEvent`, mirroring the extensible pattern already used by `accounting.proto`, plus the
+  `PersistentChannel` bidi-streaming gRPC service.
+- **Feature flag**: `DRL_MEMBERSHIP_USE_HIPRIO_PERSISTENT_CHANNEL` (env), `use-hiprio-persistent-channel`
+  (KDL), defaulting to `true`. The default is supplied via `internal/config/resources/default.kdl`
+  (the established pattern in this codebase for boolean defaults, since a Go `bool` zero value
+  cannot itself express "default true").
+- **Routing**: `StateDelegate.QueueBlockEvent`/`QueueUnblockEvent` check `useChannel()` (feature
+  enabled AND a `ChannelManager` is attached to the cluster) and send over the persistent channel
+  when true, falling back to the legacy `SendReliable` (TCP) path otherwise. Both paths are
+  "fire and forget" from the caller's perspective — failures are logged, never propagated, per the
+  project's availability-over-consistency principle.
+- **Joiner readiness gating**: a newly joining node blocks in `JoinCluster()` until the
+  `ChannelManager` reports an established connection to every currently known peer (bounded by a
+  30s timeout, after which it proceeds anyway and logs a `WARN`), before falling through to the
+  existing state-sync readiness gate.
+- **Legacy-path visibility**: a `WARN` log is now emitted every time a hi-priority event takes the
+  legacy on-demand TCP path (feature disabled, or channel not yet established to peers), so
+  operators can see effective transport usage during rollouts or connectivity issues.
+
+## Changes Made
+
+### internal/proto/channel.proto (new file) + generated channel.pb.go / channel_grpc.pb.go
+- `ChannelMessage` message: `oneof content { BlockEventWithExpiresAt block_with_expires_at = 1; UnblockEvent unblock = 2; }`.
+- `PersistentChannel` gRPC service with a single bidirectional-streaming RPC (`Stream`).
+
+### internal/membership/channel.go (new file)
+- `ChannelManagerConfig{LocalAddr, Port, Handler, Metrics, Logger}` / `NewChannelManager`.
+- `Start()` — starts the gRPC server, binding via `net.JoinHostPort(cm.localAddr, ...)` (scoped to
+  the node's own address rather than all interfaces, both for test isolation and production
+  correctness).
+- `EstablishForPeer(remoteAddr string)` — deterministic dial-vs-accept decision; no-ops for self
+  and empty addresses.
+- `Send(addr string, msg *drlproto.ChannelMessage) error` — serialized per-peer via a dedicated
+  write goroutine/channel.
+- `Close(addr string)` / `Stop()` — tear down a single peer or the whole manager.
+- `IsConnected(addr string) bool`, `PeerCount() int`.
+- `Stream(...)` — the gRPC service method, handling the server side of incoming bidi streams,
+  including the `x-drl-node-addr` metadata handshake used for peer identity.
+- INFO logs on channel establishment/close (satisfies the Node Join/Leave logging requirement);
+  WARN logs on dial/stream/send failures (satisfies the fallback/temporary-failure logging
+  requirement).
+
+### internal/membership/delegate.go
+- `useChannel() bool` — gates routing on `cluster.config.Membership.UseHiPrioPersistentChannel`
+  and a non-nil `ChannelManager`.
+- `sendToAllPeersViaChannel(msg)` — new send path used when `useChannel()` is true.
+- `handleChannelBlockWithExpiresAt` / `handleChannelUnblock` — apply incoming channel events using
+  the same cache-mutation logic as the legacy `NotifyMsg` handlers.
+- **New**: `warnLegacyPath(eventType string)` — logs `WARN` "using legacy on-demand TCP path for
+  hi-priority event; persistent gRPC channel disabled or unavailable" with an `event_type`
+  attribute (`block`/`unblock`). Called from `QueueBlockEvent`/`QueueUnblockEvent` immediately
+  before `sendToAllPeersAsync`, i.e. only on the legacy branch.
+
+### internal/membership/membership.go
+- `channelManager *ChannelManager` field + `SetChannelManager`/`GetChannelManager` on `Cluster`.
+- `Leave()` stops the channel manager before leaving memberlist.
+- **New**: `waitForChannelsReady()` — polls (50ms interval, 30s `channelReadyTimeout`) until
+  `ChannelManager.IsConnected` is true for every peer in `MemberAddrs()` (excluding self), then
+  logs `Info`; on timeout, logs `Warn` and proceeds. No-ops immediately when no `ChannelManager`
+  is attached (feature disabled).
+- `JoinCluster()` now calls `waitForChannelsReady()` right after updating cluster size/cache nodes
+  post-join, and before the existing state-sync wait / `markReady()` branch — so a joining node's
+  overall readiness is gated on both channel establishment and blocklist state sync.
+
+### internal/membership/event.go
+- `NotifyJoin` calls `ChannelManager.EstablishForPeer` for the newly observed node (safe from both
+  the joiner's and existing members' perspective, due to the deterministic dial decision).
+- `NotifyLeave` calls `ChannelManager.Close` for the departed node and logs `Info` (satisfies the
+  Node Leave logging requirement).
+
+### internal/cmd/cluster.go
+- When `cfg.Membership.UseHiPrioPersistentChannel` is true, constructs and starts a
+  `ChannelManager` on `cfg.Membership.HiPrioChannelPort`, attaches it to the cluster via
+  `SetChannelManager`, and logs `Info` with the configured port.
+
+### internal/config/config.go
+- `MembershipConfig` gains:
+  - `UseHiPrioPersistentChannel bool` — `kdl:"use-hiprio-persistent-channel" env:"USE_HIPRIO_PERSISTENT_CHANNEL"`
+  - `HiPrioChannelPort int` — `kdl:"hiprio-channel-port" env:"HIPRIO_CHANNEL_PORT"`
+- `Validate()`:
+  - Defaults `HiPrioChannelPort` to `7956` when unset (zero).
+  - Rejects out-of-range ports (must be `1-65535`).
+  - Rejects `HiPrioChannelPort == Port` (the persistent channel port must not collide with the
+    memberlist gossip port), enforced only when `UseHiPrioPersistentChannel` is true.
+
+### internal/config/resources/default.kdl
+- `membership` block now includes:
+  ```kdl
+  use-hiprio-persistent-channel true
+  hiprio-channel-port 7956
+  ```
+  This is the mechanism supplying the spec-mandated `default: true`, consistent with how other
+  boolean defaults (e.g. `internal-api.enabled`) are handled in this codebase.
+
+### internal/metrics/metrics.go
+- Added `MembershipChannelMsgsSentTotal`, `MembershipChannelMsgsRecvTotal`,
+  `MembershipChannelConnectionsActive`, `MembershipChannelErrorsTotal` with corresponding
+  Inc/Dec methods, wired into `channel.go`'s send/receive/connect/error paths.
+
+### internal/membership/channel_test.go (new file)
+- `TestChannelManager_EstablishForPeer_DialDirectionIsDeterministic`
+- `TestChannelManager_SendRecv_RoundTrip`
+- `TestChannelManager_Send_UnknownPeer`
+- `TestChannelManager_Close_TearsDownPeer`
+- `TestChannelManager_EstablishForPeer_IgnoresSelfAndEmpty`
+- `TestChannelManager_ConcurrentSend`
+- `TestChannelManager_StartUsesConfiguredPort`
+- Uses `127.0.0.1` and `::1` as the two test node addresses (macOS does not auto-bind
+  `127.0.0.2`-style secondary loopback addresses without an interface alias, unlike Linux's full
+  `127.0.0.0/8` range).
+
+### internal/membership/delegate_test.go
+- `TestStateDelegate_UseChannel` (table test: nil cluster / nil config / disabled / enabled-no-manager / enabled-with-manager)
+- `TestStateDelegate_HandleChannelBlockWithExpiresAt`, `TestStateDelegate_HandleChannelUnblock`
+- `TestStateDelegate_QueueBlockEvent_ViaChannel_NoPanic`
+- **New**: `TestStateDelegate_QueueBlockEvent_LegacyPath_LogsWarn`,
+  `TestStateDelegate_QueueUnblockEvent_LegacyPath_LogsWarn` — capture logger output via a
+  `bytes.Buffer`-backed `slog.TextHandler` and assert the legacy-path `WARN` message and
+  `event_type` are present.
+- **New**: `TestStateDelegate_QueueBlockEvent_ChannelPath_NoLegacyWarn` — asserts no legacy-path
+  `WARN` is logged when the channel path is used instead.
+
+### internal/membership/membership_test.go
+- **New**: `TestCluster_WaitForChannelsReady_NoChannelManager_NoOp` — verifies the readiness gate
+  returns immediately when the feature is disabled.
+- **New**: `TestCluster_WaitForChannelsReady_NoPeers_ReturnsImmediately` — verifies the gate
+  returns immediately for a single-node cluster (nothing to wait for), using a real, started
+  `ChannelManager`.
+
+### internal/config/config_test.go
+- `clearEnvVars()` updated to `DRL_MEMBERSHIP_USE_HIPRIO_PERSISTENT_CHANNEL` /
+  `DRL_MEMBERSHIP_HIPRIO_CHANNEL_PORT`.
+- `TestLoad_DefaultsOnly` asserts `cfg.Membership.UseHiPrioPersistentChannel == true` (new default).
+- `TestLoad_EnvironmentOverrides` sets the env var to `"false"` (opposite of the default) to prove
+  the override actually takes effect, rather than incidentally matching the default.
+- `TestValidate_HiPrioChannelPort_DefaultsWhenZero`, `TestValidate_HiPrioChannelPort_OutOfRange`,
+  `TestValidate_HiPrioChannelPort_CollidesWithMembershipPort`,
+  `TestValidate_HiPrioChannelPort_CollisionOnlyEnforcedWhenChannelEnabled`.
+- `TestConfig_HiPrioPersistentChannelFromKDL` — parses a KDL snippet with
+  `use-hiprio-persistent-channel true` / `hiprio-channel-port 8956` and asserts both fields.
+
+## Test Results
+- `go build ./...` — clean.
+- `go vet ./...` — clean.
+- `mise run lint` — 0 issues.
+- `mise run test` (`gotestsum` + `tparse`, all packages) — all suites PASS, including
+  `internal/config` (137 tests) and `internal/membership` (71 tests).
+- `go test ./internal/membership/... -race` — clean, no data races introduced by this milestone.
+  (A pre-existing, unrelated data race in `internal/api/handlers_blocklist_test.go`'s
+  `mockBroadcaster.QueueBlockEvent` was confirmed via `git stash`/`git stash pop` to exist on a
+  clean `main` checkout prior to this work, and is out of scope here.)
+
+## Verification Checklist
+- [x] `go build ./...` compiles
+- [x] `go vet ./...` clean
+- [x] `mise run lint` — 0 issues
+- [x] `mise run test` — all packages pass
+- [x] `go test ./internal/membership/... -race` — no races
+- [x] Env var `DRL_MEMBERSHIP_USE_HIPRIO_PERSISTENT_CHANNEL` (default `true`) wired and tested
+- [x] KDL fields `use-hiprio-persistent-channel` / `hiprio-channel-port` wired and tested
+- [x] Persistent channel listens/dials on port `7956` by default
+- [x] Single bidirectional gRPC connection per node pair (deterministic dial direction)
+- [x] Node Join logs `INFO` on channel establishment
+- [x] Node Leave logs `INFO` and tears down the channel/client connections
+- [x] Joiner readiness gated on persistent channel connections to all known peers (bounded by a
+      30s timeout, degrading gracefully to availability over strict consistency)
+- [x] Legacy on-demand TCP path logs `WARN` whenever it is used instead of the persistent channel
+- [x] Temporary transport failures (dial/stream/send) logged as `WARN`, never fail the caller
+- [x] Unit tests cover `ChannelManager` lifecycle, `StateDelegate` routing/gating, legacy-path
+      warning, and joiner readiness gating
+
+## Known Limitations
+- The persistent gRPC channel does not currently use TLS (matches the existing internal-cluster
+  trust model of the rest of the membership/gRPC transport in this codebase; not a regression
+  introduced by this milestone).
+- `waitForChannelsReady()`'s 30s timeout is currently a package-level constant rather than a
+  configurable value; the milestone spec does not call for a dedicated timeout knob, so this was
+  not added as a new config surface.

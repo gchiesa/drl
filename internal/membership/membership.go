@@ -17,15 +17,16 @@ import (
 
 // Cluster manages the memberlist cluster membership
 type Cluster struct {
-	config        *config.Config
-	localIP       string
-	cacheManager  *cache.Manager
-	memberlist    *memberlist.Memberlist
-	metrics       *metrics.Metrics
-	logger        *slog.Logger
-	stateDelegate *StateDelegate
-	mu            sync.RWMutex
-	ready         bool
+	config         *config.Config
+	localIP        string
+	cacheManager   *cache.Manager
+	memberlist     *memberlist.Memberlist
+	metrics        *metrics.Metrics
+	logger         *slog.Logger
+	stateDelegate  *StateDelegate
+	channelManager *ChannelManager
+	mu             sync.RWMutex
+	ready          bool
 }
 
 // NewCluster creates a new Cluster instance
@@ -51,6 +52,23 @@ func (c *Cluster) GetStateDelegate() *StateDelegate {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
 	return c.stateDelegate
+}
+
+// SetChannelManager sets the persistent gRPC channel manager used for
+// hi-priority (block/unblock) event propagation when
+// config.Membership.UseHiPrioPersistentChannel is enabled.
+func (c *Cluster) SetChannelManager(cm *ChannelManager) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.channelManager = cm
+}
+
+// GetChannelManager returns the persistent gRPC channel manager, or nil if
+// the feature is disabled.
+func (c *Cluster) GetChannelManager() *ChannelManager {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	return c.channelManager
 }
 
 // Start initializes and starts the memberlist cluster
@@ -185,6 +203,13 @@ func (c *Cluster) JoinCluster() error {
 	c.updateClusterSize()
 	c.cacheManager.UpdateNodes(c.MemberAddrs())
 
+	// When the persistent gRPC channel is enabled, a newly joining node is
+	// only considered ready once its channel connections to all currently
+	// known peers are established. This avoids a window where hi-priority
+	// block/unblock events destined for this node would be undeliverable
+	// over the channel during the join.
+	c.waitForChannelsReady()
+
 	// Wait for state sync if delegate is configured
 	c.mu.RLock()
 	delegate := c.stateDelegate
@@ -199,6 +224,60 @@ func (c *Cluster) JoinCluster() error {
 	}
 
 	return nil
+}
+
+// channelReadyTimeout bounds how long JoinCluster waits for persistent gRPC
+// channel connections to be established to all known peers before
+// proceeding with readiness. This favours availability over strict
+// consistency: if a peer's channel never comes up (e.g. it is unreachable),
+// the node still becomes ready rather than blocking forever.
+const channelReadyTimeout = 30 * time.Second
+
+// waitForChannelsReady blocks until the persistent gRPC channel manager
+// reports an established connection to every currently known peer, or until
+// channelReadyTimeout elapses. It is a no-op when the persistent channel
+// feature is disabled (no channel manager configured).
+func (c *Cluster) waitForChannelsReady() {
+	cm := c.GetChannelManager()
+	if cm == nil {
+		return
+	}
+
+	localAddr := c.LocalAddr()
+	deadline := time.Now().Add(channelReadyTimeout)
+
+	for {
+		peers := c.MemberAddrs()
+		expected := 0
+		allConnected := true
+		for _, addr := range peers {
+			if addr == localAddr {
+				continue
+			}
+			expected++
+			if !cm.IsConnected(addr) {
+				allConnected = false
+			}
+		}
+
+		if allConnected {
+			c.logger.Info("persistent gRPC channel connections established",
+				"expected_peers", expected,
+			)
+			return
+		}
+
+		if time.Now().After(deadline) {
+			c.logger.Warn("timed out waiting for persistent gRPC channel connections to all peers; proceeding without full connectivity",
+				"timeout", channelReadyTimeout,
+				"connected_peers", cm.PeerCount(),
+				"expected_peers", expected,
+			)
+			return
+		}
+
+		time.Sleep(50 * time.Millisecond)
+	}
 }
 
 // markReady marks the cluster as ready, handling both delegate and non-delegate cases
@@ -397,6 +476,12 @@ func (c *Cluster) findNodeByAddr(addr string) *memberlist.Node {
 
 // Leave gracefully leaves the cluster
 func (c *Cluster) Leave(timeout time.Duration) error {
+	// Tear down the persistent gRPC channel (all peer connections and the
+	// listening server), if it was enabled, before leaving memberlist.
+	if cm := c.GetChannelManager(); cm != nil {
+		cm.Stop()
+	}
+
 	if c.memberlist == nil {
 		return nil
 	}

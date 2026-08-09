@@ -1,0 +1,114 @@
+---
+# Sidecar pod: echo-server (workload) + drl (embedded proxy).
+# DRL listens on :8080 and proxies authenticated, rate-limited traffic to
+# echo-server on localhost:18080.  Pods discover each other via the
+# drl-headless headless Service for P2P blocklist gossip.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: echo-server
+  namespace: drl
+  labels:
+    app: echo-server
+spec:
+  replicas: 3
+  selector:
+    matchLabels:
+      app: echo-server
+  template:
+    metadata:
+      labels:
+        app: echo-server
+    spec:
+      containers:
+        # ── echo-server ────────────────────────────────────────────────────────
+        - name: echo-server
+          image: mccutchen/go-httpbin:latest
+          env:
+            - name: PORT
+              value: "18080"
+          ports:
+            - name: http
+              containerPort: 18080
+              protocol: TCP
+          resources:
+            requests:
+              cpu: "100m"
+              memory: "64Mi"
+            limits:
+              cpu: "200m"
+              memory: "128Mi"
+
+        # ── drl sidecar ────────────────────────────────────────────────────────
+        # DRL acts as the embedded reverse proxy on :8080.
+        # All inbound traffic passes through Auth0 OIDC validation and rate-limit
+        # accounting before being forwarded to echo-server on localhost:18080.
+        - name: drl
+          image: ghcr.io/gchiesa/drl:latest
+          args: []
+          env:
+            - name: DRL_CONFIG_PATH
+              value: /etc/drl/config.kdl
+            - name: DRL_PRIVATE_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: drl-secrets
+                  key: private-api-key
+            - name: DRL_MEMBERSHIP_PRIMARY_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: drl-secrets
+                  key: membership-primary-key
+            - name: DRL_MEMBERSHIP_SECONDARY_KEYS
+              valueFrom:
+                secretKeyRef:
+                  name: drl-secrets
+                  key: membership-secondary-keys
+                  optional: true
+          ports:
+            - name: http
+              containerPort: 8080
+              protocol: TCP
+            - name: grpc
+              containerPort: 8081
+              protocol: TCP
+            - name: internal-api
+              containerPort: 8082
+              protocol: TCP
+            - name: metrics
+              containerPort: 9091
+              protocol: TCP
+            - name: memberlist-tcp
+              containerPort: 7946
+              protocol: TCP
+            - name: memberlist-udp
+              containerPort: 7946
+              protocol: UDP
+          volumeMounts:
+            - name: drl-config
+              mountPath: /etc/drl
+              readOnly: true
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 9091
+            initialDelaySeconds: 15
+            periodSeconds: 10
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 9091
+            initialDelaySeconds: 10
+            periodSeconds: 5
+          resources:
+            requests:
+              cpu: "100m"
+              memory: "128Mi"
+            limits:
+              cpu: "300m"
+              memory: "256Mi"
+
+      volumes:
+        - name: drl-config
+          configMap:
+            name: drl-config

@@ -1,0 +1,21 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+namespace: drl
+
+resources:
+  - configmap.yaml
+  - deployment.yaml
+  - service.yaml
+
+# Replace with your actual DRL image
+images:
+  - name: ghcr.io/gchiesa/drl
+    newTag: latest
+
+# Generate the DRL secrets from a local .env file (for local dev only).
+# In production use an external secrets operator (ESO, Vault, Sealed Secrets).
+# secretGenerator:
+#   - name: drl-secrets
+#     envs:
+#       - drl-secrets.env

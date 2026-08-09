@@ -13,6 +13,11 @@ membership {
     startup-delay "3s"
     gossip-interval "50ms"
     gossip-nodes 5
+    // Persistent gRPC channel for hi-priority (block/unblock) propagation.
+    // Enabled by default; replaces the on-demand memberlist SendReliable
+    // (TCP) path with a long-lived, bidirectional gRPC stream per peer pair.
+    use-hiprio-persistent-channel true
+    hiprio-channel-port 7956
 }
 
 logging {

@@ -35,6 +35,12 @@ type Metrics struct {
 	MembershipReliableMsgsTotal   prometheus.Counter
 	MembershipBestEffortMsgsTotal prometheus.Counter
 
+	// Persistent gRPC channel metrics
+	MembershipChannelMsgsSentTotal     prometheus.Counter
+	MembershipChannelMsgsRecvTotal     prometheus.Counter
+	MembershipChannelConnectionsActive prometheus.Gauge
+	MembershipChannelErrorsTotal       prometheus.Counter
+
 	// Handover metrics
 	HandoverOutEntities prometheus.Counter
 	HandoverInEntities  prometheus.Counter
@@ -138,6 +144,24 @@ func NewMetrics() *Metrics {
 			Help: "Total number of best-effort messages sent via memberlist",
 		}),
 
+		// Persistent gRPC channel metrics
+		MembershipChannelMsgsSentTotal: prometheus.NewCounter(prometheus.CounterOpts{
+			Name: "drl_membership_channel_msgs_sent_total",
+			Help: "Total number of hi-priority messages sent via the persistent gRPC channel",
+		}),
+		MembershipChannelMsgsRecvTotal: prometheus.NewCounter(prometheus.CounterOpts{
+			Name: "drl_membership_channel_msgs_recv_total",
+			Help: "Total number of hi-priority messages received via the persistent gRPC channel",
+		}),
+		MembershipChannelConnectionsActive: prometheus.NewGauge(prometheus.GaugeOpts{
+			Name: "drl_membership_channel_connections_active",
+			Help: "Current number of active persistent gRPC channel connections to peers",
+		}),
+		MembershipChannelErrorsTotal: prometheus.NewCounter(prometheus.CounterOpts{
+			Name: "drl_membership_channel_errors_total",
+			Help: "Total number of persistent gRPC channel errors (dial failures, send/recv failures)",
+		}),
+
 		// Handover metrics
 		HandoverOutEntities: prometheus.NewCounter(prometheus.CounterOpts{
 			Name: "drl_accounting_handover_out_entities",
@@ -230,6 +254,10 @@ func NewMetrics() *Metrics {
 	registry.MustRegister(m.AccountingBulkLoadTotal)
 	registry.MustRegister(m.MembershipReliableMsgsTotal)
 	registry.MustRegister(m.MembershipBestEffortMsgsTotal)
+	registry.MustRegister(m.MembershipChannelMsgsSentTotal)
+	registry.MustRegister(m.MembershipChannelMsgsRecvTotal)
+	registry.MustRegister(m.MembershipChannelConnectionsActive)
+	registry.MustRegister(m.MembershipChannelErrorsTotal)
 	registry.MustRegister(m.HandoverOutEntities)
 	registry.MustRegister(m.HandoverInEntities)
 	registry.MustRegister(m.HandoverDurationMs)
@@ -324,6 +352,31 @@ func (m *Metrics) IncMembershipReliable() {
 // IncMembershipBestEffort increments the best-effort message counter
 func (m *Metrics) IncMembershipBestEffort() {
 	m.MembershipBestEffortMsgsTotal.Inc()
+}
+
+// IncMembershipChannelMsgsSent increments the persistent gRPC channel sent-message counter
+func (m *Metrics) IncMembershipChannelMsgsSent() {
+	m.MembershipChannelMsgsSentTotal.Inc()
+}
+
+// IncMembershipChannelMsgsRecv increments the persistent gRPC channel received-message counter
+func (m *Metrics) IncMembershipChannelMsgsRecv() {
+	m.MembershipChannelMsgsRecvTotal.Inc()
+}
+
+// IncMembershipChannelConnections increments the active persistent gRPC channel connections gauge
+func (m *Metrics) IncMembershipChannelConnections() {
+	m.MembershipChannelConnectionsActive.Inc()
+}
+
+// DecMembershipChannelConnections decrements the active persistent gRPC channel connections gauge
+func (m *Metrics) DecMembershipChannelConnections() {
+	m.MembershipChannelConnectionsActive.Dec()
+}
+
+// IncMembershipChannelErrors increments the persistent gRPC channel error counter
+func (m *Metrics) IncMembershipChannelErrors() {
+	m.MembershipChannelErrorsTotal.Inc()
 }
 
 // AddHandoverOut adds to the handover out entities counter

@@ -139,6 +139,15 @@ type MembershipConfig struct {
 	// valid AES lengths (16, 24, or 32 bytes).
 	// Override via env: DRL_MEMBERSHIP_PRIMARY_KEY + DRL_MEMBERSHIP_SECONDARY_KEYS
 	SecretKeys []string `kdl:"secret-keys" json:"-"` // never serialised — contains sensitive key material
+	// UseHiPrioPersistentChannel enables the persistent gRPC channel for
+	// hi-priority (block/unblock) event propagation between cluster members,
+	// replacing the on-demand memberlist SendReliable (TCP) path. The
+	// channel is established once, when a node joins the cluster, instead
+	// of a new connection per event.
+	UseHiPrioPersistentChannel bool `kdl:"use-hiprio-persistent-channel" env:"USE_HIPRIO_PERSISTENT_CHANNEL" json:"use-hiprio-persistent-channel"`
+	// HiPrioChannelPort is the TCP port the persistent gRPC channel listens
+	// on and dials peers at. Defaults to 7956 when unset.
+	HiPrioChannelPort int `kdl:"hiprio-channel-port" env:"HIPRIO_CHANNEL_PORT" json:"hiprio-channel-port"`
 }
 
 // LoggingConfig holds logging configuration
@@ -469,6 +478,17 @@ func (c *Config) Validate() error {
 	}
 	if c.Membership.GossipNodes == 0 {
 		c.Membership.GossipNodes = 5
+	}
+	if c.Membership.HiPrioChannelPort == 0 {
+		c.Membership.HiPrioChannelPort = 7956
+	}
+
+	// Validate persistent gRPC channel port
+	if c.Membership.HiPrioChannelPort < 1 || c.Membership.HiPrioChannelPort > 65535 {
+		errs = append(errs, fmt.Sprintf("membership.hiprio-channel-port must be between 1 and 65535, got %d", c.Membership.HiPrioChannelPort))
+	}
+	if c.Membership.UseHiPrioPersistentChannel && c.Membership.HiPrioChannelPort == c.Membership.Port {
+		errs = append(errs, fmt.Sprintf("membership.hiprio-channel-port (%d) must differ from membership.port (%d)", c.Membership.HiPrioChannelPort, c.Membership.Port))
 	}
 
 	// Apply accounting settings defaults

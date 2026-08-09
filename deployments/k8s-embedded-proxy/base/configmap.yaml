@@ -1,0 +1,114 @@
+---
+# DRL configuration — embedded-proxy mode, no Envoy required.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: drl-config
+  namespace: drl
+data:
+  config.kdl: |
+    // DRL - Distributed Rate Limiter Configuration
+    // K8s Embedded Proxy deployment
+    //
+    // DRL's built-in HTTP reverse proxy replaces Envoy entirely.
+    // DRL runs as a sidecar alongside echo-server in the same pod.
+    // Traffic enters DRL on :8080, is authenticated via Auth0 OIDC, rate-limited,
+    // then forwarded to echo-server on localhost:18080.
+    // Peer discovery uses the headless K8s Service "drl-headless" which
+    // resolves to A records for every pod IP.
+
+    listen {
+        grpc ":8081"
+        metrics ":9091"
+    }
+
+    membership {
+        service-name "drl-headless.drl.svc.cluster.local"
+        port 7946
+        bind-addr "0.0.0.0"
+        startup-delay "3s"
+    }
+
+    logging {
+        level "debug"
+        format "json"
+    }
+
+    internal-api {
+        enabled true
+        address ":8082"
+    }
+
+    cache {
+        blocklist-size-mb 64
+        accounting-size-mb 128
+        sync-timeout-seconds 30
+        blocklist-default-ttl-seconds 300
+    }
+
+    accounting {
+        settings {
+            algorithm "sliding-window"
+            retry-after-type "delay-seconds"
+            use-x-forwarded-for           true
+            use-x-forwarded-for-direction "right"
+            use-x-forwarded-for-index     0
+        }
+        rules {
+            "catch-all" {
+                path-prefix "/"
+                limit 100
+                per "minute"
+            }
+            "anything" {
+                path-prefix "/anything"
+                limit 10
+                headers "authorization"
+                redactions {
+                    "Authorization" "^(Bearer .{0,3}).*$"
+                }
+                per "minute"
+            }
+        }
+    }
+
+    // Embedded reverse proxy — DRL is a sidecar, so the upstream is localhost.
+    // DRL listens on :8080 and validates Auth0 Bearer tokens before
+    // rate-limiting and forwarding to echo-server on the loopback interface.
+    embedded-proxy {
+        enabled true
+        listen ":8080"
+
+        tls {
+            enabled false
+            cert ""
+            key ""
+        }
+
+        // Virtual host "echo-server": handles all inbound traffic.
+        // The hostname is a logical label used for metrics and OIDC verifier
+        // lookup; it does not perform HTTP Host-header matching.
+        host "echo-server" {
+            // OIDC Resource Server settings — DRL validates Auth0 Bearer JWTs.
+            // The issuer URL must match the "iss" claim in your access tokens
+            // (Auth0 always appends a trailing slash).
+            // DRL auto-discovers the JWKS URI via the OpenID Connect discovery
+            // endpoint at {issuer}/.well-known/openid-configuration.
+            //
+            // audience: MUST be set to your Auth0 API Identifier — the value
+            //   you configured under Auth0 Dashboard → Applications → APIs →
+            //   Identifier (e.g. "https://api.my-service.example.com").
+            //   Requests whose token "aud" claim does not match will receive 403.
+            oidc {
+                issuer "https://dev-xxwr5gxe.eu.auth0.com/"
+                audience "https://drl.lan/api/v2/"
+                jwks-cache-ttl "5m"
+            }
+            routes {
+                route "/" {
+                    upstream "http://127.0.0.1:18080"
+                    require-auth true
+                }
+            }
+        }
+    }
