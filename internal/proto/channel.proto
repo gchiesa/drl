@@ -1,0 +1,31 @@
+syntax = "proto3";
+package drl.v1;
+option go_package = "github.com/gchiesa/drl/internal/proto";
+
+import "internal/proto/accounting.proto";
+
+// ChannelMessage is the envelope for events exchanged over the persistent,
+// hi-priority gRPC channel established between cluster members when a node
+// joins the cluster. Like DrlMessage, it carries an explicit type
+// discriminator via oneof so new hi-priority event kinds can be multiplexed
+// onto the same channel in the future without breaking the wire format or
+// requiring a new RPC.
+message ChannelMessage {
+  oneof content {
+    BlockEventWithExpiresAt block_with_expires_at = 1;
+    UnblockEvent unblock = 2;
+  }
+}
+
+// PersistentChannel is a bidirectional streaming RPC used to propagate
+// hi-priority events between two cluster members over a single, long-lived
+// gRPC connection instead of an on-demand connection per event.
+//
+// Exactly one stream is established per unordered pair of nodes: the dial
+// direction is decided deterministically by comparing node addresses (see
+// internal/membership/channel.go), and both peers Send and Recv on that same
+// stream. This halves the number of live connections compared to a model
+// where each node dials the other independently.
+service PersistentChannel {
+  rpc Stream(stream ChannelMessage) returns (stream ChannelMessage);
+}

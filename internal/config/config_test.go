@@ -40,6 +40,8 @@ func TestLoad_DefaultsOnly(t *testing.T) {
 	assert.Equal(t, int64(128), cfg.Cache.AccountingSizeMB)
 	assert.Equal(t, 30, cfg.Cache.SyncTimeoutSeconds)
 	assert.Equal(t, 300, cfg.Cache.BlocklistDefaultTTLSeconds)
+	assert.True(t, cfg.Membership.UseHiPrioPersistentChannel)
+	assert.Equal(t, 7956, cfg.Membership.HiPrioChannelPort)
 
 }
 
@@ -133,6 +135,10 @@ func TestLoad_EnvironmentOverrides(t *testing.T) {
 	t.Setenv("DRL_LOGGING_FORMAT", "text")
 	t.Setenv("DRL_INTERNAL_API_ENABLED", "false")
 	t.Setenv("DRL_INTERNAL_API_ADDRESS", ":7002")
+	// Default is true — override to false to prove the env var actually
+	// takes effect rather than just matching the default.
+	t.Setenv("DRL_MEMBERSHIP_USE_HIPRIO_PERSISTENT_CHANNEL", "false")
+	t.Setenv("DRL_MEMBERSHIP_HIPRIO_CHANNEL_PORT", "7999")
 
 	cfg, err := Load("")
 	require.NoError(t, err)
@@ -148,6 +154,8 @@ func TestLoad_EnvironmentOverrides(t *testing.T) {
 	assert.Equal(t, "text", cfg.Logging.Format)
 	assert.False(t, cfg.InternalAPI.Enabled)
 	assert.Equal(t, ":7002", cfg.InternalAPI.Address)
+	assert.False(t, cfg.Membership.UseHiPrioPersistentChannel)
+	assert.Equal(t, 7999, cfg.Membership.HiPrioChannelPort)
 }
 
 func TestLoad_EnvironmentOverridesKDL(t *testing.T) {
@@ -229,6 +237,134 @@ func TestValidate_ValidConfig(t *testing.T) {
 			ServiceName: "drl",
 			Port:        7946,
 			BindAddr:    "0.0.0.0",
+		},
+		Logging: LoggingConfig{
+			Level:  "info",
+			Format: "json",
+		},
+		Cache: CacheConfig{
+			BlocklistSizeMB:            64,
+			AccountingSizeMB:           128,
+			SyncTimeoutSeconds:         30,
+			BlocklistDefaultTTLSeconds: 3600,
+		},
+	}
+
+	err := cfg.Validate()
+	assert.NoError(t, err)
+}
+
+func TestValidate_HiPrioChannelPort_DefaultsWhenZero(t *testing.T) {
+	cfg := &Config{
+		Listen: ListenConfig{
+			GRPC:    ":8081",
+			Metrics: ":9091",
+		},
+		Membership: MembershipConfig{
+			ServiceName: "drl",
+			Port:        7946,
+			BindAddr:    "0.0.0.0",
+		},
+		Logging: LoggingConfig{
+			Level:  "info",
+			Format: "json",
+		},
+		Cache: CacheConfig{
+			BlocklistSizeMB:            64,
+			AccountingSizeMB:           128,
+			SyncTimeoutSeconds:         30,
+			BlocklistDefaultTTLSeconds: 3600,
+		},
+	}
+
+	err := cfg.Validate()
+	require.NoError(t, err)
+	assert.Equal(t, 7956, cfg.Membership.HiPrioChannelPort)
+}
+
+func TestValidate_HiPrioChannelPort_OutOfRange(t *testing.T) {
+	tests := []struct {
+		name string
+		port int
+	}{
+		{"port negative", -1},
+		{"port too high", 65536},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cfg := &Config{
+				Listen: ListenConfig{
+					GRPC:    ":8081",
+					Metrics: ":9091",
+				},
+				Membership: MembershipConfig{
+					ServiceName:       "drl",
+					Port:              7946,
+					BindAddr:          "0.0.0.0",
+					HiPrioChannelPort: tt.port,
+				},
+				Logging: LoggingConfig{
+					Level:  "info",
+					Format: "json",
+				},
+				Cache: CacheConfig{
+					BlocklistSizeMB:            64,
+					AccountingSizeMB:           128,
+					SyncTimeoutSeconds:         30,
+					BlocklistDefaultTTLSeconds: 3600,
+				},
+			}
+
+			err := cfg.Validate()
+			assert.Error(t, err)
+			assert.Contains(t, err.Error(), "membership.hiprio-channel-port must be between 1 and 65535")
+		})
+	}
+}
+
+func TestValidate_HiPrioChannelPort_CollidesWithMembershipPort(t *testing.T) {
+	cfg := &Config{
+		Listen: ListenConfig{
+			GRPC:    ":8081",
+			Metrics: ":9091",
+		},
+		Membership: MembershipConfig{
+			ServiceName:                "drl",
+			Port:                       7946,
+			BindAddr:                   "0.0.0.0",
+			UseHiPrioPersistentChannel: true,
+			HiPrioChannelPort:          7946,
+		},
+		Logging: LoggingConfig{
+			Level:  "info",
+			Format: "json",
+		},
+		Cache: CacheConfig{
+			BlocklistSizeMB:            64,
+			AccountingSizeMB:           128,
+			SyncTimeoutSeconds:         30,
+			BlocklistDefaultTTLSeconds: 3600,
+		},
+	}
+
+	err := cfg.Validate()
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "membership.hiprio-channel-port (7946) must differ from membership.port (7946)")
+}
+
+func TestValidate_HiPrioChannelPort_CollisionOnlyEnforcedWhenChannelEnabled(t *testing.T) {
+	cfg := &Config{
+		Listen: ListenConfig{
+			GRPC:    ":8081",
+			Metrics: ":9091",
+		},
+		Membership: MembershipConfig{
+			ServiceName:                "drl",
+			Port:                       7946,
+			BindAddr:                   "0.0.0.0",
+			UseHiPrioPersistentChannel: false,
+			HiPrioChannelPort:          7946,
 		},
 		Logging: LoggingConfig{
 			Level:  "info",
@@ -873,6 +1009,31 @@ membership {
 	assert.NotNil(t, cfg)
 }
 
+func TestConfig_HiPrioPersistentChannelFromKDL(t *testing.T) {
+	clearEnvVars(t)
+
+	tmpDir := t.TempDir()
+	configPath := filepath.Join(tmpDir, "channel.kdl")
+
+	kdlConfig := `
+membership {
+    service-name "test"
+    port 7946
+    bind-addr "0.0.0.0"
+    use-hiprio-persistent-channel true
+    hiprio-channel-port 8956
+}
+`
+	err := os.WriteFile(configPath, []byte(kdlConfig), 0644)
+	require.NoError(t, err)
+
+	cfg, err := Load(configPath)
+	require.NoError(t, err)
+
+	assert.True(t, cfg.Membership.UseHiPrioPersistentChannel)
+	assert.Equal(t, 8956, cfg.Membership.HiPrioChannelPort)
+}
+
 func TestAccountingRule_WindowDuration(t *testing.T) {
 	tests := []struct {
 		name     string
@@ -1384,6 +1545,8 @@ func clearEnvVars(t *testing.T) {
 		"DRL_CACHE_BLOCKLIST_DEFAULT_TTL_SECONDS",
 		"DRL_MEMBERSHIP_PRIMARY_KEY",
 		"DRL_MEMBERSHIP_SECONDARY_KEYS",
+		"DRL_MEMBERSHIP_USE_HIPRIO_PERSISTENT_CHANNEL",
+		"DRL_MEMBERSHIP_HIPRIO_CHANNEL_PORT",
 		"DRL_ACCOUNTING_SETTINGS_ALGORITHM",
 		"DRL_ACCOUNTING_SETTINGS_CAPACITY",
 		"DRL_ACCOUNTING_SETTINGS_REFILL_RATE",

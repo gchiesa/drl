@@ -10,11 +10,21 @@ if ! command -v protoc-gen-go &>/dev/null; then
   go install google.golang.org/protobuf/cmd/protoc-gen-go@latest
 fi
 
+# Install protoc-gen-go-grpc if not already available (needed for the
+# persistent gRPC channel service in channel.proto).
+if ! command -v protoc-gen-go-grpc &>/dev/null; then
+  echo "Installing protoc-gen-go-grpc..."
+  go install google.golang.org/grpc/cmd/protoc-gen-go-grpc@latest
+fi
+
 echo "Generating Go code from protobuf definitions..."
 protoc \
   --proto_path="${ROOT_DIR}" \
   --go_out="${ROOT_DIR}" \
   --go_opt=paths=source_relative \
-  internal/proto/accounting.proto
+  --go-grpc_out="${ROOT_DIR}" \
+  --go-grpc_opt=paths=source_relative \
+  internal/proto/accounting.proto \
+  internal/proto/channel.proto
 
 echo "Protobuf generation complete."

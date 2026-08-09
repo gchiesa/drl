@@ -61,6 +61,25 @@ func newCluster(cfg *config.Config, localIP string, cacheManager *cache.Manager,
 		os.Exit(1)
 	}
 
+	// Start the persistent gRPC channel for hi-priority (block/unblock)
+	// event propagation, when enabled via config/DRL_MEMBERSHIP_USE_HIPRIO_PERSISTENT_CHANNEL.
+	if cfg.Membership.UseHiPrioPersistentChannel {
+		channelManager := membership.NewChannelManager(membership.ChannelManagerConfig{
+			LocalAddr: localIP,
+			Port:      cfg.Membership.HiPrioChannelPort,
+			Handler:   stateDelegate,
+			Metrics:   metricsManager,
+			Logger:    log,
+		})
+		if err := channelManager.Start(); err != nil {
+			log.Error("failed to start persistent gRPC channel", "error", err)
+			cacheManager.Close()
+			os.Exit(1)
+		}
+		cluster.SetChannelManager(channelManager)
+		log.Info("persistent gRPC channel enabled", "port", cfg.Membership.HiPrioChannelPort)
+	}
+
 	// Join the cluster in the background
 	go func() {
 		if err := cluster.JoinCluster(); err != nil {

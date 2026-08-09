@@ -5,6 +5,7 @@ protoc = "29.6"
 hugo = "0.160.1"
 node = "22"
 "go:github.com/swaggo/swag/cmd/swag" = "v1.16.4"
+"go:google.golang.org/grpc/cmd/protoc-gen-go-grpc" = "v1.6.2"
 
 [tasks.build]
 description = "Build the DRL binary"

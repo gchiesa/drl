@@ -271,3 +271,70 @@ func TestClusterLeaveWithoutStart(t *testing.T) {
 		t.Errorf("unexpected error leaving unstarted cluster: %v", err)
 	}
 }
+
+// TestCluster_WaitForChannelsReady_NoChannelManager_NoOp verifies that
+// waitForChannelsReady returns immediately (no blocking) when the
+// persistent gRPC channel feature is disabled, i.e. no ChannelManager has
+// been attached to the cluster.
+func TestCluster_WaitForChannelsReady_NoChannelManager_NoOp(t *testing.T) {
+	localIP := testLocalIP(t)
+	cfg := &config.Config{
+		Membership: config.MembershipConfig{
+			ServiceName:  "drl",
+			Port:         17949,
+			BindAddr:     "127.0.0.1",
+			StartupDelay: 100 * time.Millisecond,
+		},
+	}
+	m := metrics.NewMetrics()
+	cm := testCacheManager(t, localIP)
+	defer cm.Close()
+	logger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelError}))
+
+	cluster := NewCluster(cfg, localIP, cm, m, logger)
+
+	start := time.Now()
+	cluster.waitForChannelsReady()
+	assert.Less(t, time.Since(start), time.Second, "waitForChannelsReady should return immediately with no channel manager")
+}
+
+// TestCluster_WaitForChannelsReady_NoPeers_ReturnsImmediately verifies that
+// when a ChannelManager is attached but the cluster has no peers besides
+// itself, waitForChannelsReady returns immediately (there is nothing to
+// wait for).
+func TestCluster_WaitForChannelsReady_NoPeers_ReturnsImmediately(t *testing.T) {
+	localIP := testLocalIP(t)
+	cfg := &config.Config{
+		Membership: config.MembershipConfig{
+			ServiceName:                "drl",
+			Port:                       17950,
+			BindAddr:                   "127.0.0.1",
+			StartupDelay:               100 * time.Millisecond,
+			UseHiPrioPersistentChannel: true,
+		},
+	}
+	m := metrics.NewMetrics()
+	cm := testCacheManager(t, localIP)
+	defer cm.Close()
+	logger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelError}))
+
+	cluster := NewCluster(cfg, localIP, cm, m, logger)
+	require.NoError(t, cluster.Start())
+	defer func() { _ = cluster.Leave(time.Second) }()
+
+	port := freePort(t)
+	channelManager := NewChannelManager(ChannelManagerConfig{
+		LocalAddr: localIP,
+		Port:      port,
+		Handler:   cluster.stateDelegate,
+		Metrics:   m,
+		Logger:    logger,
+	})
+	require.NoError(t, channelManager.Start())
+	defer channelManager.Stop()
+	cluster.SetChannelManager(channelManager)
+
+	start := time.Now()
+	cluster.waitForChannelsReady()
+	assert.Less(t, time.Since(start), time.Second, "waitForChannelsReady should return immediately when there are no peers to connect to")
+}
