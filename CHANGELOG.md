@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.2.0](https://github.com/gchiesa/drl/compare/v1.1.1...v1.2.0) (2026-08-15)
+
+
+### Features
+
+* **ms020:** peristent grpc channel for hi priority messaging ([5326f9d](https://github.com/gchiesa/drl/commit/5326f9dc7d3f380dd190fe4edb5e3c9772220b5c))
+* **ms020:** update docker compose replicas ([3a2f2b7](https://github.com/gchiesa/drl/commit/3a2f2b7722dd12ea866dca1038c0bed6300733d7))
+
 ## [1.1.1](https://github.com/gchiesa/drl/compare/v1.1.0...v1.1.1) (2026-07-18)
 
 
