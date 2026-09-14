@@ -111,8 +111,7 @@ resource "aws_cloudwatch_log_group" "main" {
 # ─── Task Definition ─────────────────────────────────────────────────────────────
 
 locals {
-  envoy_config = file("${path.module}/config/envoy/envoy.yaml")
-  drl_config   = file("${path.module}/config/drl/config.kdl")
+  drl_config = file("${path.module}/config/drl/config.kdl")
 }
 
 resource "aws_ecs_task_definition" "echo_server" {
@@ -128,13 +127,20 @@ resource "aws_ecs_task_definition" "echo_server" {
   # In production, prefer mounting from S3 via ECS volume or baking into the image.
   container_definitions = jsonencode([
     # ── echo-server ──────────────────────────────────────────────────────
+    # No Envoy in this topology, so echo-server only needs to be reachable
+    # from DRL over loopback. It listens on 18080 to avoid colliding with
+    # DRL's embedded proxy on 8080.
     {
       name      = "echo-server"
       image     = var.echo_server_image
       essential = true
 
+      environment = [
+        { name = "PORT", value = "18080" }
+      ]
+
       portMappings = [{
-        containerPort = 8080
+        containerPort = 18080
         protocol      = "tcp"
       }]
 
@@ -148,46 +154,9 @@ resource "aws_ecs_task_definition" "echo_server" {
       }
     },
 
-    # ── envoy sidecar ─────────────────────────────────────────────────────
-    {
-      name      = "envoy"
-      image     = var.envoy_image
-      essential = true
-
-      # Envoy config is written to /tmp/envoy.yaml via entrypoint.
-      # The 'command' here inlines the YAML via environment variable to avoid
-      # a separate config bucket; for production use a proper volume mount.
-      entryPoint = ["/bin/sh", "-c"]
-      command    = ["echo \"$ENVOY_CONFIG\" | base64 -d > /tmp/envoy.yaml && envoy -c /tmp/envoy.yaml --log-level info"]
-
-      environment = [
-        {
-          name  = "ENVOY_CONFIG"
-          value = base64encode(local.envoy_config)
-        }
-      ]
-
-      portMappings = [
-        { containerPort = 10000, protocol = "tcp" },
-        { containerPort = 9901, protocol = "tcp" } # admin
-      ]
-
-      dependsOn = [{
-        containerName = "drl"
-        condition     = "HEALTHY"
-      }]
-
-      logConfiguration = {
-        logDriver = "awslogs"
-        options = {
-          "awslogs-group"         = aws_cloudwatch_log_group.main.name
-          "awslogs-region"        = var.aws_region
-          "awslogs-stream-prefix" = "envoy"
-        }
-      }
-    },
-
-    # ── drl sidecar ───────────────────────────────────────────────────────
+    # ── drl (embedded proxy) ────────────────────────────────────────────────
+    # DRL is both the edge reverse proxy (ALB target on :8080) and the rate
+    # limiter — there is no Envoy container in this task.
     {
       name      = "drl"
       image     = var.drl_image
@@ -216,11 +185,13 @@ resource "aws_ecs_task_definition" "echo_server" {
       ]
 
       portMappings = [
-        { containerPort = 8081, protocol = "tcp" }, # gRPC
-        { containerPort = 8082, protocol = "tcp" }, # internal API
+        { containerPort = 8080, protocol = "tcp" }, # embedded proxy (ALB target)
+        { containerPort = 8081, protocol = "tcp" }, # gRPC (unused for ingress here)
+        { containerPort = 8082, protocol = "tcp" }, # internal API (also queried peer-to-peer for UI aggregation)
         { containerPort = 9091, protocol = "tcp" }, # metrics
         { containerPort = 7946, protocol = "tcp" }, # memberlist TCP
-        { containerPort = 7946, protocol = "udp" }  # memberlist UDP
+        { containerPort = 7946, protocol = "udp" }, # memberlist UDP
+        { containerPort = 7956, protocol = "tcp" }  # hi-prio persistent gRPC channel (block/unblock propagation)
       ]
 
       healthCheck = {
@@ -259,12 +230,12 @@ resource "aws_ecs_service" "echo_server" {
   }
 
   load_balancer {
-    target_group_arn = aws_lb_target_group.envoy.arn
-    container_name   = "envoy"
-    container_port   = 10000
+    target_group_arn = aws_lb_target_group.drl.arn
+    container_name   = "drl"
+    container_port   = 8080
   }
 
-  # Register DRL sidecar in Cloud Map so instances discover each other via DNS
+  # Register DRL in Cloud Map so instances discover each other via DNS
   service_registries {
     registry_arn   = aws_service_discovery_service.drl.arn
     container_name = "drl"

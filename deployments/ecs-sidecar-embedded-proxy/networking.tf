@@ -119,13 +119,13 @@ resource "aws_security_group" "alb" {
 
 resource "aws_security_group" "tasks" {
   name        = "${var.cluster_name}-tasks-sg"
-  description = "Allow inbound from ALB and intra-cluster memberlist gossip"
+  description = "Allow inbound from ALB and intra-cluster DRL peer traffic (gossip, hi-prio channel, internal API)"
   vpc_id      = aws_vpc.main.id
 
-  # Envoy HTTP from ALB
+  # DRL embedded proxy (edge listener) from ALB — no Envoy in this topology
   ingress {
-    from_port       = 10000
-    to_port         = 10000
+    from_port       = 8080
+    to_port         = 8080
     protocol        = "tcp"
     security_groups = [aws_security_group.alb.id]
   }
@@ -142,6 +142,24 @@ resource "aws_security_group" "tasks" {
     from_port = 7946
     to_port   = 7946
     protocol  = "udp"
+    self      = true
+  }
+
+  # DRL persistent gRPC channel for hi-priority Block/Unblock propagation
+  # (membership.hiprio-channel-port, default 7956 — separate from gossip)
+  ingress {
+    from_port = 7956
+    to_port   = 7956
+    protocol  = "tcp"
+    self      = true
+  }
+
+  # DRL internal API — queried node-to-node for cross-task blocklist /
+  # accounting aggregation (e.g. the control-plane UI proxy)
+  ingress {
+    from_port = 8082
+    to_port   = 8082
+    protocol  = "tcp"
     self      = true
   }
 
@@ -167,9 +185,9 @@ resource "aws_lb" "main" {
   tags = { Name = "${var.cluster_name}-alb" }
 }
 
-resource "aws_lb_target_group" "envoy" {
-  name        = "${var.cluster_name}-envoy-tg"
-  port        = 10000
+resource "aws_lb_target_group" "drl" {
+  name        = "${var.cluster_name}-drl-tg"
+  port        = 8080
   protocol    = "HTTP"
   vpc_id      = aws_vpc.main.id
   target_type = "ip"
@@ -190,6 +208,6 @@ resource "aws_lb_listener" "http" {
 
   default_action {
     type             = "forward"
-    target_group_arn = aws_lb_target_group.envoy.arn
+    target_group_arn = aws_lb_target_group.drl.arn
   }
 }

@@ -1,0 +1,79 @@
+// DRL - Distributed Rate Limiter Configuration
+// ECS Sidecar (Embedded Proxy) deployment — no Envoy container in this task.
+//
+// DRL's built-in HTTP reverse proxy is the edge listener: the ALB forwards
+// traffic straight to DRL on :8080, which rate-limits and forwards to
+// echo-server on loopback :18080. This is the simplest way to put a global
+// rate limiter in front of an ECS service — ALB + DRL sidecar, nothing else.
+//
+// Peer discovery: DRL instances across ECS tasks discover each other via
+// AWS Cloud Map DNS (drl.drl.local). The memberlist library resolves
+// the DNS name to all task IPs and establishes gossip connections.
+
+listen {
+    grpc ":8081"
+    metrics ":9091"
+}
+
+membership {
+    service-name "drl"
+    port 7946
+    bind-addr "0.0.0.0"
+    // Cloud Map DNS for peer discovery across ECS tasks
+    // All task IPs registered under drl.drl.local resolve here
+    join-addr "drl.drl.local"
+    startup-delay "5s"
+}
+
+logging {
+    level "info"
+    format "json"
+}
+
+internal-api {
+    enabled true
+    address ":8082"
+}
+
+accounting {
+    settings {
+        algorithm "sliding-window"
+        retry-after-type "delay-seconds"
+    }
+    rules {
+        "catch-all" {
+            path-prefix "/"
+            limit 100
+            per "minute"
+        }
+        "anything" {
+            path-prefix "/anything"
+            limit 10
+            per "minute"
+        }
+    }
+}
+
+// Embedded reverse proxy — replaces the Envoy sidecar entirely. The ALB's
+// target group points directly at this listener.
+embedded-proxy {
+    enabled true
+    listen ":8080"
+
+    tls {
+        enabled false
+        cert ""
+        key ""
+    }
+
+    // Single virtual host that catches all inbound traffic and forwards it
+    // to echo-server over loopback (same task, awsvpc network namespace).
+    host "echo-server" {
+        routes {
+            route "/" {
+                upstream "http://127.0.0.1:18080"
+                require-auth false
+            }
+        }
+    }
+}

@@ -1,19 +1,22 @@
 ---
 title: Deployment Models
-description: Overview of the available DRL deployment flavours — Docker Compose, ECS Fargate, Kubernetes sidecar, Kubernetes fleet, and Istio.
+description: Overview of the available DRL deployment flavours — Docker Compose, ECS Fargate (Envoy or embedded proxy), Kubernetes sidecar, Kubernetes fleet, and Istio.
 weight: 9
 ---
 
-DRL ships with five deployment configurations, each targeting a different infrastructure model. All
+DRL ships with six deployment configurations, each targeting a different infrastructure model. Most
 flavours configure the same core components — an echo-server workload, an Envoy reverse proxy, and
-one or more DRL instances — but differ in how Envoy reaches DRL and how DRL nodes form a cluster.
+one or more DRL instances — but differ in how Envoy reaches DRL and how DRL nodes form a cluster. One
+flavour, the ECS embedded-proxy variant, drops Envoy entirely and lets DRL's built-in reverse proxy sit
+directly behind the load balancer.
 
 ## Flavour comparison
 
-| Flavour | Envoy → DRL path | DRL topology | Infrastructure | Best for |
+| Flavour | Edge → DRL path | DRL topology | Infrastructure | Best for |
 |---------|-----------------|--------------|----------------|----------|
-| [Docker Compose](#docker-compose) | `drl:8081` (DNS) | 2-replica service, bridge network | Local machine | Local dev, manual QA |
-| [ECS Sidecar](#ecs-sidecar-terraform) | `127.0.0.1:8081` (loopback) | One DRL container per Fargate task; peers via Cloud Map DNS | AWS ECS Fargate + ALB | AWS-native workloads |
+| [Docker Compose](#docker-compose) | `drl:8081` (DNS, Envoy ext_authz) | 2-replica service, bridge network | Local machine | Local dev, manual QA |
+| [ECS Sidecar (Envoy)](#ecs-sidecar-envoy-terraform) | `127.0.0.1:8081` (loopback, Envoy ext_authz) | One DRL container per Fargate task; peers via Cloud Map DNS | AWS ECS Fargate + ALB | AWS-native workloads already running Envoy |
+| [ECS Sidecar (Embedded Proxy)](#ecs-sidecar-embedded-proxy-terraform) | ALB → DRL `:8080` directly (no Envoy) | One DRL container per Fargate task; peers via Cloud Map DNS | AWS ECS Fargate + ALB | **Global rate limiter for ECS with just a plain ALB** — no Envoy required |
 | [K8s Sidecar](#kubernetes-sidecar-kustomize) | `127.0.0.1:8081` (loopback) | One DRL pod per app pod; peers via headless Service DNS | Any Kubernetes cluster | Sidecar-injection pattern |
 | [K8s Fleet](#kubernetes-fleet-kustomize) | `drl.drl.svc.cluster.local:8081` (ClusterIP) | Dedicated DRL Deployment; peers via headless Service DNS | Any Kubernetes cluster | Shared rate-limit tier, independent scaling |
 | [Istio](#istio-extension) | `drl.drl.svc.cluster.local:8081` (ClusterIP) | Any of the above | Istio service mesh | Mesh-wide policy without re-configuring workloads |
@@ -48,7 +51,7 @@ docker compose --profile loadtest up -d
 
 ---
 
-## ECS Sidecar (Terraform)
+## ECS Sidecar (Envoy) (Terraform)
 
 Deploys the full stack on **AWS ECS Fargate** using Terraform. Each ECS task runs three containers
 (`echo-server`, `envoy`, `drl`) in the same network namespace, so all inter-container traffic
@@ -76,7 +79,7 @@ Internet → ALB :80 → Envoy :10000 (per-task sidecar)
 **Deploy**
 
 ```bash
-cd deployments/ecs-sidecar
+cd deployments/ecs-sidecar-envoy
 terraform init
 terraform apply \
   -var="drl_image=<ECR_URI>/drl:latest" \
@@ -85,7 +88,53 @@ terraform apply \
 ```
 
 **Source**  
-{{< icon "github" >}} [deployments/ecs-sidecar/README.md](https://github.com/gchiesa/drl/blob/main/deployments/ecs-sidecar/README.md)
+{{< icon "github" >}} [deployments/ecs-sidecar-envoy/README.md](https://github.com/gchiesa/drl/blob/main/deployments/ecs-sidecar-envoy/README.md)
+
+---
+
+## ECS Sidecar (Embedded Proxy) (Terraform)
+
+The simplest way to put a **global rate limiter in front of an ECS service**: no Envoy container, no
+`ext_authz` wiring, no second config file. The ALB forwards traffic directly to DRL's built-in reverse
+proxy, which rate-limits and forwards to `echo-server` over loopback. Each ECS task runs just two
+containers (`echo-server`, `drl`). DRL instances across tasks still discover each other via **AWS Cloud
+Map** DNS (`drl.drl.local`) for gossip and blocklist convergence.
+
+**Topology**
+
+```
+Internet → ALB :80 → DRL embedded proxy :8080 (per-task sidecar)
+                         ↓ forward (127.0.0.1:18080)
+                      echo-server (loopback only)
+                      DRL :8080 ↕ memberlist gossip (Cloud Map DNS)
+                      DRL sidecar (other tasks)
+```
+
+This is the flavour to reach for when you already have (or just want) a plain ALB in front of an ECS
+service and need rate limiting without adopting Envoy — DRL's embedded proxy can also terminate TLS and
+validate OIDC Bearer tokens at the edge if you need that later (see [Embedded Proxy](/docs/embedded-proxy/)).
+
+**Resources created**
+
+- VPC, public/private subnets, NAT gateways
+- Application Load Balancer (target group points at DRL's `:8080`)
+- ECS cluster (Fargate), task definition, service
+- AWS Cloud Map private DNS namespace for peer discovery
+- SSM Parameter Store entries for secrets
+
+**Deploy**
+
+```bash
+cd deployments/ecs-sidecar-embedded-proxy
+terraform init
+terraform apply \
+  -var="drl_image=<ECR_URI>/drl:latest" \
+  -var="drl_private_api_key=<SECRET>" \
+  -var="drl_membership_primary_key=<16_BYTE_HEX>"
+```
+
+**Source**  
+{{< icon "github" >}} [deployments/ecs-sidecar-embedded-proxy/README.md](https://github.com/gchiesa/drl/blob/main/deployments/ecs-sidecar-embedded-proxy/README.md)
 
 ---
 

@@ -63,7 +63,8 @@ drl/
 │   ├── docker-compose/          # Local integration testing stack
 │   ├── k8s-fleet/               # Kubernetes fleet deployment
 │   ├── k8s-sidecar/             # Kubernetes sidecar deployment
-│   ├── ecs-sidecar/             # AWS ECS sidecar deployment
+│   ├── ecs-sidecar-envoy/       # AWS ECS sidecar deployment (Envoy)
+│   ├── ecs-sidecar-embedded-proxy/ # AWS ECS sidecar deployment (DRL embedded proxy)
 │   └── istio/                   # Istio service mesh integration
 ├── ci/scripts/                  # MISE task scripts (must have +x bit)
 ├── .github/                     # GitHub Actions workflows and templates

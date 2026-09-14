@@ -17,6 +17,11 @@ It supports two deployment models:
 - **Embedded reverse proxy** — DRL itself handles ingress: TLS termination, OIDC JWT validation,
   rate-limiting, and upstream forwarding in a single binary.
 
+> **On AWS ECS?** The embedded reverse proxy model is a perfect fit for adding a global rate limiter to
+> an ECS service behind a plain **Application Load Balancer** — point the ALB straight at the DRL sidecar
+> and skip Envoy entirely. See the [`ecs-sidecar-embedded-proxy`](https://github.com/gchiesa/drl/blob/main/deployments/ecs-sidecar-embedded-proxy/README.md)
+> Terraform deployment and the [Deployment Models]({{< ref "deployments" >}}) page.
+
 ---
 
 ## How it works
@@ -227,4 +232,4 @@ accounting {
 | [Control Plane UI]({{< ref "ui" >}}) | Built-in web dashboard, ECDH session auth, cross-node aggregation |
 | [Metrics]({{< ref "metrics" >}}) | Prometheus metrics reference and Grafana panel queries |
 | [Sizing Guide]({{< ref "sizing" >}}) | Memory footprint, capacity tables, and deployment recommendations |
-| [Deployment Models]({{< ref "deployments" >}}) | Docker Compose, ECS Fargate, Kubernetes sidecar/fleet, and Istio |
+| [Deployment Models]({{< ref "deployments" >}}) | Docker Compose, ECS Fargate (Envoy or embedded proxy + ALB), Kubernetes sidecar/fleet, and Istio |

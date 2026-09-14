@@ -71,6 +71,10 @@ Best suited for:
 - Internal APIs or microservices where a full Envoy deployment is not warranted
 - Environments where operational simplicity outweighs the need for deep proxy customisation
 - Local development and integration testing
+- **AWS ECS Fargate behind a plain Application Load Balancer** — point the ALB straight at the DRL
+  sidecar and you have a global rate limiter for the service with no Envoy container, no extra config
+  file, and one fewer hop per request. See the
+  [`ecs-sidecar-embedded-proxy`](deployments/ecs-sidecar-embedded-proxy/README.md) deployment flavour.
 
 ---
 
@@ -242,7 +246,8 @@ Ready-to-use deployment configurations live under [`deployments/`](deployments/)
 | Flavour | Path | Infrastructure | Description |
 |---------|------|----------------|-------------|
 | [Docker Compose](deployments/docker-compose/README.md) | `deployments/docker-compose/` | Local machine | Full stack via `docker compose up` — fastest way to try DRL |
-| [ECS Sidecar](deployments/ecs-sidecar/README.md) | `deployments/ecs-sidecar/` | AWS ECS Fargate (Terraform) | echo-server + envoy + DRL as co-located Fargate task sidecars |
+| [ECS Sidecar (Envoy)](deployments/ecs-sidecar-envoy/README.md) | `deployments/ecs-sidecar-envoy/` | AWS ECS Fargate (Terraform) | echo-server + envoy + DRL as co-located Fargate task sidecars |
+| [ECS Sidecar (Embedded Proxy)](deployments/ecs-sidecar-embedded-proxy/README.md) | `deployments/ecs-sidecar-embedded-proxy/` | AWS ECS Fargate (Terraform) | ALB → DRL embedded proxy directly — a global rate limiter with no Envoy container |
 | [K8s Sidecar](deployments/k8s-sidecar/README.md) | `deployments/k8s-sidecar/` | Any Kubernetes cluster (Kustomize) | DRL as a third container inside each application pod |
 | [K8s Fleet](deployments/k8s-fleet/README.md) | `deployments/k8s-fleet/` | Any Kubernetes cluster (Kustomize) | DRL as a dedicated Deployment; Envoy connects via ClusterIP Service |
 | [Istio](deployments/istio/README.md) | `deployments/istio/` | Istio service mesh | Configuration guide: inject DRL into existing Istio-managed sidecars via `EnvoyFilter` / `AuthorizationPolicy` |

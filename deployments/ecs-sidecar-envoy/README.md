@@ -1,6 +1,11 @@
-# DRL ECS Sidecar Deployment
+# DRL ECS Sidecar (Envoy) Deployment
 
 Terraform configuration for deploying DRL as a **sidecar** alongside Envoy and the echo-server workload on AWS ECS Fargate.
+
+> Already running Envoy on ECS? This flavour is for you. If you don't need Envoy at all, see the
+> [`ecs-sidecar-embedded-proxy`](../ecs-sidecar-embedded-proxy/README.md) flavour — DRL's built-in reverse
+> proxy sits directly behind the ALB, so a plain ALB + DRL sidecar is enough to get a global rate limiter
+> on ECS with one fewer moving part.
 
 ## Architecture
 
@@ -34,13 +39,27 @@ Terraform configuration for deploying DRL as a **sidecar** alongside Envoy and t
 
 Each ECS task contains three containers sharing a single network namespace:
 
-| Container   | Role                                              | Port(s)              |
-|-------------|---------------------------------------------------|----------------------|
-| echo-server | Backend workload (`mccutchen/go-httpbin`)          | 8080                 |
-| envoy       | Reverse proxy — forwards traffic, calls DRL first | 10000, 9901 (admin)  |
-| drl         | Rate limiter sidecar — receives ext_authz gRPC    | 8081, 8082, 9091     |
+| Container   | Role                                              | Port(s)                        |
+|-------------|---------------------------------------------------|---------------------------------|
+| echo-server | Backend workload (`mccutchen/go-httpbin`)          | 8080                            |
+| envoy       | Reverse proxy — forwards traffic, calls DRL first | 10000, 9901 (admin)             |
+| drl         | Rate limiter sidecar — receives ext_authz gRPC    | 8081, 8082, 9091, 7946, 7956    |
 
 DRL instances across tasks discover each other via **AWS Cloud Map** (`drl.drl.local`), which resolves to all healthy task IPs, enabling the memberlist P2P gossip cluster.
+
+### Cross-task peer traffic
+
+The `tasks` security group must allow every port DRL nodes use to talk to **each other**, on top of the
+ALB → Envoy ingress rule. All of the following are opened as self-referencing rules in
+`networking.tf`:
+
+| Port | Protocol | Purpose |
+|------|----------|---------|
+| 7946 | TCP + UDP | Memberlist gossip — cluster membership, failure detection, state push/pull |
+| 7956 | TCP | Persistent gRPC channel for hi-priority Block/Unblock propagation (`membership.hiprio-channel-port`) — deliberately a different port from gossip |
+| 8082 | TCP | Internal API — queried node-to-node by the control-plane UI proxy to aggregate blocklist/accounting data from peers |
+
+`8081` (gRPC check) does not need a self rule: Envoy calls it over `127.0.0.1` within the same task, never across tasks.
 
 ## Prerequisites
 
