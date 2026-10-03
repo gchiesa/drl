@@ -22,8 +22,8 @@ import (
 // It handles TCP Push/Pull state sync for the blocklist cache and processes
 // incoming DrlMessage envelopes (accounting batches, block/unblock events).
 type StateDelegate struct {
-	blocklist  *cache.BlocklistCache
-	accounting *cache.AccountingCache
+	blocklist  cache.BlocklistRepository
+	accounting cache.AccountingRepository
 	metrics    *metrics.Metrics
 	logger     *slog.Logger
 	cluster    *Cluster
@@ -49,8 +49,8 @@ type StateDelegate struct {
 
 // DelegateConfig holds configuration for the state delegate
 type DelegateConfig struct {
-	Blocklist   *cache.BlocklistCache
-	Accounting  *cache.AccountingCache
+	Blocklist   cache.BlocklistRepository
+	Accounting  cache.AccountingRepository
 	Metrics     *metrics.Metrics
 	Logger      *slog.Logger
 	SyncTimeout time.Duration
@@ -270,6 +270,11 @@ func (d *StateDelegate) LocalState(join bool) []byte {
 // MergeRemoteState is called when state is received from a peer during Push/Pull sync.
 // This is called on the joining node to receive the current cluster state.
 func (d *StateDelegate) MergeRemoteState(buf []byte, join bool) {
+	if d.blocklist == nil {
+		d.markSyncComplete()
+		return
+	}
+
 	// Record sync start time if this is the first sync
 	d.syncOnce.Do(func() {
 		d.syncStartTime = time.Now()
@@ -512,11 +517,11 @@ func (d *StateDelegate) MarkReady() {
 }
 
 // SetBlocklist sets the blocklist cache reference
-func (d *StateDelegate) SetBlocklist(blocklist *cache.BlocklistCache) {
+func (d *StateDelegate) SetBlocklist(blocklist cache.BlocklistRepository) {
 	d.blocklist = blocklist
 }
 
 // GetBlocklist returns the blocklist cache reference
-func (d *StateDelegate) GetBlocklist() *cache.BlocklistCache {
+func (d *StateDelegate) GetBlocklist() cache.BlocklistRepository {
 	return d.blocklist
 }

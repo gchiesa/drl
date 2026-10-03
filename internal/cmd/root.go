@@ -6,6 +6,7 @@ import (
 	"log/slog"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 	"time"
 
@@ -106,9 +107,12 @@ func Execute(version string) {
 		os.Exit(1)
 	}
 
-	// Initialize Handover for graceful state evacuation on shutdown
+	// Initialize Handover for graceful state evacuation on shutdown.
+	// Handover is disabled when using the Redis provider: Redis maintains
+	// shared state across nodes, so peer-to-peer state transfer is unnecessary.
 	var handoverManager *membership.Handover
-	if accountingEngine != nil && accountingEngine.GetFlusher() != nil {
+	redisProviderActive := strings.EqualFold(cfg.Cache.Provider, "redis")
+	if accountingEngine != nil && accountingEngine.GetFlusher() != nil && !redisProviderActive {
 		if handoverManager, err = membership.NewHandover(membership.HandoverConfig{
 			Cluster:    clusterManager,
 			Accounting: cacheManager.Accounting,
@@ -121,6 +125,8 @@ func Execute(version string) {
 		}
 		clusterManager.GetStateDelegate().SetHandover(handoverManager)
 		log.Info("handover manager initialized")
+	} else if redisProviderActive {
+		log.Info("handover manager disabled (redis provider: state is centralized)")
 	}
 
 	// Initialize internal API if enabled

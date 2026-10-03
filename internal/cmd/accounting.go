@@ -57,7 +57,15 @@ func newAccountingEngine(
 	if log == nil {
 		return nil, fmt.Errorf("logger must be provided")
 	}
-	if len(cfg.Accounting.Rules) > 0 {
+	if len(cfg.Accounting.Rules) == 0 {
+		return nil, fmt.Errorf("accounting rules must be provided")
+	}
+
+	// The Flusher is only needed for the in-memory backend. With Redis every
+	// node increments the shared store directly (IsOwner always returns true),
+	// so there are no remote increments to batch or forward.
+	redisProvider := strings.EqualFold(cfg.Cache.Provider, "redis")
+	if !redisProvider {
 		senderID := xxhash.Sum64String(localIP)
 
 		flusher = accounting.NewFlusher(accounting.FlusherConfig{
@@ -75,26 +83,28 @@ func newAccountingEngine(
 			os.Exit(1)
 		}
 		log.Info("accounting flusher started")
-
-		limiter := newRateLimiter(cfg, log)
-
-		engine = accounting.NewEngine(accounting.EngineConfig{
-			Rules:       cfg.Accounting.Rules,
-			Settings:    cfg.Accounting.Settings,
-			Accounting:  cacheManager.Accounting,
-			Flusher:     flusher,
-			Logger:      log,
-			Metrics:     metricsManager,
-			Limiter:     limiter,
-			Blocklist:   blocklist,
-			Broadcaster: broadcaster,
-		})
-		log.Info("accounting engine initialized",
-			"rules", len(cfg.Accounting.Rules),
-			"algorithm", cfg.Accounting.Settings.Algorithm,
-		)
 	} else {
-		return nil, fmt.Errorf("accounting rules must be provided")
+		log.Info("accounting flusher disabled (redis provider: direct writes to shared store)")
 	}
+
+	limiter := newRateLimiter(cfg, log)
+
+	engine = accounting.NewEngine(accounting.EngineConfig{
+		Rules:       cfg.Accounting.Rules,
+		Settings:    cfg.Accounting.Settings,
+		Accounting:  cacheManager.Accounting,
+		Flusher:     flusher, // nil when provider is redis
+		Logger:      log,
+		Metrics:     metricsManager,
+		Limiter:     limiter,
+		Blocklist:   blocklist,
+		Broadcaster: broadcaster,
+	})
+	log.Info("accounting engine initialized",
+		"rules", len(cfg.Accounting.Rules),
+		"algorithm", cfg.Accounting.Settings.Algorithm,
+		"flusher_active", !redisProvider,
+	)
+
 	return engine, nil
 }

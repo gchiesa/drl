@@ -42,7 +42,7 @@ const (
 // When a threshold is exceeded, it blocks the entity locally and broadcasts.
 type Engine struct {
 	rules       *iradix.Tree[*accountingRuleWithName]
-	accounting  *cache.AccountingCache
+	accounting  cache.AccountingRepository
 	flusher     *Flusher
 	logger      *slog.Logger
 	metrics     *metrics.Metrics
@@ -63,7 +63,7 @@ type accountingRuleWithName struct {
 type EngineConfig struct {
 	Rules       map[string]config.AccountingRule
 	Settings    config.AccountingSettings
-	Accounting  *cache.AccountingCache
+	Accounting  cache.AccountingRepository
 	Flusher     *Flusher
 	Logger      *slog.Logger
 	Metrics     *metrics.Metrics
@@ -207,8 +207,12 @@ func (e *Engine) Process(sourceIP, path string, headers map[string]string) {
 			e.metrics.SetRateLimitTokensCurrent(rule.Name, decision.TokensRemaining)
 		}
 	} else {
-		// Remote enqueue
-		e.flusher.Enqueue(ownerAddr, entityHash, 1)
+		// Remote enqueue — only reached with the in-memory backend.
+		// The Redis backend makes IsOwner() always return true, so this
+		// branch is dead when flusher is nil.
+		if e.flusher != nil {
+			e.flusher.Enqueue(ownerAddr, entityHash, 1)
+		}
 		e.metrics.IncAccountingRemote()
 		e.logger.Debug("remote accounting enqueue",
 			"key", key,
@@ -273,6 +277,8 @@ func (e *Engine) BulkLoad(sourceIP, path string, headers map[string]string, dist
 	}
 
 	if e.flusher == nil {
+		// No flusher (Redis provider): IsOwner always returns true so this
+		// branch should not be reached in normal operation. Drop defensively.
 		e.metrics.IncAccountingBulkLoad(BulkLoadDropped)
 		return BulkLoadDropped
 	}
@@ -289,7 +295,11 @@ func (e *Engine) BulkLoad(sourceIP, path string, headers map[string]string, dist
 }
 
 // PendingUpdates returns the number of batched updates waiting to be flushed.
+// Returns 0 when the flusher is disabled (Redis provider).
 func (e *Engine) PendingUpdates() int64 {
+	if e.flusher == nil {
+		return 0
+	}
 	return e.flusher.PendingCount()
 }
 

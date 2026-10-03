@@ -1,0 +1,62 @@
+# Milestone 021 Completed
+
+## Summary
+
+Implemented a high-performance Repository abstraction layer for the DRL cache subsystem, with full Redis backend support.
+
+## What Was Done
+
+### 1. Cache Repository Abstraction (`internal/cache`)
+- Created `internal/cache/repository.go` with `BlocklistRepository` and `AccountingRepository` interfaces.
+- Updated `Manager.Blocklist` and `Manager.Accounting` fields from concrete types to interface types.
+- Added `NewManagerWithRepositories()` constructor for injecting custom backends.
+
+### 2. Redis Implementations
+- `internal/cache/redis_blocklist.go`: Redis-backed `BlocklistRepository`.
+  - Keys: `drl:bl:<entityKey>` with TTL matching block expiration.
+  - Msgpack-encoded values preserving entity metadata.
+  - `GetState()` returns nil, `MergeState()` is a no-op (Redis is shared source of truth).
+- `internal/cache/redis_accounting.go`: Redis-backed `AccountingRepository`.
+  - Keys: `drl:ac:<entityKey>` with TTL matching the rate-limit window.
+  - Atomic increment via Lua script (INCRBY + conditional EXPIRE).
+  - Consistent hashing ring still runs in memory for ownership determination.
+  - `ConsumeTransferable()` always returns `(nil, false)`.
+- `internal/cache/redis_client.go`: Redis client factory with exponential backoff + jitter retry on startup.
+
+### 3. Configuration (`internal/config`)
+- Added `Provider` field (`"in-memory"` default, `"redis"`) to `CacheConfig`.
+- Added `RedisConfig` struct with all Redis connection/pool settings.
+- Extended `Validate()` to validate provider values and apply defaults for Redis settings.
+- Updated `default.kdl` with `provider "in-memory"`.
+- Env var overrides: `DRL_CACHE_PROVIDER`, `DRL_CACHE_REDIS_ADDRS`, etc.
+
+### 4. Metrics (`internal/metrics`)
+- Added Redis-specific metrics:
+  - `drl_redis_command_duration_seconds` (Histogram, labels: command, status)
+  - `drl_redis_errors_total` (Counter, labels: command, error_type)
+  - `drl_redis_pool_connections_active` (Gauge)
+  - `drl_redis_pool_connections_idle` (Gauge)
+
+### 5. Downstream Package Updates
+- `internal/accounting/engine.go`: `AccountingCache *cache.AccountingCache` → `AccountingRepository cache.AccountingRepository`
+- `internal/accounting/flusher.go`: same interface change
+- `internal/membership/delegate.go`: `*cache.BlocklistCache` / `*cache.AccountingCache` → interface types
+- `internal/membership/handover.go`: `*cache.AccountingCache` → `cache.AccountingRepository`
+- Added nil-guard to `MergeRemoteState` in delegate (prevents panic with nil blocklist).
+
+### 6. Startup Readiness Gate (`internal/cmd/cache.go`)
+- Redis provider path: calls `cache.NewRedisClient()` which pings Redis with configurable retry+backoff.
+- On failure: logs structured error and calls `os.Exit(1)`.
+
+### 7. Shutdown Handover Control (`internal/cmd/root.go`)
+- Handover is skipped when `cache.provider = "redis"` (Redis maintains shared state natively).
+
+### 8. Tests
+- `internal/cache/redis_blocklist_test.go`: Block, IsBlocked, Unblock, TTL expiry, ListEntries, Clear, GetState/MergeState (no-op), interface compliance.
+- `internal/cache/redis_accounting_test.go`: Increment, Get, Reset, TTL expiry, consistent hashing, ConsumeTransferable, SnapshotAll, interface compliance.
+- `internal/cache/redis_client_test.go`: Success and failure paths for `NewRedisClient`.
+- All tests use `miniredis` — no real Redis instance required.
+
+## Test Results
+- All 455+ tests PASS
+- Lint: 0 issues

@@ -5,10 +5,13 @@ import (
 	"time"
 )
 
-// Manager provides a unified interface for blocklist and accounting caches
+// Manager provides a unified interface for blocklist and accounting caches.
+// The underlying storage backend (in-memory or Redis) is determined at
+// construction time and exposed via the BlocklistRepository and
+// AccountingRepository interfaces, so callers are backend-agnostic.
 type Manager struct {
-	Blocklist  *BlocklistCache
-	Accounting *AccountingCache
+	Blocklist  BlocklistRepository
+	Accounting AccountingRepository
 	logger     *slog.Logger
 }
 
@@ -30,6 +33,7 @@ type ManagerConfig struct {
 }
 
 // NewManager creates a new cache manager with both blocklist and accounting caches
+// backed by the in-memory Otter store.
 func NewManager(cfg ManagerConfig) (*Manager, error) {
 	blocklist, err := NewBlocklistCache(BlocklistConfig{
 		MaxSizeMB: cfg.BlocklistSizeMB,
@@ -61,6 +65,17 @@ func NewManager(cfg ManagerConfig) (*Manager, error) {
 		Accounting: accounting,
 		logger:     cfg.Logger,
 	}, nil
+}
+
+// NewManagerWithRepositories creates a Manager using pre-built repository
+// implementations (e.g. Redis-backed). Use this when NewManager's in-memory
+// defaults are not appropriate.
+func NewManagerWithRepositories(blocklist BlocklistRepository, accounting AccountingRepository, logger *slog.Logger) *Manager {
+	return &Manager{
+		Blocklist:  blocklist,
+		Accounting: accounting,
+		logger:     logger,
+	}
 }
 
 // Close closes both caches
