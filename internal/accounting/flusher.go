@@ -34,7 +34,7 @@ type Flusher struct {
 	buffers    map[string]*nodeBuffer // ownerAddr -> buffer
 	sender     NodeSender
 	senderID   uint64
-	accounting *cache.AccountingCache
+	accounting cache.AccountingRepository
 	logger     *slog.Logger
 	metrics    *metrics.Metrics
 
@@ -49,7 +49,7 @@ type Flusher struct {
 // FlusherConfig holds configuration for creating a Flusher.
 type FlusherConfig struct {
 	SenderID      uint64
-	Accounting    *cache.AccountingCache
+	Accounting    cache.AccountingRepository
 	Logger        *slog.Logger
 	Metrics       *metrics.Metrics
 	FlushInterval time.Duration

@@ -35,6 +35,7 @@ cache {
     accounting-size-mb 128
     sync-timeout-seconds 30
     blocklist-default-ttl-seconds 300
+    provider "in-memory"
 }
 
 accounting {

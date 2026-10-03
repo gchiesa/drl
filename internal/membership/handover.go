@@ -31,7 +31,7 @@ type FlusherEnqueuer interface {
 // Handover manages the graceful state evacuation when a node is shutting down.
 type Handover struct {
 	cluster    *Cluster
-	accounting *cache.AccountingCache
+	accounting cache.AccountingRepository
 	flusher    FlusherEnqueuer
 	metrics    *metrics.Metrics
 	logger     *slog.Logger
@@ -46,7 +46,7 @@ type Handover struct {
 // HandoverConfig holds configuration for creating a Handover.
 type HandoverConfig struct {
 	Cluster    *Cluster
-	Accounting *cache.AccountingCache
+	Accounting cache.AccountingRepository
 	Flusher    FlusherEnqueuer
 	Metrics    *metrics.Metrics
 	Logger     *slog.Logger

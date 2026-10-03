@@ -176,6 +176,39 @@ type CacheConfig struct {
 	SyncTimeoutSeconds int `kdl:"sync-timeout-seconds" env:"SYNC_TIMEOUT_SECONDS" json:"sync-timeout-seconds"`
 	// BlocklistDefaultTTLSeconds is the default TTL in seconds for admin-API blocks
 	BlocklistDefaultTTLSeconds int `kdl:"blocklist-default-ttl-seconds" env:"BLOCKLIST_DEFAULT_TTL_SECONDS" json:"blocklist-default-ttl-seconds"`
+
+	// Provider selects the cache storage backend. Valid values: "in-memory" (default), "redis".
+	Provider string `kdl:"provider" env:"PROVIDER" json:"provider"`
+	// Redis holds the Redis-specific connection and pool configuration.
+	// Only relevant when Provider is "redis".
+	Redis RedisConfig `kdl:"redis" envPrefix:"REDIS_" json:"redis,omitempty"`
+}
+
+// RedisConfig holds connection and pool settings for the Redis cache backend.
+type RedisConfig struct {
+	// Addrs is the list of Redis server addresses.
+	// Provide a single address for standalone mode, multiple for cluster/sentinel.
+	Addrs []string `kdl:"addrs" env:"ADDRS" envSeparator:"," json:"addrs"`
+	// Password is the Redis AUTH password (empty = no auth).
+	Password string `kdl:"password" env:"PASSWORD" json:"-"` // never serialised
+	// DB is the Redis database index (standalone only; cluster always uses 0).
+	DB int `kdl:"db" env:"DB" json:"db"`
+	// MaxRetries is the number of retry attempts before failing permanently.
+	MaxRetries int `kdl:"max-retries" env:"MAX_RETRIES" json:"max-retries"`
+	// RetryBackoffMin is the minimum backoff duration between retries.
+	RetryBackoffMin time.Duration `kdl:"retry-backoff-min" env:"RETRY_BACKOFF_MIN" json:"retry-backoff-min"`
+	// RetryBackoffMax is the maximum backoff duration between retries.
+	RetryBackoffMax time.Duration `kdl:"retry-backoff-max" env:"RETRY_BACKOFF_MAX" json:"retry-backoff-max"`
+	// ConnectTimeout is the maximum time to wait for a connection to be established.
+	ConnectTimeout time.Duration `kdl:"connect-timeout" env:"CONNECT_TIMEOUT" json:"connect-timeout"`
+	// DialTimeout is the timeout for establishing a new connection.
+	DialTimeout time.Duration `kdl:"dial-timeout" env:"DIAL_TIMEOUT" json:"dial-timeout"`
+	// ReadTimeout is the timeout for socket reads.
+	ReadTimeout time.Duration `kdl:"read-timeout" env:"READ_TIMEOUT" json:"read-timeout"`
+	// WriteTimeout is the timeout for socket writes.
+	WriteTimeout time.Duration `kdl:"write-timeout" env:"WRITE_TIMEOUT" json:"write-timeout"`
+	// PoolSize is the number of connections maintained in the pool per CPU.
+	PoolSize int `kdl:"pool-size" env:"POOL_SIZE" json:"pool-size"`
 }
 
 // EmbeddedProxyConfig holds configuration for the embedded reverse proxy.
@@ -470,6 +503,44 @@ func (c *Config) Validate() error {
 	}
 	if c.Cache.BlocklistDefaultTTLSeconds < 1 {
 		errs = append(errs, fmt.Sprintf("cache.blocklist-default-ttl-seconds must be at least 1, got %d", c.Cache.BlocklistDefaultTTLSeconds))
+	}
+
+	// Apply cache provider default and validate
+	if c.Cache.Provider == "" {
+		c.Cache.Provider = "in-memory"
+	}
+	validProviders := map[string]bool{"in-memory": true, "redis": true}
+	if !validProviders[strings.ToLower(c.Cache.Provider)] {
+		errs = append(errs, fmt.Sprintf("cache.provider must be one of in-memory, redis; got %q", c.Cache.Provider))
+	}
+	if strings.ToLower(c.Cache.Provider) == "redis" {
+		if len(c.Cache.Redis.Addrs) == 0 {
+			errs = append(errs, "cache.redis.addrs must contain at least one address when provider is redis")
+		}
+		if c.Cache.Redis.MaxRetries == 0 {
+			c.Cache.Redis.MaxRetries = 5
+		}
+		if c.Cache.Redis.RetryBackoffMin == 0 {
+			c.Cache.Redis.RetryBackoffMin = 100 * time.Millisecond
+		}
+		if c.Cache.Redis.RetryBackoffMax == 0 {
+			c.Cache.Redis.RetryBackoffMax = 2 * time.Second
+		}
+		if c.Cache.Redis.ConnectTimeout == 0 {
+			c.Cache.Redis.ConnectTimeout = 5 * time.Second
+		}
+		if c.Cache.Redis.DialTimeout == 0 {
+			c.Cache.Redis.DialTimeout = 3 * time.Second
+		}
+		if c.Cache.Redis.ReadTimeout == 0 {
+			c.Cache.Redis.ReadTimeout = 3 * time.Second
+		}
+		if c.Cache.Redis.WriteTimeout == 0 {
+			c.Cache.Redis.WriteTimeout = 3 * time.Second
+		}
+		if c.Cache.Redis.PoolSize == 0 {
+			c.Cache.Redis.PoolSize = 10
+		}
 	}
 
 	// Apply membership defaults

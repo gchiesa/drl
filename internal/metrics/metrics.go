@@ -66,6 +66,12 @@ type Metrics struct {
 	OIDCRequestsTotal        *prometheus.CounterVec   // labels: host, path, status
 	OIDCVerificationDuration *prometheus.HistogramVec // labels: host, path
 
+	// Redis backend metrics (only populated when cache.provider = "redis")
+	RedisCommandDuration       *prometheus.HistogramVec // labels: command, status
+	RedisErrorsTotal           *prometheus.CounterVec   // labels: command, error_type
+	RedisPoolConnectionsActive prometheus.Gauge
+	RedisPoolConnectionsIdle   prometheus.Gauge
+
 	registry *prometheus.Registry
 	server   *http.Server
 }
@@ -236,6 +242,25 @@ func NewMetrics() *Metrics {
 			Buckets: prometheus.ExponentialBuckets(0.0001, 2, 12), // 100µs → ~400ms
 		}, []string{"host", "path"}),
 
+		// Redis backend metrics
+		RedisCommandDuration: prometheus.NewHistogramVec(prometheus.HistogramOpts{
+			Name:    "drl_redis_command_duration_seconds",
+			Help:    "Duration of Redis commands in seconds, labelled by command name and status",
+			Buckets: prometheus.ExponentialBuckets(0.0001, 2, 12), // 100µs → ~400ms
+		}, []string{"command", "status"}),
+		RedisErrorsTotal: prometheus.NewCounterVec(prometheus.CounterOpts{
+			Name: "drl_redis_errors_total",
+			Help: "Total number of Redis command errors, labelled by command and error type",
+		}, []string{"command", "error_type"}),
+		RedisPoolConnectionsActive: prometheus.NewGauge(prometheus.GaugeOpts{
+			Name: "drl_redis_pool_connections_active",
+			Help: "Current number of active (in-use) connections in the Redis pool",
+		}),
+		RedisPoolConnectionsIdle: prometheus.NewGauge(prometheus.GaugeOpts{
+			Name: "drl_redis_pool_connections_idle",
+			Help: "Current number of idle connections in the Redis pool",
+		}),
+
 		registry: registry,
 	}
 
@@ -273,6 +298,10 @@ func NewMetrics() *Metrics {
 	registry.MustRegister(m.ProxyLatencySeconds)
 	registry.MustRegister(m.OIDCRequestsTotal)
 	registry.MustRegister(m.OIDCVerificationDuration)
+	registry.MustRegister(m.RedisCommandDuration)
+	registry.MustRegister(m.RedisErrorsTotal)
+	registry.MustRegister(m.RedisPoolConnectionsActive)
+	registry.MustRegister(m.RedisPoolConnectionsIdle)
 
 	return m
 }
@@ -536,3 +565,23 @@ const (
 	CacheTypeBlocklist  = "blocklist"
 	CacheTypeAccounting = "accounting"
 )
+
+// ObserveRedisCommandDuration records the duration of a Redis command.
+func (m *Metrics) ObserveRedisCommandDuration(command, status string, seconds float64) {
+	m.RedisCommandDuration.WithLabelValues(command, status).Observe(seconds)
+}
+
+// IncRedisError increments the Redis error counter for the given command and error type.
+func (m *Metrics) IncRedisError(command, errorType string) {
+	m.RedisErrorsTotal.WithLabelValues(command, errorType).Inc()
+}
+
+// SetRedisPoolActive sets the active Redis connection pool gauge.
+func (m *Metrics) SetRedisPoolActive(active float64) {
+	m.RedisPoolConnectionsActive.Set(active)
+}
+
+// SetRedisPoolIdle sets the idle Redis connection pool gauge.
+func (m *Metrics) SetRedisPoolIdle(idle float64) {
+	m.RedisPoolConnectionsIdle.Set(idle)
+}
